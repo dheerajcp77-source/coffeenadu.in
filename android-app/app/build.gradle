@@ -1,0 +1,82 @@
+plugins {
+    id 'com.android.application'
+}
+
+def keystorePropertiesFile = rootProject.file("keystore.properties")
+def keystoreProperties = new Properties()
+if (keystorePropertiesFile.exists()) {
+    keystoreProperties.load(new FileInputStream(keystorePropertiesFile))
+}
+
+android {
+    namespace 'com.coffeenadu.admin'
+    compileSdk 35
+
+    defaultConfig {
+        applicationId "com.coffeenadu.admin"
+        minSdk 24
+        targetSdk 35
+        versionCode 2
+        versionName "2.1.0"
+
+        manifestPlaceholders = [
+            hostName: "coffeenad-news.ai.studio",
+            defaultUrl: "https://coffeenad-news.ai.studio/admin",
+            launcherName: "CoffeeNadu Admin",
+            assetStatements: '[{"relation": ["delegate_permission/common.handle_all_urls"], "target": {"namespace": "web", "site": "https://coffeenad-news.ai.studio"}}]'
+        ]
+
+        buildConfigField "String", "ADMIN_LAUNCH_URL", "\"https://coffeenad-news.ai.studio/admin\""
+        buildConfigField "String", "ALLOWED_HOST", "\"coffeenad-news.ai.studio\""
+    }
+
+    signingConfigs {
+        release {
+            def storePath = keystoreProperties.getProperty("storeFile") ?: System.getenv("COFFEENADU_KEYSTORE_PATH")
+            def storePass = keystoreProperties.getProperty("storePassword") ?: System.getenv("COFFEENADU_KEYSTORE_PASSWORD")
+            def keyAliasVal = keystoreProperties.getProperty("keyAlias") ?: System.getenv("COFFEENADU_KEY_ALIAS")
+            def keyPass = keystoreProperties.getProperty("keyPassword") ?: System.getenv("COFFEENADU_KEY_PASSWORD")
+
+            if (storePath && storePass && keyAliasVal && keyPass) {
+                storeFile file(storePath)
+                storePassword storePass
+                keyAlias keyAliasVal
+                keyPassword keyPass
+            }
+        }
+    }
+
+    buildTypes {
+        debug {
+            applicationIdSuffix ".debug"
+            versionNameSuffix "-debug"
+            minifyEnabled false
+        }
+        release {
+            minifyEnabled true
+            shrinkResources true
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+            if (signingConfigs.release.storeFile != null) {
+                signingConfig signingConfigs.release
+            }
+        }
+    }
+
+    buildFeatures {
+        buildConfig true
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}
+
+dependencies {
+    implementation 'androidx.appcompat:appcompat:1.7.0'
+    implementation 'androidx.activity:activity:1.9.3'
+    implementation 'androidx.browser:browser:1.8.0'
+    implementation 'com.google.androidbrowserhelper:androidbrowserhelper:2.5.0'
+    implementation 'androidx.core:core-splashscreen:1.0.1'
+    implementation 'androidx.swiperefreshlayout:swiperefreshlayout:1.1.0'
+}

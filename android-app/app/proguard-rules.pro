@@ -1,0 +1,3 @@
+-keep class com.coffeenadu.admin.** { *; }
+-keep class com.google.androidbrowserhelper.** { *; }
+-dontwarn com.google.androidbrowserhelper.**

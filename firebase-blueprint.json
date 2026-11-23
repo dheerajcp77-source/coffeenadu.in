@@ -1,0 +1,477 @@
+{
+  "entities": {
+    "Article": {
+      "title": "Article",
+      "description": "A published Koppa Taluk Kannada news article displayed on the Coffeenadu News portal.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "Unique identifier for the news article."
+        },
+        "titleKannada": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1500,
+          "description": "Kannada headline of the news story (supports sanitized rich-text formatting)."
+        },
+        "summaryKannada": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2500,
+          "description": "Short Kannada summary shown in feed cards (supports sanitized rich-text formatting)."
+        },
+        "bodyKannada": {
+          "type": "array",
+          "description": "Ordered Kannada report paragraphs (1 to 60 paragraphs)."
+        },
+        "category": {
+          "type": "string",
+          "enum": [
+            "Local",
+            "Malnad",
+            "Agriculture",
+            "Health",
+            "Entertainment",
+            "Crime",
+            "General",
+            "Politics",
+            "Sports",
+            "Special",
+            "State",
+            "Nation",
+            "Civic & Roads",
+            "Education",
+            "Culture"
+          ],
+          "maxLength": 40,
+          "description": "English navigation category."
+        },
+        "location": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 60,
+          "description": "Place name (Kannada by default: ಕೊಪ್ಪ, ಜಯಪುರ, ಶೃಂಗೇರಿ, etc.)."
+        },
+        "publishedDate": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 30,
+          "description": "Display publication date (e.g., 16 Nov 2026)."
+        },
+        "publishedTime": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 30,
+          "description": "Display publication time (e.g., 08:15 AM)."
+        },
+        "publishedTimestamp": {
+          "type": "number",
+          "description": "Unix epoch milliseconds for chronological sorting."
+        },
+        "readTimeMinutes": {
+          "type": "number",
+          "description": "Estimated read time in minutes (1 to 120)."
+        },
+        "reporter": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100,
+          "description": "Reporter or editorial desk attribution."
+        },
+        "imageKey": {
+          "type": "string",
+          "enum": [
+            "none",
+            "koppa-landscape",
+            "malnad-hills",
+            "coffee-estate",
+            "health-medical",
+            "entertainment-stage",
+            "crime-alert",
+            "general-news",
+            "politics-assembly",
+            "sports-stadium",
+            "special-feature",
+            "state-civic",
+            "nation-parliament",
+            "tunga-bridge",
+            "education-library",
+            "malnad-culture"
+          ],
+          "maxLength": 40,
+          "description": "Preset Koppa visual key when not using an uploaded image."
+        },
+        "imageUrl": {
+          "type": "string",
+          "maxLength": 350000,
+          "description": "Optional compressed image data URL or HTTPS image URL."
+        },
+        "imageCaption": {
+          "type": "string",
+          "maxLength": 1000,
+          "description": "Optional Kannada caption for the article photo (supports sanitized rich-text formatting)."
+        },
+        "extraImages": {
+          "type": "array",
+          "description": "Optional list of up to 6 additional news photos displayed after the end of the article report."
+        },
+        "isFeatured": {
+          "type": "boolean",
+          "description": "Whether this article is pinned as the lead hero story."
+        },
+        "featuredUntil": {
+          "type": "number",
+          "description": "Optional Unix epoch milliseconds after which the article automatically leaves the Featured Lead Story carousel."
+        },
+        "authorUid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "Firebase Auth UID of the publishing admin."
+        },
+        "viewCount": {
+          "type": "number",
+          "description": "Total number of times readers opened this article."
+        },
+        "watermarkApplied": {
+          "type": "boolean",
+          "description": "Whether the circular CoffeeNadu logo watermark has already been baked into imageUrl."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when the article was created."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when the article was last updated."
+        }
+      },
+      "required": [
+        "id",
+        "titleKannada",
+        "summaryKannada",
+        "bodyKannada",
+        "category",
+        "location",
+        "publishedDate",
+        "publishedTime",
+        "publishedTimestamp",
+        "readTimeMinutes",
+        "reporter",
+        "imageKey",
+        "isFeatured",
+        "authorUid",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "ProgramEvent": {
+      "title": "ProgramEvent",
+      "description": "Scheduled local program or event displayed in the Programs & Events calendar.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "Unique identifier for the event."
+        },
+        "titleKannada": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 300,
+          "description": "Program or event title."
+        },
+        "descriptionKannada": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2000,
+          "description": "Program details, venue, and schedule notes."
+        },
+        "eventDate": {
+          "type": "string",
+          "minLength": 10,
+          "maxLength": 10,
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+          "description": "Scheduled calendar date in YYYY-MM-DD format."
+        },
+        "eventTime": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 40,
+          "description": "Scheduled time string (e.g., 10:00 AM)."
+        },
+        "location": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 60,
+          "description": "Place where the event is hosted."
+        },
+        "organizer": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100,
+          "description": "Organizing committee or contact."
+        },
+        "imageUrl": {
+          "type": "string",
+          "maxLength": 350000,
+          "description": "Optional compressed event banner photo."
+        },
+        "authorUid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "Firebase Auth UID of the publishing admin."
+        },
+        "viewCount": {
+          "type": "number",
+          "description": "Total number of times readers opened this program or event."
+        },
+        "watermarkApplied": {
+          "type": "boolean",
+          "description": "Whether the circular CoffeeNadu logo watermark has already been baked into imageUrl."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when created."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when last updated."
+        }
+      },
+      "required": [
+        "id",
+        "titleKannada",
+        "descriptionKannada",
+        "eventDate",
+        "eventTime",
+        "location",
+        "organizer",
+        "authorUid",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "SupportThread": {
+      "title": "SupportThread",
+      "description": "Reader-to-Admin conversation thread displayed in the Admin Inbox.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 20,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "Random unguessable thread ID."
+        },
+        "senderName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80,
+          "description": "Reader display name (compulsory)."
+        },
+        "senderPhone": {
+          "type": "string",
+          "maxLength": 25,
+          "description": "Reader mobile number (compulsory on new threads; optional for legacy threads)."
+        },
+        "senderLocation": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 60,
+          "description": "Optional reader town or village."
+        },
+        "topic": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120,
+          "description": "Selected inquiry topic in English/Kannada."
+        },
+        "lastMessage": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1000,
+          "description": "Most recent message snippet."
+        },
+        "lastSenderRole": {
+          "type": "string",
+          "enum": ["reader", "admin"],
+          "maxLength": 10,
+          "description": "Who sent the most recent message."
+        },
+        "status": {
+          "type": "string",
+          "enum": ["open", "replied", "closed"],
+          "maxLength": 10,
+          "description": "Current conversation status."
+        },
+        "unreadByAdmin": {
+          "type": "boolean",
+          "description": "Whether admin has unread reader messages."
+        },
+        "unreadByReader": {
+          "type": "boolean",
+          "description": "Whether reader has unread admin replies."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when thread started."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of latest activity."
+        }
+      },
+      "required": [
+        "id",
+        "senderName",
+        "senderLocation",
+        "topic",
+        "lastMessage",
+        "lastSenderRole",
+        "status",
+        "unreadByAdmin",
+        "unreadByReader",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "SupportMessage": {
+      "title": "SupportMessage",
+      "description": "Single message inside a reader-to-admin support thread.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "Message ID."
+        },
+        "threadId": {
+          "type": "string",
+          "minLength": 20,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "Parent thread ID."
+        },
+        "senderRole": {
+          "type": "string",
+          "enum": ["reader", "admin"],
+          "maxLength": 10,
+          "description": "Sender role."
+        },
+        "senderName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80,
+          "description": "Sender name."
+        },
+        "text": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2000,
+          "description": "Message body."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when sent."
+        }
+      },
+      "required": [
+        "id",
+        "threadId",
+        "senderRole",
+        "senderName",
+        "text",
+        "createdAt"
+      ]
+    },
+    "AdminRecord": {
+      "title": "AdminRecord",
+      "description": "Authorized editorial admin record keyed by Firebase Auth UID.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "Firebase Auth UID of the authorized admin."
+        },
+        "label": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100,
+          "description": "Display label for the editor."
+        },
+        "addedBy": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "Firebase Auth UID of the admin who granted access."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when admin access was granted."
+        }
+      },
+      "required": [
+        "uid",
+        "label",
+        "addedBy",
+        "createdAt"
+      ]
+    }
+  },
+  "firestore": {
+    "/articles/{articleId}": {
+      "schema": {
+        "$ref": "#/entities/Article"
+      },
+      "description": "Publicly readable news articles managed exclusively by verified editorial admins."
+    },
+    "/events/{eventId}": {
+      "schema": {
+        "$ref": "#/entities/ProgramEvent"
+      },
+      "description": "Publicly readable scheduled programs & events managed by verified admins."
+    },
+    "/supportThreads/{threadId}": {
+      "schema": {
+        "$ref": "#/entities/SupportThread"
+      },
+      "description": "Reader-to-Admin inbox threads keyed by unguessable thread ID."
+    },
+    "/supportThreads/{threadId}/messages/{messageId}": {
+      "schema": {
+        "$ref": "#/entities/SupportMessage"
+      },
+      "description": "Individual messages inside a support thread."
+    },
+    "/admins/{adminUid}": {
+      "schema": {
+        "$ref": "#/entities/AdminRecord"
+      },
+      "description": "Restricted editorial admin allowlist keyed by Firebase Auth UID."
+    }
+  }
+}

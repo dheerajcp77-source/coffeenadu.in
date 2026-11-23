@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="cn_navy">#0B192C</color>
+    <color name="cn_navy_dark">#07101D</color>
+    <color name="cn_gold">#F59E0B</color>
+    <color name="cn_white">#FFFFFF</color>
+    <color name="cn_muted">#CBD5E1</color>
+</resources>

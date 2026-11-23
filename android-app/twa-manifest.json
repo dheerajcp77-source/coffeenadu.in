@@ -1,0 +1,70 @@
+{
+  "packageId": "com.coffeenadu.admin",
+  "host": "coffeenad-news.ai.studio",
+  "name": "CoffeeNadu Admin",
+  "launcherName": "CoffeeNadu",
+  "display": "standalone",
+  "themeColor": "#0B192C",
+  "themeColorDark": "#0B192C",
+  "navigationColor": "#0B192C",
+  "navigationColorDark": "#0B192C",
+  "navigationDividerColor": "#17335C",
+  "navigationDividerColorDark": "#17335C",
+  "backgroundColor": "#0B192C",
+  "enableNotifications": true,
+  "startUrl": "/admin",
+  "iconUrl": "https://coffeenad-news.ai.studio/pwa-512x512.png",
+  "maskableIconUrl": "https://coffeenad-news.ai.studio/pwa-maskable-512x512.png",
+  "splashScreenFadeOutDuration": 300,
+  "signingKey": {
+    "path": "./coffeenadu-admin-release.keystore",
+    "alias": "coffeenadu-admin"
+  },
+  "appVersionName": "2.0.0",
+  "appVersionCode": 1,
+  "shortcuts": [
+    {
+      "name": "Dashboard Overview",
+      "shortName": "Dashboard",
+      "url": "https://coffeenad-news.ai.studio/admin?section=dashboard",
+      "chosenIconUrl": "https://coffeenad-news.ai.studio/pwa-192x192.png"
+    },
+    {
+      "name": "Add New Article",
+      "shortName": "Add News",
+      "url": "https://coffeenad-news.ai.studio/admin?section=add-article",
+      "chosenIconUrl": "https://coffeenad-news.ai.studio/pwa-192x192.png"
+    },
+    {
+      "name": "News Management",
+      "shortName": "News",
+      "url": "https://coffeenad-news.ai.studio/admin?section=news",
+      "chosenIconUrl": "https://coffeenad-news.ai.studio/pwa-192x192.png"
+    }
+  ],
+  "generatorApp": "bubblewrap-cli",
+  "webManifestUrl": "https://coffeenad-news.ai.studio/manifest.webmanifest",
+  "fallbackType": "webview",
+  "features": {
+    "playBilling": {
+      "enabled": false
+    },
+    "locationDelegation": {
+      "enabled": false
+    }
+  },
+  "alphaDependencies": {
+    "enabled": false
+  },
+  "enableSiteSettingsShortcut": true,
+  "isChromeOSOnly": false,
+  "isMetaQuest": false,
+  "minSdkVersion": 24,
+  "orientation": "default",
+  "fingerprints": [
+    {
+      "name": "production-release",
+      "value": "BB:21:80:F1:87:27:E2:F2:5A:20:AB:FA:B8:AB:6B:C4:70:DA:60:B5:49:B9:AB:CE:EF:91:B8:49:0F:75:F9:AC"
+    }
+  ]
+}

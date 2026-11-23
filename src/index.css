@@ -1,0 +1,191 @@
+@import "tailwindcss";
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  --font-sans: "Plus Jakarta Sans", "Noto Sans Kannada", system-ui, -apple-system, sans-serif;
+  --font-serif: "Playfair Display", "Noto Serif Kannada", Georgia, serif;
+  --font-kannada: "Noto Sans Kannada", "Plus Jakarta Sans", system-ui, sans-serif;
+  --font-kannada-serif: "Noto Serif Kannada", "Noto Sans Kannada", Georgia, serif;
+}
+
+@layer base {
+  html {
+    font-family: var(--font-sans);
+    scroll-behavior: smooth;
+  }
+
+  .font-kannada {
+    font-family: var(--font-kannada);
+  }
+
+  .font-kannada-serif {
+    font-family: var(--font-kannada-serif);
+  }
+
+  .font-masthead {
+    font-family: "Playfair Display", Georgia, serif;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+.news-protected,
+.news-protected * {
+  -webkit-user-select: none !important;
+  -moz-user-select: none !important;
+  -ms-user-select: none !important;
+  user-select: none !important;
+  -webkit-touch-callout: none !important;
+}
+
+.news-protected input,
+.news-protected textarea,
+.news-protected select,
+.news-protected [contenteditable="true"],
+.news-protected [contenteditable="true"] * {
+  -webkit-user-select: text !important;
+  -moz-user-select: text !important;
+  -ms-user-select: text !important;
+  user-select: text !important;
+  -webkit-touch-callout: default !important;
+}
+
+/* Rich text formatting for both Admin Editor and Public Article View */
+.article-rich-content b,
+.article-rich-content strong {
+  font-weight: 800;
+}
+
+.article-rich-content i,
+.article-rich-content em {
+  font-style: italic;
+}
+
+.article-rich-content u {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.article-rich-content s,
+.article-rich-content strike,
+.article-rich-content del {
+  text-decoration: line-through;
+}
+
+.article-rich-content h2 {
+  font-size: 1.35em;
+  font-weight: 800;
+  color: #0f172a;
+  line-height: 1.4;
+  margin-top: 0.75em;
+  margin-bottom: 0.35em;
+}
+
+.article-rich-content h3 {
+  font-size: 1.15em;
+  font-weight: 700;
+  color: #0f172a;
+  line-height: 1.45;
+  margin-top: 0.65em;
+  margin-bottom: 0.3em;
+}
+
+.article-rich-content ul {
+  list-style-type: disc;
+  padding-left: 1.5rem;
+  margin: 0.5rem 0;
+}
+
+.article-rich-content ol {
+  list-style-type: decimal;
+  padding-left: 1.5rem;
+  margin: 0.5rem 0;
+}
+
+.article-rich-content li {
+  margin: 0.25rem 0;
+}
+
+.article-rich-content blockquote {
+  border-left: 4px solid #0f274a;
+  background-color: #f8fafc;
+  padding: 0.65rem 1rem;
+  margin: 0.75rem 0;
+  border-radius: 0 0.375rem 0.375rem 0;
+  color: #334155;
+  font-style: italic;
+}
+
+.article-rich-content p {
+  margin: 0.35rem 0;
+}
+
+.article-rich-content p:first-child {
+  margin-top: 0;
+}
+
+.article-rich-content p:last-child {
+  margin-bottom: 0;
+}
+
+.article-rich-inline p,
+.article-rich-inline div {
+  margin: 0;
+}
+
+.article-rich-inline-compact p,
+.article-rich-inline-compact div {
+  display: inline;
+  margin: 0;
+}
+
+.news-protected img,
+.news-protected canvas {
+  -webkit-user-drag: none;
+  user-drag: none;
+  pointer-events: none !important;
+  -webkit-touch-callout: none !important;
+  -webkit-user-select: none !important;
+  user-select: none !important;
+}
+
+.news-watermark-layer {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='240' height='140' viewBox='0 0 240 140'%3E%3Ctext x='12' y='78' fill='%230F274A' fill-opacity='0.085' font-family='sans-serif' font-size='12' font-weight='700' letter-spacing='1.2' transform='rotate(-22 120 70)'%3ECOFFEENADU NEWS · READ ONLY%3C/text%3E%3C/svg%3E");
+  background-repeat: repeat;
+}
+
+.news-watermark-light {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='240' height='140' viewBox='0 0 240 140'%3E%3Ctext x='12' y='78' fill='%23FFFFFF' fill-opacity='0.11' font-family='sans-serif' font-size='12' font-weight='700' letter-spacing='1.2' transform='rotate(-22 120 70)'%3ECOFFEENADU NEWS · READ ONLY%3C/text%3E%3C/svg%3E");
+  background-repeat: repeat;
+}
+
+.news-privacy-blurred {
+  filter: blur(28px) brightness(0.18) !important;
+  opacity: 0.08 !important;
+  transition: none !important;
+  pointer-events: none !important;
+  user-select: none !important;
+}
+
+.news-print-blocked {
+  display: none;
+}
+
+@media print {
+  .news-protected-root {
+    display: none !important;
+  }
+  .news-print-blocked {
+    display: flex !important;
+  }
+}
+

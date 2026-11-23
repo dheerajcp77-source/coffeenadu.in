@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">CoffeeNadu Admin</string>
+    <string name="offline_title">No Internet Connection</string>
+    <string name="offline_message">CoffeeNadu Admin requires an active internet connection to protect credentials and keep news data synced with Google Sheets &amp; Drive.</string>
+    <string name="retry_button">Retry Connection</string>
+</resources>

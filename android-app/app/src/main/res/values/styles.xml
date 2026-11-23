@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.CoffeeNaduAdmin" parent="Theme.AppCompat.DayNight.NoActionBar">
+        <item name="android:statusBarColor">@color/cn_navy</item>
+        <item name="android:navigationBarColor">@color/cn_navy</item>
+        <item name="android:windowBackground">@color/cn_navy</item>
+    </style>
+
+    <style name="Theme.CoffeeNaduAdmin.Splash" parent="Theme.SplashScreen">
+        <item name="windowSplashScreenBackground">@color/cn_navy</item>
+        <item name="windowSplashScreenAnimatedIcon">@drawable/splash_logo</item>
+        <item name="postSplashScreenTheme">@style/Theme.CoffeeNaduAdmin</item>
+    </style>
+</resources>

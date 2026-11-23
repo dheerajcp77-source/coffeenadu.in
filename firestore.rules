@@ -1,0 +1,511 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Global safety net: deny all reads and writes by default
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Core Identity & Path Validation Helpers
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function isValidThreadId(id) {
+      return id is string && id.size() >= 20 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isVerifiedUser() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    function isBootstrappedAdmin() {
+      return isVerifiedUser() &&
+        request.auth.token.email is string &&
+        request.auth.token.email.lower() in [
+          'shwethashwethak85@gmail.com',
+          'dheerajcp77@gmail.com'
+        ];
+    }
+
+    function isAdmin() {
+      return isBootstrappedAdmin() || (
+        isVerifiedUser() &&
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+      );
+    }
+
+    function isValidCategory(category) {
+      return category in [
+        'Local',
+        'Malnad',
+        'Agriculture',
+        'Health',
+        'Entertainment',
+        'Crime',
+        'General',
+        'Politics',
+        'Sports',
+        'Special',
+        'State',
+        'Nation',
+        'Civic & Roads',
+        'Education',
+        'Culture'
+      ];
+    }
+
+    function isValidImageKey(imageKey) {
+      return imageKey in [
+        'none',
+        'koppa-landscape',
+        'malnad-hills',
+        'coffee-estate',
+        'health-medical',
+        'entertainment-stage',
+        'crime-alert',
+        'general-news',
+        'politics-assembly',
+        'sports-stadium',
+        'special-feature',
+        'state-civic',
+        'nation-parliament',
+        'tunga-bridge',
+        'education-library',
+        'malnad-culture'
+      ];
+    }
+
+    function isValidArticle(data) {
+      return data.keys().hasAll([
+          'id',
+          'titleKannada',
+          'summaryKannada',
+          'bodyKannada',
+          'category',
+          'location',
+          'publishedDate',
+          'publishedTime',
+          'publishedTimestamp',
+          'readTimeMinutes',
+          'reporter',
+          'imageKey',
+          'isFeatured',
+          'authorUid',
+          'createdAt',
+          'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'id',
+          'titleKannada',
+          'summaryKannada',
+          'bodyKannada',
+          'category',
+          'location',
+          'publishedDate',
+          'publishedTime',
+          'publishedTimestamp',
+          'readTimeMinutes',
+          'reporter',
+          'imageKey',
+          'imageUrl',
+          'imageCaption',
+          'extraImages',
+          'isFeatured',
+          'featuredUntil',
+          'authorUid',
+          'viewCount',
+          'watermarkApplied',
+          'createdAt',
+          'updatedAt'
+        ]) &&
+        isValidId(data.id) &&
+        data.titleKannada is string && data.titleKannada.size() >= 1 && data.titleKannada.size() <= 1500 &&
+        data.summaryKannada is string && data.summaryKannada.size() >= 1 && data.summaryKannada.size() <= 2500 &&
+        data.bodyKannada is list &&
+        data.bodyKannada.size() >= 1 &&
+        data.bodyKannada.size() <= 60 &&
+        data.bodyKannada[0] is string &&
+        data.bodyKannada[0].size() >= 1 &&
+        data.bodyKannada[0].size() <= 15000 &&
+        data.category is string && data.category.size() <= 40 && isValidCategory(data.category) &&
+        data.location is string && data.location.size() >= 1 && data.location.size() <= 60 &&
+        data.publishedDate is string && data.publishedDate.size() >= 1 && data.publishedDate.size() <= 30 &&
+        data.publishedTime is string && data.publishedTime.size() >= 1 && data.publishedTime.size() <= 30 &&
+        data.publishedTimestamp is number && data.publishedTimestamp > 0 &&
+        data.readTimeMinutes is number && data.readTimeMinutes >= 1 && data.readTimeMinutes <= 120 &&
+        data.reporter is string && data.reporter.size() >= 1 && data.reporter.size() <= 100 &&
+        data.imageKey is string && data.imageKey.size() <= 40 && isValidImageKey(data.imageKey) &&
+        (!('imageUrl' in data) || (data.imageUrl is string && data.imageUrl.size() <= 350000)) &&
+        (!('imageCaption' in data) || (data.imageCaption is string && data.imageCaption.size() <= 1000)) &&
+        (!('extraImages' in data) || (
+          data.extraImages is list &&
+          data.extraImages.size() <= 6 &&
+          (data.extraImages.size() == 0 || (
+            data.extraImages[0] is map &&
+            'imageUrl' in data.extraImages[0] &&
+            data.extraImages[0].imageUrl is string &&
+            data.extraImages[0].imageUrl.size() >= 1 &&
+            data.extraImages[0].imageUrl.size() <= 350000
+          ))
+        )) &&
+        data.isFeatured is bool &&
+        (!('featuredUntil' in data) || (data.featuredUntil is number && data.featuredUntil >= 0)) &&
+        isValidId(data.authorUid) &&
+        (!('viewCount' in data) || (data.viewCount is number && data.viewCount >= 0 && data.viewCount <= 1000000000)) &&
+        (!('watermarkApplied' in data) || data.watermarkApplied is bool) &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidEvent(data) {
+      return data.keys().hasAll([
+          'id',
+          'titleKannada',
+          'descriptionKannada',
+          'eventDate',
+          'eventTime',
+          'location',
+          'organizer',
+          'authorUid',
+          'createdAt',
+          'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'id',
+          'titleKannada',
+          'descriptionKannada',
+          'eventDate',
+          'eventTime',
+          'location',
+          'organizer',
+          'imageUrl',
+          'authorUid',
+          'viewCount',
+          'watermarkApplied',
+          'createdAt',
+          'updatedAt'
+        ]) &&
+        isValidId(data.id) &&
+        data.titleKannada is string && data.titleKannada.size() >= 1 && data.titleKannada.size() <= 300 &&
+        data.descriptionKannada is string && data.descriptionKannada.size() >= 1 && data.descriptionKannada.size() <= 2000 &&
+        data.eventDate is string && data.eventDate.size() == 10 && data.eventDate.matches('^\\d{4}-\\d{2}-\\d{2}$') &&
+        data.eventTime is string && data.eventTime.size() >= 1 && data.eventTime.size() <= 40 &&
+        data.location is string && data.location.size() >= 1 && data.location.size() <= 60 &&
+        data.organizer is string && data.organizer.size() >= 1 && data.organizer.size() <= 100 &&
+        (!('imageUrl' in data) || (data.imageUrl is string && data.imageUrl.size() <= 350000)) &&
+        isValidId(data.authorUid) &&
+        (!('viewCount' in data) || (data.viewCount is number && data.viewCount >= 0 && data.viewCount <= 1000000000)) &&
+        (!('watermarkApplied' in data) || data.watermarkApplied is bool) &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidSupportThread(data) {
+      return data.keys().hasAll([
+          'id',
+          'senderName',
+          'senderLocation',
+          'topic',
+          'lastMessage',
+          'lastSenderRole',
+          'status',
+          'unreadByAdmin',
+          'unreadByReader',
+          'createdAt',
+          'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'id',
+          'senderName',
+          'senderPhone',
+          'senderLocation',
+          'topic',
+          'lastMessage',
+          'lastSenderRole',
+          'status',
+          'unreadByAdmin',
+          'unreadByReader',
+          'createdAt',
+          'updatedAt'
+        ]) &&
+        isValidThreadId(data.id) &&
+        data.senderName is string && data.senderName.size() >= 1 && data.senderName.size() <= 80 &&
+        (!('senderPhone' in data) || (data.senderPhone is string && data.senderPhone.size() <= 25)) &&
+        data.senderLocation is string && data.senderLocation.size() <= 60 &&
+        data.topic is string && data.topic.size() >= 1 && data.topic.size() <= 120 &&
+        data.lastMessage is string && data.lastMessage.size() >= 1 && data.lastMessage.size() <= 1000 &&
+        data.lastSenderRole is string && data.lastSenderRole.size() <= 10 && data.lastSenderRole in ['reader', 'admin'] &&
+        data.status is string && data.status.size() <= 10 && data.status in ['open', 'replied', 'closed'] &&
+        data.unreadByAdmin is bool &&
+        data.unreadByReader is bool &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidSupportMessage(data) {
+      return data.keys().hasAll([
+          'id',
+          'threadId',
+          'senderRole',
+          'senderName',
+          'text',
+          'createdAt'
+        ]) &&
+        data.keys().hasOnly([
+          'id',
+          'threadId',
+          'senderRole',
+          'senderName',
+          'text',
+          'createdAt'
+        ]) &&
+        isValidId(data.id) &&
+        isValidThreadId(data.threadId) &&
+        data.senderRole is string && data.senderRole.size() <= 10 && data.senderRole in ['reader', 'admin'] &&
+        data.senderName is string && data.senderName.size() >= 1 && data.senderName.size() <= 80 &&
+        data.text is string && data.text.size() >= 1 && data.text.size() <= 2000 &&
+        data.createdAt is timestamp;
+    }
+
+    function isValidAdminRecord(data) {
+      return data.keys().hasAll(['uid', 'label', 'addedBy', 'createdAt']) &&
+        data.keys().hasOnly(['uid', 'label', 'addedBy', 'createdAt']) &&
+        isValidId(data.uid) &&
+        data.label is string && data.label.size() >= 1 && data.label.size() <= 100 &&
+        isValidId(data.addedBy) &&
+        data.createdAt is timestamp;
+    }
+
+    // Public Koppa Taluk news articles: anyone can read; only verified admins can write
+    match /articles/{articleId} {
+      allow get: if isValidId(articleId);
+      allow list: if true;
+
+      allow create: if isVerifiedUser() &&
+        isValidId(articleId) &&
+        isValidArticle(incoming()) &&
+        incoming().id == articleId &&
+        incoming().authorUid == request.auth.uid &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time &&
+        isAdmin();
+
+      allow update: if isValidId(articleId) &&
+        isValidArticle(incoming()) &&
+        incoming().id == existing().id &&
+        incoming().authorUid == existing().authorUid &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().publishedTimestamp == existing().publishedTimestamp && (
+          // Public Action: Atomic +1 view increment when opening an article
+          (
+            incoming().updatedAt == existing().updatedAt &&
+            incoming().diff(existing()).affectedKeys().hasOnly(['viewCount']) &&
+            incoming().viewCount is number && (
+              (!('viewCount' in existing()) && incoming().viewCount == 1) ||
+              ('viewCount' in existing() && existing().viewCount is number && incoming().viewCount == existing().viewCount + 1)
+            )
+          ) ||
+          // Admin Actions: Edit or toggle lead status
+          (
+            isVerifiedUser() &&
+            isAdmin() &&
+            incoming().updatedAt == request.time && (
+              // Action 1: Toggle featured lead story flag and optional expiry timer
+              incoming().diff(existing()).affectedKeys().hasOnly(['isFeatured', 'featuredUntil', 'updatedAt']) ||
+              // Action 2: Full editorial update
+              incoming().diff(existing()).affectedKeys().hasOnly([
+                'titleKannada',
+                'summaryKannada',
+                'bodyKannada',
+                'category',
+                'location',
+                'reporter',
+                'imageKey',
+                'imageUrl',
+                'imageCaption',
+                'extraImages',
+                'isFeatured',
+                'featuredUntil',
+                'readTimeMinutes',
+                'watermarkApplied',
+                'updatedAt'
+              ]) ||
+              // Action 3: One-time automatic watermark backfill on existing image
+              incoming().diff(existing()).affectedKeys().hasOnly([
+                'imageUrl',
+                'watermarkApplied',
+                'updatedAt'
+              ])
+            )
+          )
+        );
+
+      allow delete: if isVerifiedUser() && isValidId(articleId) && isAdmin();
+    }
+
+    // Scheduled Programs & Events calendar: anyone can read; only verified admins can manage
+    match /events/{eventId} {
+      allow get: if isValidId(eventId);
+      allow list: if true;
+
+      allow create: if isVerifiedUser() &&
+        isValidId(eventId) &&
+        isValidEvent(incoming()) &&
+        incoming().id == eventId &&
+        incoming().authorUid == request.auth.uid &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time &&
+        isAdmin();
+
+      allow update: if isValidId(eventId) &&
+        isValidEvent(incoming()) &&
+        incoming().id == existing().id &&
+        incoming().authorUid == existing().authorUid &&
+        incoming().createdAt == existing().createdAt && (
+          // Public Action: Atomic +1 view increment when opening a program/event
+          (
+            incoming().updatedAt == existing().updatedAt &&
+            incoming().diff(existing()).affectedKeys().hasOnly(['viewCount']) &&
+            incoming().viewCount is number && (
+              (!('viewCount' in existing()) && incoming().viewCount == 1) ||
+              ('viewCount' in existing() && existing().viewCount is number && incoming().viewCount == existing().viewCount + 1)
+            )
+          ) ||
+          // Admin Action: Full event update
+          (
+            isVerifiedUser() &&
+            isAdmin() &&
+            incoming().updatedAt == request.time &&
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'titleKannada',
+              'descriptionKannada',
+              'eventDate',
+              'eventTime',
+              'location',
+              'organizer',
+              'imageUrl',
+              'watermarkApplied',
+              'updatedAt'
+            ])
+          )
+        );
+
+      allow delete: if isVerifiedUser() && isValidId(eventId) && isAdmin();
+    }
+
+    // Reader-to-Admin Support Threads & Inbox
+    match /supportThreads/{threadId} {
+      allow get: if isValidThreadId(threadId);
+      allow list: if isVerifiedUser() && isAdmin();
+
+      allow create: if isValidThreadId(threadId) &&
+        isValidSupportThread(incoming()) &&
+        incoming().id == threadId &&
+        incoming().lastSenderRole == 'reader' &&
+        incoming().status == 'open' &&
+        incoming().unreadByAdmin == true &&
+        incoming().unreadByReader == false &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time;
+
+      allow update: if isValidThreadId(threadId) &&
+        isValidSupportThread(incoming()) &&
+        incoming().id == existing().id &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time && (
+          // Action 1: Verified Admin updates/replies to inbox thread
+          (isVerifiedUser() &&
+            isAdmin() &&
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'lastMessage',
+              'lastSenderRole',
+              'status',
+              'unreadByAdmin',
+              'unreadByReader',
+              'updatedAt'
+            ])) ||
+          // Action 2: Reader sends a follow-up message on their own secret threadId
+          (incoming().lastSenderRole == 'reader' &&
+            incoming().status == 'open' &&
+            incoming().unreadByAdmin == true &&
+            incoming().unreadByReader == false &&
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'senderName',
+              'senderPhone',
+              'senderLocation',
+              'topic',
+              'lastMessage',
+              'lastSenderRole',
+              'status',
+              'unreadByAdmin',
+              'unreadByReader',
+              'updatedAt'
+            ])) ||
+          // Action 3: Reader marks admin reply as read
+          (incoming().unreadByReader == false &&
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'unreadByReader',
+              'updatedAt'
+            ]))
+        );
+
+      allow delete: if isVerifiedUser() && isValidThreadId(threadId) && isAdmin();
+
+      match /messages/{messageId} {
+        allow get: if isValidThreadId(threadId) && isValidId(messageId);
+        allow list: if isValidThreadId(threadId) && resource.data.threadId == threadId;
+
+        allow create: if isValidThreadId(threadId) &&
+          isValidId(messageId) &&
+          exists(/databases/$(database)/documents/supportThreads/$(threadId)) &&
+          isValidSupportMessage(incoming()) &&
+          incoming().id == messageId &&
+          incoming().threadId == threadId &&
+          incoming().createdAt == request.time &&
+          (incoming().senderRole == 'reader' || (isVerifiedUser() && isAdmin()));
+
+        allow update: if false;
+        allow delete: if isVerifiedUser() && isValidThreadId(threadId) && isValidId(messageId) && isAdmin();
+      }
+    }
+
+    // Authorized editorial admin UIDs (no PII stored)
+    match /admins/{adminUid} {
+      allow get: if isVerifiedUser() && isValidId(adminUid) && (request.auth.uid == adminUid || isAdmin());
+      allow list: if isBootstrappedAdmin();
+
+      allow create: if isVerifiedUser() &&
+        isValidId(adminUid) &&
+        isValidAdminRecord(incoming()) &&
+        incoming().uid == adminUid &&
+        incoming().addedBy == request.auth.uid &&
+        incoming().createdAt == request.time &&
+        isAdmin();
+
+      allow update: if isVerifiedUser() &&
+        isValidId(adminUid) &&
+        isValidAdminRecord(incoming()) &&
+        isAdmin() &&
+        incoming().uid == existing().uid &&
+        incoming().addedBy == existing().addedBy &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().diff(existing()).affectedKeys().hasOnly(['label']);
+
+      allow delete: if isVerifiedUser() && isValidId(adminUid) && isAdmin() && adminUid != request.auth.uid;
+    }
+  }
+}

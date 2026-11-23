@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="CoffeeNadu Admin">
+  <defs>
+    <linearGradient id="cnNavy" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#0B192C" />
+      <stop offset="100%" stop-color="#17335C" />
+    </linearGradient>
+    <linearGradient id="cnGold" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#F59E0B" />
+      <stop offset="100%" stop-color="#D97706" />
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="112" fill="url(#cnNavy)" />
+  <circle cx="256" cy="256" r="184" fill="none" stroke="url(#cnGold)" stroke-width="10" opacity="0.9" />
+  <g transform="translate(256 244)">
+    <path d="M-82 -44 H54 V24 C54 68 20 100 -14 100 C-48 100 -82 68 -82 24 Z" fill="#FFFFFF" />
+    <path d="M54 -28 H76 C96 -28 110 -14 110 8 C110 30 96 46 76 46 H54" fill="none" stroke="#FFFFFF" stroke-width="18" stroke-linecap="round" />
+    <rect x="-102" y="108" width="176" height="18" rx="9" fill="url(#cnGold)" />
+    <path d="M-40 -72 C-40 -90 -24 -94 -24 -112" fill="none" stroke="#FBBF24" stroke-width="12" stroke-linecap="round" />
+    <path d="M-4 -72 C-4 -90 12 -94 12 -112" fill="none" stroke="#FBBF24" stroke-width="12" stroke-linecap="round" />
+  </g>
+</svg>
