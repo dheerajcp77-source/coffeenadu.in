@@ -139,11 +139,16 @@ export async function getStorageBackendStatus(forceRefresh = false): Promise<Sto
     return cachedStatus.value;
   }
   try {
-    const resp = await fetch('/api/storage/status');
-    if (resp.ok) {
+    const resp = await fetch('/api/storage/status', {
+      headers: { Accept: 'application/json' },
+    });
+    const contentType = (resp.headers.get('content-type') || '').toLowerCase();
+    if (resp.ok && contentType.includes('application/json')) {
       const data = (await resp.json()) as StorageStatusResponse;
-      cachedStatus = { value: data, expiresAt: Date.now() + 2 * 60 * 1000 };
-      return data;
+      if (data && (data.mode === 'google_sheets' || data.mode === 'firebase_fallback')) {
+        cachedStatus = { value: data, expiresAt: Date.now() + 2 * 60 * 1000 };
+        return data;
+      }
     }
   } catch {
     // Fallback cleanly

@@ -56,29 +56,72 @@ export async function resolveActiveAdminBearerToken(): Promise<string> {
   throw new Error('Please sign in to CoffeeNadu News Admin 2.0 first.');
 }
 
+const ADMIN2_FETCH_TIMEOUT_MS = 25_000;
+
 async function admin2Fetch<T>(
   url: string,
   options: { method?: string; body?: unknown; requireAuth?: boolean; keepalive?: boolean } = {}
 ): Promise<T> {
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
+    Accept: 'application/json',
   };
   if (options.requireAuth !== false) {
     const token = await resolveActiveAdminBearerToken();
     headers.Authorization = `Bearer ${token}`;
   }
-  const resp = await fetch(url, {
+  const fetchInit: RequestInit = {
     method: options.method || 'GET',
     headers,
     body: options.body !== undefined ? JSON.stringify(options.body) : undefined,
     cache: 'no-store',
     credentials: 'same-origin',
     keepalive: options.keepalive,
-  });
-  const json = (await resp.json().catch(() => ({}))) as T & { ok?: boolean; error?: string };
+  };
+  if (
+    !options.keepalive &&
+    typeof AbortSignal !== 'undefined' &&
+    typeof AbortSignal.timeout === 'function'
+  ) {
+    fetchInit.signal = AbortSignal.timeout(ADMIN2_FETCH_TIMEOUT_MS);
+  }
+
+  let resp: Response;
+  try {
+    resp = await fetch(url, fetchInit);
+  } catch (err) {
+    if (err instanceof Error && (err.name === 'TimeoutError' || err.name === 'AbortError')) {
+      throw new Error('Request timed out while contacting the admin backend. Please try again.');
+    }
+    throw new Error('Unable to reach the CoffeeNadu News admin backend.');
+  }
+
+  if (resp.status === 204) {
+    return {} as T;
+  }
+
+  const contentType = (resp.headers.get('content-type') || '').toLowerCase();
+  const isJsonResponse = contentType.includes('application/json') || contentType.includes('+json');
+
+  let json: (T & { ok?: boolean; error?: string }) | null = null;
+  if (isJsonResponse) {
+    try {
+      json = (await resp.json()) as T & { ok?: boolean; error?: string };
+    } catch {
+      json = null;
+    }
+  }
+
   if (!resp.ok) {
     throw new Error(json?.error || `Request failed (${resp.status})`);
   }
+
+  if (!isJsonResponse || !json) {
+    throw new Error(
+      'Admin API returned an unexpected non-JSON response. Please verify the API proxy is active.'
+    );
+  }
+
   return json;
 }
 
