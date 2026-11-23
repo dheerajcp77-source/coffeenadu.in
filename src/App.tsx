@@ -984,7 +984,7 @@ export default function App() {
       )}
 
       <footer className="border-t border-slate-200 bg-white mt-10">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-6">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-8 pb-20 sm:py-8 space-y-6">
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
             <div>
               <div className="inline-flex items-center gap-2 font-masthead text-lg font-bold text-[#0F274A]">
@@ -1030,11 +1030,17 @@ export default function App() {
             </div>
           </div>
 
-          <div className="pt-4 border-t border-slate-200 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 text-[11px] text-slate-500">
-            <p>
-              © {new Date().getFullYear()} Coffeenadu News · Koppa Taluk. All rights reserved.
-            </p>
-            <p>
+          <div className="pt-5 border-t border-slate-200 space-y-2.5">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 text-xs text-slate-600">
+              <p className="font-medium text-slate-700">
+                © 2026 CoffeeNadu News. All rights reserved.
+              </p>
+              <p className="text-slate-600">
+                Developed &amp; Managed by{' '}
+                <span className="font-semibold text-[#0F274A]">Dheeraj</span>
+              </p>
+            </div>
+            <p className="text-[11px] text-slate-500 leading-relaxed">
               Unauthorized copying, screenshotting, downloading, or redistribution of news content and photos is prohibited.
             </p>
           </div>
