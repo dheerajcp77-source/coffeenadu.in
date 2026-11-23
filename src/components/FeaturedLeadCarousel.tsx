@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ArrowRight, ChevronLeft, ChevronRight, Clock } from 'lucide-react';
 import koppaLandscapeImg from '../assets/images/koppa_town_landscape_1794709366123.jpg';
-import { getKannadaLocationLabel, resolveArticleImage } from '../data/newsData';
+import { getKannadaLocationLabel, resolveArticleImage } from '../constants/newsData';
 import type { NewsArticle } from '../types/news';
 import { sanitizeRichTextHtml, stripRichTextToPlainText } from '../utils/richText';
 import { ArticleShareBar } from './ArticleShareBar';

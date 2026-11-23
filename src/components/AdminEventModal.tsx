@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ChangeEvent, type FormEvent } from 'react';
 import { ImagePlus, Loader2, Trash2, X } from 'lucide-react';
-import { KOPPA_LOCATIONS, getKannadaLocationLabel } from '../data/newsData';
+import { KOPPA_LOCATIONS, getKannadaLocationLabel } from '../constants/newsData';
 import type { EventMutationInput } from '../services/eventsStore';
 import type { ProgramEvent } from '../types/news';
 import { applyWatermarkToImageSrc } from '../utils/watermark';

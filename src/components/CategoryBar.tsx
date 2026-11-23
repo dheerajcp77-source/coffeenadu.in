@@ -19,7 +19,7 @@ import {
   X,
 } from 'lucide-react';
 import koppaLandscapeImg from '../assets/images/koppa_town_landscape_1794709366123.jpg';
-import { KOPPA_PLACE_OPTIONS, NEWS_CATEGORIES } from '../data/newsData';
+import { KOPPA_PLACE_OPTIONS, NEWS_CATEGORIES } from '../constants/newsData';
 import type { FilterCategory, NewsCategory } from '../types/news';
 
 interface CategoryBarProps {

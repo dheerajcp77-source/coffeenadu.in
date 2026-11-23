@@ -15,7 +15,7 @@ import {
   KOPPA_PLACE_OPTIONS,
   getKannadaLocationLabel,
   matchesSelectedLocation,
-} from '../data/newsData';
+} from '../constants/newsData';
 import { recordEventView } from '../services/eventsStore';
 import type { ProgramEvent } from '../types/news';
 import { buildEventPublicUrl } from '../utils/slug';

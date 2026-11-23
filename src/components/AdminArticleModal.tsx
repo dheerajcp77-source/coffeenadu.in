@@ -6,7 +6,7 @@ import {
   NEWS_CATEGORIES,
   getKannadaLocationLabel,
   resolveArticleImage,
-} from '../data/newsData';
+} from '../constants/newsData';
 import type { ExtraNewsPhoto, ImageKey, NewsArticle, NewsCategory } from '../types/news';
 import { MAX_EXTRA_NEWS_PHOTOS } from '../utils/extraPhotos';
 import {

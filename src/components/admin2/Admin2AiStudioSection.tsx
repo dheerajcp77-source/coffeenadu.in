@@ -10,7 +10,7 @@ import {
   ShieldAlert,
   Sparkles,
 } from 'lucide-react';
-import { NEWS_CATEGORIES } from '../../data/newsData';
+import { NEWS_CATEGORIES } from '../../constants/newsData';
 import { createAdmin2Draft, runAiNewsStudio } from '../../services/admin2Client';
 import type { AiStudioResponse, AiStudioTool } from '../../types/admin2';
 

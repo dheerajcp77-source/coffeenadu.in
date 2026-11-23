@@ -16,7 +16,7 @@ import {
   type QueryDocumentSnapshot,
   type DocumentData,
 } from 'firebase/firestore';
-import { KOPPA_LOCATIONS, NEWS_CATEGORIES, SEED_ARTICLES } from '../data/seedArticles';
+import { KOPPA_LOCATIONS, NEWS_CATEGORIES, SEED_ARTICLES } from '../constants/seedArticles';
 import {
   OperationType,
   auth,

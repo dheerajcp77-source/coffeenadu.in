@@ -23,7 +23,7 @@ import {
   Trash2,
   X,
 } from 'lucide-react';
-import { NEWS_CATEGORIES, getKannadaLocationLabel } from '../../data/newsData';
+import { NEWS_CATEGORIES, getKannadaLocationLabel } from '../../constants/newsData';
 import {
   archiveLiveArticle,
   createAdmin2Draft,

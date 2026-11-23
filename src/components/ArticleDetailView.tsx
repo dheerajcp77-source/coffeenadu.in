@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 import { ArrowLeft } from 'lucide-react';
-import { getKannadaLocationLabel, resolveArticleImage } from '../data/newsData';
+import { getKannadaLocationLabel, resolveArticleImage } from '../constants/newsData';
 import { recordArticleView } from '../services/articlesStore';
 import type { NewsArticle } from '../types/news';
 import { sanitizeRichTextHtml, stripRichTextToPlainText } from '../utils/richText';

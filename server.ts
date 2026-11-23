@@ -8,7 +8,7 @@ import { promisify } from 'node:util';
 import { GoogleGenAI, ThinkingLevel, Type } from '@google/genai';
 import express, { type NextFunction, type Request, type Response } from 'express';
 import sharp from 'sharp';
-import { SEED_ARTICLES as PORTAL_SEED_ARTICLES } from './src/data/seedArticles.ts';
+import { SEED_ARTICLES as PORTAL_SEED_ARTICLES } from './src/constants/seedArticles.ts';
 import { Admin2Backend } from './src/server/admin2Backend.ts';
 import { SheetsStorageManager } from './src/server/sheetsStorageProxy.ts';
 

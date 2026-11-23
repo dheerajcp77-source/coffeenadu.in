@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Check, Share2 } from 'lucide-react';
-import { getKannadaLocationLabel } from '../data/newsData';
+import { getKannadaLocationLabel } from '../constants/newsData';
 import type { NewsArticle } from '../types/news';
 import { stripRichTextToPlainText } from '../utils/richText';
 import { buildArticlePublicUrl, PUBLIC_SHARE_ORIGIN } from '../utils/slug';

@@ -1,4 +1,4 @@
-import { KOPPA_BRIEFS, KOPPA_MARKET_RATES, KOPPA_PLACE_OPTIONS } from '../data/newsData';
+import { KOPPA_BRIEFS, KOPPA_MARKET_RATES, KOPPA_PLACE_OPTIONS } from '../constants/newsData';
 import { WhatsAppGroupBanner } from './WhatsAppGroupBanner';
 
 interface RightRailProps {

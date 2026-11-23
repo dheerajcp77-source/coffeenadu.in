@@ -19,7 +19,7 @@ import {
   getKannadaLocationLabel,
   matchesSelectedLocation,
   resolveArticleImage,
-} from './data/newsData';
+} from './constants/newsData';
 import {
   getArticleByIdFromFirestore,
   loadInitialArticles,

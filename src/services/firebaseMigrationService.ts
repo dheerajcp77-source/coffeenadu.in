@@ -9,7 +9,7 @@ import {
   startAfter,
   type Timestamp,
 } from 'firebase/firestore';
-import { KOPPA_LOCATIONS, NEWS_CATEGORIES } from '../data/newsData';
+import { KOPPA_LOCATIONS, NEWS_CATEGORIES } from '../constants/newsData';
 import { db } from '../firebase';
 import type { ImageKey, NewsArticle, NewsCategory, ProgramEvent } from '../types/news';
 import {

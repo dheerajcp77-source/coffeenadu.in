@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { ArrowLeft, Loader2, MessageCircle, MessageSquare, Send } from 'lucide-react';
-import { KOPPA_LOCATIONS } from '../data/newsData';
+import { KOPPA_LOCATIONS } from '../constants/newsData';
 import {
   getOrCreateReaderThreadId,
   getSavedReaderProfile,

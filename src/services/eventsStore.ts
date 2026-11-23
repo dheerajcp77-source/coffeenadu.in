@@ -18,7 +18,7 @@ import {
   type Timestamp,
 } from 'firebase/firestore';
 import { applyWatermarkToImageSrc } from '../utils/watermark';
-import { KOPPA_LOCATIONS } from '../data/newsData';
+import { KOPPA_LOCATIONS } from '../constants/newsData';
 import {
   OperationType,
   auth,

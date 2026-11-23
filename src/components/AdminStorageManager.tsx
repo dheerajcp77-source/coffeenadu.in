@@ -21,7 +21,7 @@ import {
   Trash2,
   Upload,
 } from 'lucide-react';
-import { NEWS_CATEGORIES } from '../data/newsData';
+import { NEWS_CATEGORIES } from '../constants/newsData';
 import { FIRESTORE_QUOTA_UPGRADE_URL } from '../services/firestoreOptimizer';
 import {
   buildDetailedAuditRecords,
