@@ -64,12 +64,8 @@ declare global {
 }
 
 /**
- * Returns the active origin that reliably preserves `/?article=...` and `/events?event=...`
- * deep links and OpenGraph previews.
- *
- * The Express server injects `window.__COFFEENADU_SHARE_ORIGIN__` after probing whether
- * `https://coffeenadu.in` preserves query strings (e.g., via Cloudflare Redirect Rules)
- * or strips them (default GoDaddy domain forwarding).
+ * Returns the canonical public origin (`https://coffeenadu.in`) for article and event
+ * deep links and Open Graph previews.
  */
 export function getDeepLinkShareOrigin(): string {
   if (typeof window !== 'undefined') {
@@ -77,11 +73,8 @@ export function getDeepLinkShareOrigin(): string {
     if (typeof injected === 'string' && /^https?:\/\//i.test(injected.trim())) {
       return injected.trim().replace(/\/+$/, '');
     }
-    if (window.location?.origin && /^https?:\/\//i.test(window.location.origin)) {
-      return window.location.origin.replace(/\/+$/, '');
-    }
   }
-  return FALLBACK_DEEP_LINK_ORIGIN;
+  return PUBLIC_SHARE_ORIGIN;
 }
 
 export function buildArticlePublicUrl(articleId: string, origin?: string): string {

@@ -3,7 +3,7 @@ import { Check, Share2 } from 'lucide-react';
 import { getKannadaLocationLabel } from '../constants/newsData';
 import type { NewsArticle } from '../types/news';
 import { stripRichTextToPlainText } from '../utils/richText';
-import { buildArticlePublicUrl, PUBLIC_SHARE_ORIGIN } from '../utils/slug';
+import { buildArticlePublicUrl } from '../utils/slug';
 
 interface ArticleShareBarProps {
   article: NewsArticle;
@@ -16,9 +16,7 @@ export const SHARE_PROMO_FOOTER = [
   '',
   'ಪ್ರತಿದಿನದ ಸುದ್ದಿ, ಬಸ್ ಸಮಯ, ಕಾರ್ಯಕ್ರಮಗಳು ಮತ್ತು ಪ್ರಮುಖ ಮಾಹಿತಿಗಾಗಿ ನಮ್ಮ ವೆಬ್ಸೈಟ್ಗೆ ಭೇಟಿ ನೀಡಿ.',
   '',
-  `👉 ${PUBLIC_SHARE_ORIGIN}`,
-  '',
-  '📲 *ಈ ಲಿಂಕ್ ಅನ್ನು ನಿಮ್ಮ ಸ್ನೇಹಿತರು, ಕುಟುಂಬದವರು ಹಾಗೂ ಇತರ WhatsApp ಗ್ರೂಪ್ಗಳಲ್ಲಿ ಶೇರ್ ಮಾಡಿ.*',
+  '📲 *ಈ ಸುದ್ದಿಯನ್ನು ನಿಮ್ಮ ಸ್ನೇಹಿತರು, ಕುಟುಂಬದವರು ಹಾಗೂ ಇತರ WhatsApp ಗ್ರೂಪ್ಗಳಲ್ಲಿ ಶೇರ್ ಮಾಡಿ.*',
 ].join('\n');
 
 function buildArticleUrl(articleId: string): string {
