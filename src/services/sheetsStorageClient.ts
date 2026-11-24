@@ -307,20 +307,78 @@ export async function fetchEventByIdFromSheets(eventId: string): Promise<Program
   return mapSheetsItemToEvent(json.item);
 }
 
+export interface RecordedViewResponse {
+  ok: boolean;
+  views: number;
+  lastViewedAt: string;
+}
+
 export async function recordAggregatedViewOnServer(
   type: 'article' | 'event',
-  id: string
-): Promise<void> {
-  try {
-    await fetch('/api/storage/views', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ type, id }),
-      keepalive: true,
-    });
-  } catch {
-    // Non-fatal
+  id: string,
+  meta?: {
+    title?: string;
+    category?: string;
+    location?: string;
+    publishedDate?: string;
+    baselineViews?: number;
   }
+): Promise<RecordedViewResponse | null> {
+  const payload = JSON.stringify({
+    type,
+    id,
+    ...(meta?.title ? { title: meta.title } : {}),
+    ...(meta?.category ? { category: meta.category } : {}),
+    ...(meta?.location ? { location: meta.location } : {}),
+    ...(meta?.publishedDate ? { publishedDate: meta.publishedDate } : {}),
+    ...(typeof meta?.baselineViews === 'number' && Number.isFinite(meta.baselineViews)
+      ? { baselineViews: meta.baselineViews }
+      : {}),
+  });
+
+  const retryDelays = [250, 650];
+  for (let attempt = 0; attempt <= retryDelays.length; attempt += 1) {
+    try {
+      const resp = await fetch('/api/storage/views', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: payload,
+        cache: 'no-store',
+        keepalive: true,
+      });
+
+      if (resp.ok) {
+        const json = (await resp.json().catch(() => null)) as {
+          ok?: boolean;
+          views?: number;
+          lastViewedAt?: string;
+        } | null;
+        if (json?.ok && typeof json.views === 'number' && Number.isFinite(json.views)) {
+          return {
+            ok: true,
+            views: json.views,
+            lastViewedAt: json.lastViewedAt || new Date().toISOString(),
+          };
+        }
+        return {
+          ok: true,
+          views: (meta?.baselineViews ?? 0) + 1,
+          lastViewedAt: new Date().toISOString(),
+        };
+      }
+
+      if (resp.status >= 400 && resp.status < 500 && resp.status !== 429) {
+        return null;
+      }
+    } catch {
+      // Retry on transient network errors
+    }
+
+    if (attempt < retryDelays.length) {
+      await new Promise((resolve) => setTimeout(resolve, retryDelays[attempt]));
+    }
+  }
+  return null;
 }
 
 export async function uploadImageToDriveViaServer(input: {

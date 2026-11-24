@@ -142,7 +142,7 @@ export function Admin2DashboardSection({
       onClick: () => onNavigateSection('analytics'),
     },
     {
-      label: 'Total Article Views',
+      label: 'Total Views (All Articles)',
       value: data.traffic.totalSheetViews,
       sub: `${data.traffic.totalPageViews14d} portal hits (14d)`,
       icon: Eye,
@@ -340,10 +340,10 @@ export function Admin2DashboardSection({
           <div className="mb-4 flex items-center justify-between">
             <div>
               <h3 className="text-sm font-bold text-slate-900 dark:text-white">
-                Most Read Articles
+                Most Viewed Articles
               </h3>
               <p className="text-xs text-slate-500 dark:text-slate-400">
-                Ranked by real view counts in Google Sheets.
+                Ranked by confirmed live views across all articles.
               </p>
             </div>
             <button
@@ -382,6 +382,50 @@ export function Admin2DashboardSection({
           )}
         </section>
       </div>
+
+      {/* Recently Viewed Articles */}
+      <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-xs dark:border-slate-800 dark:bg-[#111C2E]">
+        <div className="mb-3 flex items-center justify-between">
+          <div>
+            <h3 className="text-sm font-bold text-slate-900 dark:text-white">
+              Recently Viewed Articles
+            </h3>
+            <p className="text-xs text-slate-500 dark:text-slate-400">
+              Latest confirmed reader article opens with updated view totals.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => onNavigateSection('analytics')}
+            className="text-xs font-semibold text-[#1D4ED8] hover:underline dark:text-blue-400"
+          >
+            View Analytics
+          </button>
+        </div>
+        {!data.recentlyViewedArticles || data.recentlyViewedArticles.length === 0 ? (
+          <p className="py-6 text-center text-xs text-slate-500">
+            No article views recorded yet since tracking started.
+          </p>
+        ) : (
+          <div className="divide-y divide-slate-100 dark:divide-slate-800">
+            {data.recentlyViewedArticles.map((art) => (
+              <div key={art.id} className="flex items-start justify-between gap-3 py-2.5">
+                <div className="min-w-0">
+                  <p className="line-clamp-1 text-xs font-semibold text-slate-900 dark:text-slate-100">
+                    {art.title}
+                  </p>
+                  <p className="mt-0.5 text-[11px] text-slate-500 dark:text-slate-400">
+                    {art.category} · Viewed {formatShortTime(art.viewedAt)}
+                  </p>
+                </div>
+                <span className="shrink-0 text-xs font-bold tabular-nums text-slate-700 dark:text-slate-200">
+                  {art.views.toLocaleString('en-IN')} views
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
 
       {/* Recent Activity & Notifications */}
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">

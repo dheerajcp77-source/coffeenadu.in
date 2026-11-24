@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { GoogleGenAI } from '@google/genai';
 import type { Express, NextFunction, Request, Response } from 'express';
+import { SEED_ARTICLES } from '../constants/seedArticles.ts';
 import {
   ALL_ADMIN_PERMISSIONS,
   ROLE_DEFAULT_PERMISSIONS,
@@ -17,6 +18,7 @@ import {
   type Admin2MediaAsset,
   type Admin2Notification,
   type Admin2NotificationPreferences,
+  type Admin2RecentViewedArticle,
   type Admin2SessionInfo,
   type Admin2SessionUser,
   type Admin2WebsiteSettings,
@@ -60,7 +62,12 @@ import {
   sanitizeExternalWebsiteUrl,
   sanitizePhoneDigits,
 } from '../utils/adHelpers.ts';
-import type { SheetsNewsItem, SheetsStorageManager, VerifiedAdminUser } from './sheetsStorageProxy.ts';
+import type {
+  ArticleViewRecordMeta,
+  SheetsNewsItem,
+  SheetsStorageManager,
+  VerifiedAdminUser,
+} from './sheetsStorageProxy.ts';
 
 const PROTECTED_SUPER_ADMINS = [
   { email: 'shwethashwethak85@gmail.com', fullName: 'Shwetha (Chief Editor)' },
@@ -133,6 +140,16 @@ interface DailyTrafficBucket {
   devices: Record<string, number>;
 }
 
+interface ArticleViewStatsRecord {
+  id: string;
+  title: string;
+  category: string;
+  location: string;
+  publishedDate: string;
+  totalViews: number;
+  lastViewedAt: string;
+}
+
 interface Admin2PersistedState {
   version: number;
   accounts: Admin2AccountRecord[];
@@ -168,6 +185,8 @@ interface Admin2PersistedState {
   automations: Admin2AutomationItem[];
   settings: Admin2WebsiteSettings;
   trafficByDay: Record<string, DailyTrafficBucket>;
+  articleViewStats: Record<string, ArticleViewStatsRecord>;
+  recentlyViewedArticles: Admin2RecentViewedArticle[];
   ads: Advertisement[];
   adSequenceCounter: number;
   adPlatformSettings: AdPlatformSettings;
@@ -498,6 +517,7 @@ function createDefaultNotificationPrefs(): Admin2NotificationPreferences {
 }
 
 export class Admin2Backend {
+  private readonly dataDir: string;
   private readonly stateFile: string;
   private readonly secretFile: string;
   private readonly adMediaDir: string;
@@ -512,6 +532,7 @@ export class Admin2Backend {
   constructor(baseDataDir: string, sheetsStorage: SheetsStorageManager) {
     this.sheetsStorage = sheetsStorage;
     const resolvedDir = this.resolveWritableDir(baseDataDir);
+    this.dataDir = resolvedDir;
     this.stateFile = path.join(resolvedDir, 'admin2-state.json');
     this.secretFile = path.join(resolvedDir, '.admin2-secret');
     this.adMediaDir = path.join(resolvedDir, 'ads-media');
@@ -523,9 +544,14 @@ export class Admin2Backend {
     this.hmacSecret = this.loadOrGenerateSecret();
     this.state = this.loadOrInitState();
 
-    // Wire external admin verifier + live storage event hook into SheetsStorageManager
+    // Wire external admin verifier, live storage event hook & persistent article view ledger
     this.sheetsStorage.setExternalAdminVerifier((token, req) => this.verifyForSheetsProxy(token, req));
     this.sheetsStorage.setEventHook((ev) => this.handleStorageEvent(ev));
+    this.sheetsStorage.setArticleViewHooks(
+      (articleId, meta) => this.recordConfirmedArticleView(articleId, meta),
+      (articleId, sheetsViewsWithPending) =>
+        this.getEffectiveArticleViews(articleId, sheetsViewsWithPending)
+    );
 
     // Start 60-second scheduled publishing worker
     this.startSchedulerWorker();
@@ -618,6 +644,8 @@ export class Admin2Backend {
       automations: createDefaultAutomations(),
       settings: createDefaultSettings(),
       trafficByDay: {},
+      articleViewStats: {},
+      recentlyViewedArticles: [],
       ads: [],
       adSequenceCounter: 0,
       adPlatformSettings: createDefaultAdPlatformSettings(),
@@ -674,6 +702,11 @@ export class Admin2Backend {
               ? raw.automations
               : defaults.automations,
           trafficByDay: raw.trafficByDay && typeof raw.trafficByDay === 'object' ? raw.trafficByDay : {},
+          articleViewStats:
+            raw.articleViewStats && typeof raw.articleViewStats === 'object' ? raw.articleViewStats : {},
+          recentlyViewedArticles: Array.isArray(raw.recentlyViewedArticles)
+            ? raw.recentlyViewedArticles.slice(0, 40)
+            : [],
           ads: loadedAds,
           adSequenceCounter: Math.max(rawSeq, maxExistingAdSeq),
           adPlatformSettings: (() => {
@@ -1068,11 +1101,162 @@ export class Admin2Backend {
     const device = classifyDevice(ua);
     bucket.devices[device] = (bucket.devices[device] || 0) + 1;
 
-    if (reqPath === '/' && typeof req.query.article === 'string' && req.query.article.trim()) {
-      bucket.articleReads += 1;
+    this.schedulePersist();
+  }
+
+  private loadLocalFallbackArticles(): Array<{
+    id: string;
+    title: string;
+    category: string;
+    location: string;
+    publishedDate: string;
+    views: number;
+  }> {
+    const byId = new Map<
+      string,
+      {
+        id: string;
+        title: string;
+        category: string;
+        location: string;
+        publishedDate: string;
+        views: number;
+      }
+    >();
+
+    for (const seed of SEED_ARTICLES) {
+      if (!seed?.id) continue;
+      byId.set(seed.id, {
+        id: seed.id,
+        title: stripMarkup(seed.titleKannada || seed.id),
+        category: seed.category || 'Local',
+        location: seed.location || 'ಕೊಪ್ಪ',
+        publishedDate: seed.publishedDate || '',
+        views: Number(seed.viewCount) || 0,
+      });
     }
 
-    this.schedulePersist();
+    try {
+      const storePath = path.join(this.dataDir, 'news-store.json');
+      if (fs.existsSync(storePath)) {
+        const parsed = JSON.parse(fs.readFileSync(storePath, 'utf8'));
+        if (Array.isArray(parsed)) {
+          for (const raw of parsed as Array<Record<string, unknown>>) {
+            const id = typeof raw?.id === 'string' ? raw.id.trim() : '';
+            if (!id) continue;
+            byId.set(id, {
+              id,
+              title: stripMarkup(String(raw.titleKannada || id)),
+              category: String(raw.category || 'Local'),
+              location: String(raw.location || 'ಕೊಪ್ಪ'),
+              publishedDate: String(raw.publishedDate || ''),
+              views: Number(raw.viewCount) || 0,
+            });
+          }
+        }
+      }
+    } catch {
+      // Non-fatal fallback to seed articles
+    }
+
+    return Array.from(byId.values());
+  }
+
+  public getEffectiveArticleViews(articleId: string, knownBaseViews = 0): number {
+    const cleanId = articleId.trim();
+    const recorded = this.state.articleViewStats[cleanId]?.totalViews || 0;
+    return Math.max(Number(knownBaseViews) || 0, recorded);
+  }
+
+  public recordConfirmedArticleView(
+    articleId: string,
+    meta: ArticleViewRecordMeta = {}
+  ): { views: number; lastViewedAt: string } {
+    const cleanId = articleId.trim();
+    const nowIso = new Date().toISOString();
+    if (!/^[a-zA-Z0-9_-]{1,128}$/.test(cleanId)) {
+      return { views: 0, lastViewedAt: nowIso };
+    }
+
+    const existing = this.state.articleViewStats[cleanId];
+    const cachedSheet = this.sheetsStorage.findCachedNewsItem(cleanId);
+    const localMatch =
+      cachedSheet || existing
+        ? null
+        : this.loadLocalFallbackArticles().find((a) => a.id === cleanId) || null;
+
+    const priorKnownViews = Math.max(
+      0,
+      Number(existing?.totalViews) || 0,
+      Number(meta.cachedSheetsViewsBefore) || 0,
+      Number(meta.baselineViews) || 0,
+      Number(localMatch?.views) || 0
+    );
+    const nextTotalViews = priorKnownViews + 1;
+
+    const resolvedTitle =
+      stripMarkup(
+        String(meta.title || cachedSheet?.title || localMatch?.title || existing?.title || cleanId)
+      ).slice(0, 220) || cleanId;
+    const resolvedCategory =
+      String(
+        meta.category || cachedSheet?.category || localMatch?.category || existing?.category || 'Local'
+      ).trim() || 'Local';
+    const resolvedLocation =
+      String(
+        meta.location || cachedSheet?.location || localMatch?.location || existing?.location || 'ಕೊಪ್ಪ'
+      ).trim() || 'ಕೊಪ್ಪ';
+    const resolvedPublishedDate = String(
+      meta.publishedDate ||
+        cachedSheet?.publishedDate ||
+        localMatch?.publishedDate ||
+        existing?.publishedDate ||
+        ''
+    ).trim();
+
+    this.state.articleViewStats[cleanId] = {
+      id: cleanId,
+      title: resolvedTitle,
+      category: resolvedCategory,
+      location: resolvedLocation,
+      publishedDate: resolvedPublishedDate,
+      totalViews: nextTotalViews,
+      lastViewedAt: nowIso,
+    };
+
+    const recentEntry: Admin2RecentViewedArticle = {
+      id: cleanId,
+      title: resolvedTitle,
+      category: resolvedCategory,
+      location: resolvedLocation,
+      publishedDate: resolvedPublishedDate,
+      views: nextTotalViews,
+      viewedAt: nowIso,
+    };
+    this.state.recentlyViewedArticles = [
+      recentEntry,
+      ...this.state.recentlyViewedArticles.filter((item) => item.id !== cleanId),
+    ].slice(0, 30);
+
+    const today = getTodayKey();
+    const bucket = this.ensureTrafficBucket(today);
+    bucket.articleReads += 1;
+
+    this.persistStateNow();
+    return { views: nextTotalViews, lastViewedAt: nowIso };
+  }
+
+  public getArticleViewsMap(): Record<string, number> {
+    const out: Record<string, number> = {
+      ...this.sheetsStorage.getCachedArticleViewsMap(),
+    };
+    for (const item of this.loadLocalFallbackArticles()) {
+      out[item.id] = Math.max(out[item.id] || 0, item.views);
+    }
+    for (const [id, stat] of Object.entries(this.state.articleViewStats)) {
+      out[id] = Math.max(out[id] || 0, Number(stat.totalViews) || 0);
+    }
+    return out;
   }
 
   // ===========================================================================
@@ -1721,9 +1905,61 @@ export class Admin2Backend {
         pct: totalDevices > 0 ? Math.round((count / totalDevices) * 100) : 0,
       }));
 
+    const mergedArticleMap = new Map<
+      string,
+      {
+        id: string;
+        title: string;
+        category: string;
+        location: string;
+        publishedDate: string;
+        views: number;
+      }
+    >();
+
+    for (const item of news) {
+      mergedArticleMap.set(item.newsId, {
+        id: item.newsId,
+        title: stripMarkup(item.title),
+        category: item.category || 'Local',
+        location: item.location || 'ಕೊಪ್ಪ',
+        publishedDate: item.publishedDate || '',
+        views: this.getEffectiveArticleViews(item.newsId, Number(item.views) || 0),
+      });
+    }
+
+    for (const localItem of this.loadLocalFallbackArticles()) {
+      const existing = mergedArticleMap.get(localItem.id);
+      if (existing) {
+        existing.views = Math.max(existing.views, this.getEffectiveArticleViews(localItem.id, localItem.views));
+      } else {
+        mergedArticleMap.set(localItem.id, {
+          ...localItem,
+          views: this.getEffectiveArticleViews(localItem.id, localItem.views),
+        });
+      }
+    }
+
+    for (const [id, stat] of Object.entries(this.state.articleViewStats)) {
+      const existing = mergedArticleMap.get(id);
+      if (existing) {
+        existing.views = Math.max(existing.views, Number(stat.totalViews) || 0);
+      } else {
+        mergedArticleMap.set(id, {
+          id,
+          title: stripMarkup(stat.title || id),
+          category: stat.category || 'Local',
+          location: stat.location || 'ಕೊಪ್ಪ',
+          publishedDate: stat.publishedDate || '',
+          views: Number(stat.totalViews) || 0,
+        });
+      }
+    }
+
+    const mergedArticles = Array.from(mergedArticleMap.values());
     const catMap = new Map<string, { articles: number; views: number }>();
     let totalSheetArticleViews = 0;
-    for (const item of news) {
+    for (const item of mergedArticles) {
       const views = Number(item.views) || 0;
       totalSheetArticleViews += views;
       const cur = catMap.get(item.category || 'Local') || { articles: 0, views: 0 };
@@ -1736,17 +1972,23 @@ export class Admin2Backend {
       .map(([category, stats]) => ({ category, ...stats }))
       .sort((a, b) => b.views - a.views);
 
-    const topArticles = [...news]
+    const topArticles = [...mergedArticles]
       .sort((a, b) => (Number(b.views) || 0) - (Number(a.views) || 0))
-      .slice(0, 12)
-      .map((a) => ({
-        id: a.newsId,
-        title: stripMarkup(a.title),
-        category: a.category || 'Local',
-        location: a.location || 'ಕೊಪ್ಪ',
-        publishedDate: a.publishedDate || '',
-        views: Number(a.views) || 0,
-      }));
+      .slice(0, 12);
+
+    const recentlyViewedArticles = this.state.recentlyViewedArticles
+      .slice(0, 20)
+      .map((recent) => {
+        const merged = mergedArticleMap.get(recent.id);
+        return {
+          ...recent,
+          title: merged?.title || stripMarkup(recent.title || recent.id),
+          category: merged?.category || recent.category || 'Local',
+          location: merged?.location || recent.location || 'ಕೊಪ್ಪ',
+          publishedDate: merged?.publishedDate || recent.publishedDate || '',
+          views: Math.max(Number(recent.views) || 0, merged?.views || 0),
+        };
+      });
 
     return {
       rangeDays: daysToInclude,
@@ -1756,12 +1998,13 @@ export class Admin2Backend {
         uniqueVisitors: uniqueUnion.size,
         articleReads: totalArticleReads,
         totalSheetArticleViews,
-        totalPublishedArticles: news.length,
+        totalPublishedArticles: mergedArticles.length,
       },
       trafficSources,
       deviceBreakdown,
       categoryPerformance,
       topArticles,
+      recentlyViewedArticles,
       ga4Connected: Boolean(this.state.settings.ga4MeasurementId.trim()),
       ga4MeasurementId: this.state.settings.ga4MeasurementId.trim(),
       searchConsoleConnected: Boolean(this.state.settings.searchConsoleSiteUrl.trim()),
@@ -2476,11 +2719,13 @@ export class Admin2Backend {
         const activeAutomations = this.state.automations.filter((a) => a.enabled && a.status === 'active').length;
         const errorAutomations = this.state.automations.filter((a) => a.status === 'error').length;
 
+        const publishedCount = Math.max(news.length, analytics.totals.totalPublishedArticles);
+
         res.json({
           ok: true,
           articles: {
-            total: news.length + draftsCount + scheduledCount + archivedCount,
-            published: news.length,
+            total: publishedCount + draftsCount + scheduledCount + archivedCount,
+            published: publishedCount,
             drafts: draftsCount,
             scheduled: scheduledCount,
             archived: archivedCount,
@@ -2494,6 +2739,7 @@ export class Admin2Backend {
             dailySeries: analytics.dailySeries,
           },
           popularArticles: analytics.topArticles.slice(0, 6),
+          recentlyViewedArticles: analytics.recentlyViewedArticles.slice(0, 8),
           recentActivity: this.state.auditLogs.slice(0, 10),
           recentNotifications: this.state.notifications.slice(0, 8),
           unreadNotifications: this.state.notifications.filter((n) => !n.read).length,
@@ -2519,6 +2765,15 @@ export class Admin2Backend {
           error: err instanceof Error ? err.message : 'Unable to assemble dashboard overview.',
         });
       }
+    });
+
+    // Public live article view counts map (keeps feed/admin UI synchronized with server ledger)
+    app.get('/api/articles/views', (_req, res) => {
+      res.setHeader('Cache-Control', 'no-store, must-revalidate');
+      res.json({
+        ok: true,
+        viewsById: this.getArticleViewsMap(),
+      });
     });
 
     // -------------------------------------------------------------------------

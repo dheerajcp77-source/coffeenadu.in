@@ -1956,7 +1956,18 @@ Rules:
 
   // Public news feed endpoint
   app.get('/api/articles', (_req, res) => {
-    const articles = loadArticles();
+    const viewsById = admin2Backend.getArticleViewsMap();
+    const articles = loadArticles().map((article) => {
+      const serverViews = viewsById[article.id];
+      if (typeof serverViews === 'number') {
+        return {
+          ...article,
+          viewCount: Math.max(Number((article as { viewCount?: number }).viewCount) || 0, serverViews),
+        };
+      }
+      return article;
+    });
+    res.setHeader('Cache-Control', 'no-store, must-revalidate');
     res.json({ articles });
   });
 

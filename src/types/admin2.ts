@@ -349,6 +349,16 @@ export interface Admin2WebsiteSettings {
   updatedBy: string;
 }
 
+export interface Admin2RecentViewedArticle {
+  id: string;
+  title: string;
+  category: string;
+  location: string;
+  publishedDate: string;
+  views: number;
+  viewedAt: string;
+}
+
 export interface Admin2AnalyticsSummary {
   rangeDays: number;
   dailySeries: Array<{
@@ -375,6 +385,7 @@ export interface Admin2AnalyticsSummary {
     publishedDate: string;
     views: number;
   }>;
+  recentlyViewedArticles: Admin2RecentViewedArticle[];
   ga4Connected: boolean;
   ga4MeasurementId: string;
   searchConsoleConnected: boolean;

@@ -44,6 +44,7 @@ import {
   removeAdminRecordInFirestore,
   removeLegacyFogArticleIfPresent,
   subscribeToArticlesState,
+  syncArticleViewCountsFromServer,
   toggleArticleLeadStory,
   updateArticleInFirestore,
   type AdminDirectoryEntry,
@@ -359,9 +360,11 @@ export function AdminPanel({ articles, onNavigateHome }: AdminPanelProps) {
       activeSection === 'backups'
     ) {
       setLoadingArticles(true);
-      void loadInitialArticles().finally(() => {
-        if (!cancelled) setLoadingArticles(false);
-      });
+      void loadInitialArticles()
+        .then(() => syncArticleViewCountsFromServer())
+        .finally(() => {
+          if (!cancelled) setLoadingArticles(false);
+        });
     }
 
     if (
@@ -896,6 +899,7 @@ export function AdminPanel({ articles, onNavigateHome }: AdminPanelProps) {
     setLoadingArticles(true);
     try {
       await loadInitialArticles({ forceRefresh: true });
+      await syncArticleViewCountsFromServer();
     } finally {
       setLoadingArticles(false);
     }

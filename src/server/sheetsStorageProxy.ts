@@ -128,13 +128,30 @@ interface LeadStoryOverride {
   updatedBy?: string;
 }
 
+export interface ArticleViewRecordMeta {
+  title?: string;
+  category?: string;
+  location?: string;
+  publishedDate?: string;
+  baselineViews?: number;
+  cachedSheetsViewsBefore?: number;
+}
+
+export type ArticleViewRecorder = (
+  articleId: string,
+  meta: ArticleViewRecordMeta
+) => { views: number; lastViewedAt: string };
+
+export type ArticleViewOverlayProvider = (articleId: string, sheetsViewsWithPending: number) => number;
+
 function resolveCacheDirs(baseDataDir: string) {
   const driveCacheDir = path.join(baseDataDir, 'drive-image-cache');
   const snapshotPath = path.join(baseDataDir, 'sheets-cache-snapshot.json');
   const leadOverridesPath = path.join(baseDataDir, 'lead-story-overrides.json');
+  const pendingViewsPath = path.join(baseDataDir, 'pending-views.json');
   try {
     fs.mkdirSync(driveCacheDir, { recursive: true });
-    return { driveCacheDir, snapshotPath, leadOverridesPath };
+    return { driveCacheDir, snapshotPath, leadOverridesPath, pendingViewsPath };
   } catch {
     const tmpBase = path.join(os.tmpdir(), 'coffeenadu-sheets-cache');
     const tmpDrive = path.join(tmpBase, 'drive-image-cache');
@@ -143,6 +160,7 @@ function resolveCacheDirs(baseDataDir: string) {
       driveCacheDir: tmpDrive,
       snapshotPath: path.join(tmpBase, 'sheets-cache-snapshot.json'),
       leadOverridesPath: path.join(tmpBase, 'lead-story-overrides.json'),
+      pendingViewsPath: path.join(tmpBase, 'pending-views.json'),
     };
   }
 }
@@ -314,10 +332,13 @@ export class SheetsStorageManager {
   private readonly driveCacheDir: string;
   private readonly snapshotPath: string;
   private readonly leadOverridesPath: string;
+  private readonly pendingViewsPath: string;
   private flushTimer: NodeJS.Timeout | null = null;
   private isFlushingViews = false;
   private externalAdminVerifier: ExternalAdminVerifier | null = null;
   private eventHook: StorageEventHook | null = null;
+  private articleViewRecorder: ArticleViewRecorder | null = null;
+  private articleViewOverlayProvider: ArticleViewOverlayProvider | null = null;
 
   private telemetry: QuotaTelemetry = {
     dayKey: getTodayKey(),
@@ -338,8 +359,10 @@ export class SheetsStorageManager {
     this.driveCacheDir = dirs.driveCacheDir;
     this.snapshotPath = dirs.snapshotPath;
     this.leadOverridesPath = dirs.leadOverridesPath;
+    this.pendingViewsPath = dirs.pendingViewsPath;
     this.hydrateSnapshotFromDisk();
     this.hydrateLeadOverridesFromDisk();
+    this.hydratePendingViewsFromDisk();
     this.startViewBatchFlusher();
   }
 
@@ -431,6 +454,105 @@ export class SheetsStorageManager {
     } catch {
       // Non-fatal
     }
+  }
+
+  private hydratePendingViewsFromDisk(): void {
+    try {
+      if (!fs.existsSync(this.pendingViewsPath)) return;
+      const raw = JSON.parse(fs.readFileSync(this.pendingViewsPath, 'utf8')) as {
+        news?: Record<string, number>;
+        events?: Record<string, number>;
+      };
+      if (raw?.news && typeof raw.news === 'object') {
+        for (const [id, count] of Object.entries(raw.news)) {
+          const n = Number(count);
+          if (/^[a-zA-Z0-9_-]{1,128}$/.test(id) && Number.isFinite(n) && n > 0) {
+            this.pendingNewsViews.set(id, Math.floor(n));
+          }
+        }
+      }
+      if (raw?.events && typeof raw.events === 'object') {
+        for (const [id, count] of Object.entries(raw.events)) {
+          const n = Number(count);
+          if (/^[a-zA-Z0-9_-]{1,128}$/.test(id) && Number.isFinite(n) && n > 0) {
+            this.pendingEventViews.set(id, Math.floor(n));
+          }
+        }
+      }
+    } catch {
+      // Non-fatal
+    }
+  }
+
+  private persistPendingViewsToDisk(): void {
+    try {
+      const payload = {
+        news: Object.fromEntries(this.pendingNewsViews.entries()),
+        events: Object.fromEntries(this.pendingEventViews.entries()),
+      };
+      const tmp = `${this.pendingViewsPath}.tmp`;
+      fs.writeFileSync(tmp, JSON.stringify(payload), 'utf8');
+      fs.renameSync(tmp, this.pendingViewsPath);
+    } catch {
+      // Non-fatal
+    }
+  }
+
+  public setArticleViewHooks(
+    recorder: ArticleViewRecorder,
+    overlayProvider: ArticleViewOverlayProvider
+  ): void {
+    this.articleViewRecorder = recorder;
+    this.articleViewOverlayProvider = overlayProvider;
+  }
+
+  public findCachedNewsItem(newsId: string): SheetsNewsItem | null {
+    const cleanId = newsId.trim();
+    if (!cleanId) return null;
+    const singleEntry = this.cache.get(`news:id:${cleanId}`)?.data as { item?: SheetsNewsItem } | undefined;
+    if (singleEntry?.item && singleEntry.item.newsId === cleanId) {
+      return singleEntry.item;
+    }
+    for (const [key, entry] of this.cache.entries()) {
+      if (!key.startsWith('news:list:')) continue;
+      const listVal = entry.data as { items?: SheetsNewsItem[] } | undefined;
+      const found = Array.isArray(listVal?.items)
+        ? listVal.items.find((it) => it && it.newsId === cleanId)
+        : undefined;
+      if (found) return found;
+    }
+    return null;
+  }
+
+  public getCachedArticleViewsMap(): Record<string, number> {
+    const out: Record<string, number> = {};
+    for (const [key, entry] of this.cache.entries()) {
+      if (!key.startsWith('news:')) continue;
+      const val = entry.data as { items?: SheetsNewsItem[]; item?: SheetsNewsItem } | undefined;
+      if (Array.isArray(val?.items)) {
+        for (const it of val.items) {
+          if (it?.newsId) {
+            const total = (Number(it.views) || 0) + (this.pendingNewsViews.get(it.newsId) || 0);
+            out[it.newsId] = Math.max(out[it.newsId] || 0, total);
+          }
+        }
+      }
+      if (val?.item?.newsId) {
+        const total = (Number(val.item.views) || 0) + (this.pendingNewsViews.get(val.item.newsId) || 0);
+        out[val.item.newsId] = Math.max(out[val.item.newsId] || 0, total);
+      }
+    }
+    for (const [id, pending] of this.pendingNewsViews.entries()) {
+      out[id] = Math.max(out[id] || 0, pending);
+    }
+    return out;
+  }
+
+  private resolveEffectiveNewsViews(newsId: string, baseSheetViews: unknown): number {
+    const withPending = (Number(baseSheetViews) || 0) + (this.pendingNewsViews.get(newsId) || 0);
+    return this.articleViewOverlayProvider
+      ? this.articleViewOverlayProvider(newsId, withPending)
+      : withPending;
   }
 
   private setLeadOverride(
@@ -634,25 +756,61 @@ export class SheetsStorageManager {
     }
   }
 
-  public recordView(entityType: 'article' | 'event', id: string, _visitorKey?: string): void {
+  public recordView(
+    entityType: 'article' | 'event',
+    id: string,
+    _visitorKey?: string,
+    meta?: Omit<ArticleViewRecordMeta, 'cachedSheetsViewsBefore'>
+  ): { ok: boolean; views: number; lastViewedAt: string } {
     const cleanId = id.trim();
-    if (!/^[a-zA-Z0-9_-]{1,128}$/.test(cleanId)) return;
+    const nowIso = new Date().toISOString();
+    if (!/^[a-zA-Z0-9_-]{1,128}$/.test(cleanId)) {
+      return { ok: false, views: 0, lastViewedAt: nowIso };
+    }
 
     this.rollDayIfNeeded();
 
-    const targetMap = entityType === 'article' ? this.pendingNewsViews : this.pendingEventViews;
-    targetMap.set(cleanId, (targetMap.get(cleanId) || 0) + 1);
-    this.telemetry.totalViewsAggregatedToday += 1;
-    this.emitEvent({
-      type: 'view_recorded',
-      entityId: cleanId,
-      details: `${entityType}:${cleanId}`,
-    });
+    const cachedItem = entityType === 'article' ? this.findCachedNewsItem(cleanId) : null;
+    const cachedBefore =
+      entityType === 'article'
+        ? (Number(cachedItem?.views) || 0) + (this.pendingNewsViews.get(cleanId) || 0)
+        : 0;
 
-    const totalPending = this.getPendingViewsCount();
-    if (totalPending >= VIEW_FLUSH_BATCH_THRESHOLD) {
+    if (entityType === 'event' || this.isConfigured()) {
+      const targetMap = entityType === 'article' ? this.pendingNewsViews : this.pendingEventViews;
+      targetMap.set(cleanId, (targetMap.get(cleanId) || 0) + 1);
+      this.persistPendingViewsToDisk();
+    }
+
+    this.telemetry.totalViewsAggregatedToday += 1;
+
+    let confirmedViews = cachedBefore + 1;
+    let lastViewedAt = nowIso;
+
+    if (entityType === 'article' && this.articleViewRecorder) {
+      const recorded = this.articleViewRecorder(cleanId, {
+        title: meta?.title || cachedItem?.title,
+        category: meta?.category || cachedItem?.category,
+        location: meta?.location || cachedItem?.location,
+        publishedDate: meta?.publishedDate || cachedItem?.publishedDate,
+        baselineViews: meta?.baselineViews,
+        cachedSheetsViewsBefore: cachedBefore,
+      });
+      confirmedViews = recorded.views;
+      lastViewedAt = recorded.lastViewedAt;
+    } else {
+      this.emitEvent({
+        type: 'view_recorded',
+        entityId: cleanId,
+        details: `${entityType}:${cleanId}`,
+      });
+    }
+
+    if (this.isConfigured() && this.getPendingViewsCount() >= VIEW_FLUSH_BATCH_THRESHOLD) {
       void this.flushPendingViews();
     }
+
+    return { ok: true, views: confirmedViews, lastViewedAt };
   }
 
   public getPendingViewsCount(): number {
@@ -678,6 +836,7 @@ export class SheetsStorageManager {
     // Clear pending counts optimistically; restore on failure
     this.pendingNewsViews.clear();
     this.pendingEventViews.clear();
+    this.persistPendingViewsToDisk();
 
     try {
       await this.callAppsScriptPost('batchUpdateViews', {
@@ -714,6 +873,7 @@ export class SheetsStorageManager {
           }
         }
       }
+      this.persistSnapshotToDisk();
       this.telemetry.batchedViewFlushesToday += 1;
       this.telemetry.lastFlushAt = new Date().toISOString();
       return { flushed: true, count: newsKeys.length + eventKeys.length };
@@ -725,6 +885,7 @@ export class SheetsStorageManager {
       for (const [k, v] of Object.entries(eventSnapshot)) {
         this.pendingEventViews.set(k, (this.pendingEventViews.get(k) || 0) + v);
       }
+      this.persistPendingViewsToDisk();
       return { flushed: false, count: 0 };
     } finally {
       this.isFlushingViews = false;
@@ -1004,7 +1165,7 @@ export class SheetsStorageManager {
     const nowMs = Date.now();
     return (data?.items || []).map((item) => ({
       ...this.sanitizeWithLeadOverride(item, nowMs),
-      views: (Number(item.views) || 0) + (this.pendingNewsViews.get(item.newsId) || 0),
+      views: this.resolveEffectiveNewsViews(item.newsId, item.views),
     }));
   }
 
@@ -1210,7 +1371,7 @@ export class SheetsStorageManager {
         const nowMs = Date.now();
         let itemsWithLiveViews = (data.items || []).map((item) => ({
           ...this.sanitizeWithLeadOverride(item, nowMs),
-          views: (Number(item.views) || 0) + (this.pendingNewsViews.get(item.newsId) || 0),
+          views: this.resolveEffectiveNewsViews(item.newsId, item.views),
         }));
 
         if (featured) {
@@ -1265,7 +1426,7 @@ export class SheetsStorageManager {
           ok: true,
           item: {
             ...this.sanitizeWithLeadOverride(data.item, Date.now()),
-            views: (Number(data.item.views) || 0) + (this.pendingNewsViews.get(newsId) || 0),
+            views: this.resolveEffectiveNewsViews(newsId, data.item.views),
           },
           fromCache,
         });
@@ -1341,17 +1502,40 @@ export class SheetsStorageManager {
       }
     });
 
-    // 5. Public aggregated view counter (never writes to Google Sheets on every page view)
-    app.post('/api/storage/views', (req, res) => {
+    // 5. Public view counter (persists every genuine view on server & aggregates Sheets batch flushes)
+    const handleViewRecord = (req: Request, res: Response, forcedId?: string) => {
       const entityType = req.body?.type === 'event' ? 'event' : 'article';
-      const id = typeof req.body?.id === 'string' ? req.body.id.trim() : '';
-      if (!id) {
-        res.status(400).json({ ok: false, error: 'Missing id' });
+      const rawId = forcedId ?? (typeof req.body?.id === 'string' ? req.body.id : '');
+      const id = rawId.trim();
+      if (!/^[a-zA-Z0-9_-]{1,128}$/.test(id)) {
+        res.status(400).json({ ok: false, error: 'Invalid or missing id' });
         return;
       }
-      const visitorKey = String(req.headers['x-forwarded-for'] || req.ip || 'anon').split(',')[0].trim();
-      this.recordView(entityType, id, visitorKey);
-      res.status(202).json({ ok: true, aggregated: true });
+      const baselineRaw = Number(req.body?.baselineViews);
+      const result = this.recordView(entityType, id, undefined, {
+        title: typeof req.body?.title === 'string' ? req.body.title : undefined,
+        category: typeof req.body?.category === 'string' ? req.body.category : undefined,
+        location: typeof req.body?.location === 'string' ? req.body.location : undefined,
+        publishedDate: typeof req.body?.publishedDate === 'string' ? req.body.publishedDate : undefined,
+        baselineViews: Number.isFinite(baselineRaw) && baselineRaw >= 0 ? Math.floor(baselineRaw) : undefined,
+      });
+      res.setHeader('Cache-Control', 'no-store, must-revalidate');
+      res.status(200).json({
+        ok: result.ok,
+        aggregated: true,
+        type: entityType,
+        id,
+        views: result.views,
+        lastViewedAt: result.lastViewedAt,
+      });
+    };
+
+    app.post('/api/storage/views', (req, res) => {
+      handleViewRecord(req, res);
+    });
+
+    app.post('/api/articles/:id/view', (req, res) => {
+      handleViewRecord(req, res, String(req.params.id || ''));
     });
 
     // 6. Disk-Cached Google Drive Image Proxy (100% Google Drive — no external image CDN)

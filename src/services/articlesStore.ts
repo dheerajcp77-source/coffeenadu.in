@@ -345,6 +345,7 @@ export async function loadInitialArticles(options?: {
         lastArticleCursorTimestamp = minTs < Number.MAX_SAFE_INTEGER ? minTs : null;
       }
       emitArticlesState();
+      void syncArticleViewCountsFromServer();
       return {
         articles: cleaned,
         hasMore: sharedHasMoreArticles,
@@ -1000,58 +1001,144 @@ export async function deleteArticleInFirestore(_uid: string, articleId: string):
   updateSharedArticlesCache(remaining, sharedHasMoreArticles);
 }
 
-const recentArticleViewTimestamps = new Map<string, number>();
-// Tiny guard solely to avoid React StrictMode double-effect on the exact same mount;
-// every genuine link open, website article click, or repeat visit counts +1.
-const STRICT_MODE_GUARD_MS = 500;
-
-export async function recordArticleView(articleId: string): Promise<void> {
+export function applyConfirmedArticleViewCount(
+  articleId: string,
+  confirmedViews: number
+): void {
   const cleanId = articleId.trim();
-  if (!/^[a-zA-Z0-9_-]{1,128}$/.test(cleanId)) return;
+  if (!cleanId || !Number.isFinite(confirmedViews) || confirmedViews < 0) return;
 
-  const now = Date.now();
-  const lastRecorded = recentArticleViewTimestamps.get(cleanId) ?? 0;
-  if (now - lastRecorded < STRICT_MODE_GUARD_MS) {
-    return;
-  }
-  recentArticleViewTimestamps.set(cleanId, now);
-
-  // Optimistically increment local cached count so Admin & UI reflect repeat views immediately
-  let updatedItem: NewsArticle | null = null;
+  let changedInFeed = false;
   if (sharedArticles.some((item) => item.id === cleanId)) {
     sharedArticles = sharedArticles.map((item) => {
       if (item.id !== cleanId) return item;
-      updatedItem = { ...item, viewCount: (item.viewCount ?? 0) + 1 };
-      return updatedItem;
+      const nextViews = Math.max(item.viewCount ?? 0, confirmedViews);
+      if (nextViews === (item.viewCount ?? 0)) return item;
+      changedInFeed = true;
+      return { ...item, viewCount: nextViews };
     });
-    updateSharedArticlesCache(sharedArticles, sharedHasMoreArticles);
+    if (changedInFeed) {
+      updateSharedArticlesCache(sharedArticles, sharedHasMoreArticles);
+    }
   }
+
   const itemCacheKey = `articles:item:${cleanId}`;
   const cachedSingle = getCachedValue<NewsArticle>(itemCacheKey, { allowStale: true });
-  if (updatedItem) {
-    setCachedValue(itemCacheKey, updatedItem, SINGLE_ARTICLE_CACHE_TTL_MS);
-  } else if (cachedSingle?.data) {
-    setCachedValue(
-      itemCacheKey,
-      { ...cachedSingle.data, viewCount: (cachedSingle.data.viewCount ?? 0) + 1 },
-      SINGLE_ARTICLE_CACHE_TTL_MS
-    );
+  if (cachedSingle?.data) {
+    const nextViews = Math.max(cachedSingle.data.viewCount ?? 0, confirmedViews);
+    if (nextViews !== (cachedSingle.data.viewCount ?? 0)) {
+      setCachedValue(
+        itemCacheKey,
+        { ...cachedSingle.data, viewCount: nextViews },
+        SINGLE_ARTICLE_CACHE_TTL_MS
+      );
+    }
   }
+}
 
-  if (await isSheetsStorageActive()) {
-    await recordAggregatedViewOnServer('article', cleanId);
-    return;
-  }
-
-  if (isQuotaCooldownActive()) return;
-
+export async function syncArticleViewCountsFromServer(): Promise<Record<string, number> | null> {
   try {
-    await updateDoc(doc(db, 'articles', cleanId), {
-      viewCount: increment(1),
-    });
+    const resp = await fetch('/api/articles/views', { cache: 'no-store' });
+    if (!resp.ok) return null;
+    const json = (await resp.json().catch(() => null)) as {
+      ok?: boolean;
+      viewsById?: Record<string, number>;
+    } | null;
+    if (!json?.ok || !json.viewsById || typeof json.viewsById !== 'object') {
+      return null;
+    }
+
+    const viewsById = json.viewsById;
+    let changed = false;
+    if (sharedArticles.length > 0) {
+      sharedArticles = sharedArticles.map((item) => {
+        const serverViews = viewsById[item.id];
+        if (typeof serverViews === 'number' && Number.isFinite(serverViews)) {
+          const nextViews = Math.max(item.viewCount ?? 0, serverViews);
+          if (nextViews !== (item.viewCount ?? 0)) {
+            changed = true;
+            return { ...item, viewCount: nextViews };
+          }
+        }
+        return item;
+      });
+      if (changed) {
+        updateSharedArticlesCache(sharedArticles, sharedHasMoreArticles);
+      }
+    }
+
+    for (const [id, serverViews] of Object.entries(viewsById)) {
+      if (typeof serverViews !== 'number' || !Number.isFinite(serverViews)) continue;
+      const itemCacheKey = `articles:item:${id}`;
+      const cachedSingle = getCachedValue<NewsArticle>(itemCacheKey, { allowStale: true });
+      if (cachedSingle?.data) {
+        const nextViews = Math.max(cachedSingle.data.viewCount ?? 0, serverViews);
+        if (nextViews !== (cachedSingle.data.viewCount ?? 0)) {
+          setCachedValue(
+            itemCacheKey,
+            { ...cachedSingle.data, viewCount: nextViews },
+            SINGLE_ARTICLE_CACHE_TTL_MS
+          );
+        }
+      }
+    }
+
+    return viewsById;
   } catch {
-    // Gracefully ignore if document is only local seed or user is offline
+    return null;
   }
+}
+
+export async function recordArticleView(
+  articleOrId: string | NewsArticle
+): Promise<number | null> {
+  const cleanId = (typeof articleOrId === 'string' ? articleOrId : articleOrId.id).trim();
+  if (!/^[a-zA-Z0-9_-]{1,128}$/.test(cleanId)) return null;
+
+  const providedArticle = typeof articleOrId === 'string' ? null : articleOrId;
+  const cachedSingle = getCachedValue<NewsArticle>(`articles:item:${cleanId}`, { allowStale: true });
+  const fromShared = sharedArticles.find((a) => a.id === cleanId) || cachedSingle?.data || null;
+  const refArticle = providedArticle || fromShared;
+  const baselineViews = Math.max(
+    0,
+    Number(providedArticle?.viewCount ?? 0),
+    Number(fromShared?.viewCount ?? 0)
+  );
+
+  // Always record every genuine view on the backend API (no referrer, session, or IP limits)
+  const serverResult = await recordAggregatedViewOnServer('article', cleanId, {
+    title: refArticle ? stripRichTextToPlainText(refArticle.titleKannada) : undefined,
+    category: refArticle?.category,
+    location: refArticle?.location,
+    publishedDate: refArticle?.publishedDate,
+    baselineViews,
+  });
+
+  let firestoreConfirmed = false;
+  const sheetsActive = await isSheetsStorageActive();
+  if (!sheetsActive && !isQuotaCooldownActive()) {
+    try {
+      await updateDoc(doc(db, 'articles', cleanId), {
+        viewCount: increment(1),
+      });
+      firestoreConfirmed = true;
+    } catch {
+      // Non-fatal if article exists only in local store/seed or Firestore quota/offline
+    }
+  }
+
+  if (serverResult?.ok) {
+    applyConfirmedArticleViewCount(cleanId, serverResult.views);
+    return serverResult.views;
+  }
+
+  if (firestoreConfirmed) {
+    const fallbackViews = baselineViews + 1;
+    applyConfirmedArticleViewCount(cleanId, fallbackViews);
+    return fallbackViews;
+  }
+
+  return null;
 }
 
 export async function listAdminRecordsFromFirestore(

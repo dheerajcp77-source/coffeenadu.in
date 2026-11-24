@@ -1,5 +1,5 @@
-import { useEffect } from 'react';
-import { ArrowLeft } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import { ArrowLeft, Eye } from 'lucide-react';
 import { getKannadaLocationLabel, resolveArticleImage } from '../constants/newsData';
 import { recordArticleView } from '../services/articlesStore';
 import type { AdPlatformSettings, Advertisement } from '../types/ads';
@@ -31,10 +31,40 @@ export function ArticleDetailView({
   onSelectAd,
 }: ArticleDetailViewProps) {
   const resolvedImage = resolveArticleImage(article);
+  const [displayViewCount, setDisplayViewCount] = useState<number>(article.viewCount ?? 0);
+  const isMountedRef = useRef(true);
+  const recordedMountArticleIdRef = useRef<string | null>(null);
 
   useEffect(() => {
-    void recordArticleView(article.id);
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    setDisplayViewCount((prev) => Math.max(prev, article.viewCount ?? 0));
+  }, [article.viewCount]);
+
+  useEffect(() => {
+    setDisplayViewCount(article.viewCount ?? 0);
   }, [article.id]);
+
+  useEffect(() => {
+    if (recordedMountArticleIdRef.current === article.id) return;
+    recordedMountArticleIdRef.current = article.id;
+
+    const targetId = article.id;
+    void recordArticleView(article).then((confirmedViews) => {
+      if (
+        isMountedRef.current &&
+        recordedMountArticleIdRef.current === targetId &&
+        typeof confirmedViews === 'number'
+      ) {
+        setDisplayViewCount(confirmedViews);
+      }
+    });
+  }, [article]);
 
   return (
     <main className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-8 sm:py-10 select-none">
@@ -72,6 +102,14 @@ export function ArticleDetailView({
             <span className="tabular-nums">{article.publishedTime}</span>
             <span aria-hidden="true">·</span>
             <span className="tabular-nums">{article.readTimeMinutes} min read</span>
+            <span aria-hidden="true">·</span>
+            <span
+              className="inline-flex items-center gap-1 tabular-nums text-stone-600"
+              data-testid="article-view-count"
+            >
+              <Eye className="w-3.5 h-3.5" aria-hidden="true" />
+              <span>{displayViewCount.toLocaleString('en-IN')} views</span>
+            </span>
           </div>
 
           <h1

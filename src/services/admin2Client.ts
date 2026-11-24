@@ -13,6 +13,7 @@ import type {
   Admin2MediaAsset,
   Admin2Notification,
   Admin2NotificationPreferences,
+  Admin2RecentViewedArticle,
   Admin2SessionInfo,
   Admin2SessionUser,
   Admin2WebsiteSettings,
@@ -337,6 +338,7 @@ export interface Admin2DashboardResponse {
     publishedDate: string;
     views: number;
   }>;
+  recentlyViewedArticles: Admin2RecentViewedArticle[];
   recentActivity: Admin2AuditLog[];
   recentNotifications: Admin2Notification[];
   unreadNotifications: number;
