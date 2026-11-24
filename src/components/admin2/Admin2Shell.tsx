@@ -1,6 +1,7 @@
 import { useState, type ComponentType, type ReactNode } from 'react';
 import {
   Activity,
+  BadgePlus,
   BarChart3,
   Bell,
   CalendarDays,
@@ -15,6 +16,7 @@ import {
   Inbox,
   LayoutDashboard,
   LogOut,
+  Megaphone,
   Menu,
   Moon,
   Newspaper,
@@ -43,6 +45,8 @@ export const ADMIN2_NAV_ITEMS: AdminNavItem[] = [
   { id: 'dashboard', label: 'Dashboard Overview', group: 'Editorial', icon: LayoutDashboard, requiredPermission: 'dashboard.view' },
   { id: 'news', label: 'News Management', group: 'Editorial', icon: Newspaper, requiredPermission: 'dashboard.view' },
   { id: 'add-article', label: 'Add New Article', group: 'Editorial', icon: FilePlus2, requiredPermission: 'news.create' },
+  { id: 'ads', label: 'Local Advertisements', group: 'Editorial', icon: Megaphone, requiredPermission: 'ads.manage' },
+  { id: 'add-ad', label: 'Add Advertisement', group: 'Editorial', icon: BadgePlus, requiredPermission: 'ads.manage' },
   { id: 'calendar', label: 'Publishing Calendar', group: 'Editorial', icon: CalendarDays, requiredPermission: 'dashboard.view' },
   { id: 'ai-studio', label: 'AI News Studio', group: 'Editorial', icon: Sparkles, requiredPermission: 'ai.use' },
 
@@ -82,6 +86,7 @@ interface Admin2ShellProps {
   onExitApp?: () => void;
   showExitApp?: boolean;
   onQuickAddArticle: () => void;
+  onQuickAddAd: () => void;
   children: ReactNode;
 }
 
@@ -98,6 +103,7 @@ export function Admin2Shell({
   onExitApp,
   showExitApp = false,
   onQuickAddArticle,
+  onQuickAddAd,
   children,
 }: Admin2ShellProps) {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -338,10 +344,22 @@ export function Admin2Shell({
                 <button
                   type="button"
                   onClick={onQuickAddArticle}
-                  className="inline-flex items-center gap-1.5 rounded-lg bg-[#0B192C] px-2.5 py-1.5 text-xs font-semibold text-white hover:bg-[#13294B] dark:bg-blue-600 dark:hover:bg-blue-500 transition-colors sm:px-3"
+                  className="inline-flex items-center gap-1.5 rounded-lg bg-[#0B192C] px-2.5 py-1.5 text-xs font-semibold text-white hover:bg-[#13294B] dark:bg-blue-600 dark:hover:bg-blue-500 transition-colors sm:px-3 whitespace-nowrap cursor-pointer"
                 >
                   <FilePlus2 className="h-3.5 w-3.5" />
-                  <span className="hidden sm:inline">New Article</span>
+                  <span className="hidden sm:inline">Publish Article</span>
+                </button>
+              )}
+
+              {hasPermission('ads.manage') && (
+                <button
+                  type="button"
+                  onClick={onQuickAddAd}
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-amber-400/70 bg-amber-50 px-2.5 py-1.5 text-xs font-semibold text-[#0B192C] hover:bg-amber-100 dark:border-amber-500/50 dark:bg-amber-500/15 dark:text-amber-300 dark:hover:bg-amber-500/25 transition-colors sm:px-3 whitespace-nowrap cursor-pointer"
+                  title="Add Advertisement"
+                >
+                  <BadgePlus className="h-3.5 w-3.5 shrink-0" />
+                  <span className="hidden sm:inline">Add Advertisement</span>
                 </button>
               )}
 

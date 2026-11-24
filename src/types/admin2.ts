@@ -2,6 +2,8 @@ export type AdminSectionId =
   | 'dashboard'
   | 'news'
   | 'add-article'
+  | 'ads'
+  | 'add-ad'
   | 'calendar'
   | 'ai-studio'
   | 'media'
@@ -32,6 +34,7 @@ export type AdminPermission =
   | 'news.publish'
   | 'news.delete'
   | 'news.archive'
+  | 'ads.manage'
   | 'ai.use'
   | 'media.manage'
   | 'messaging.manage'
@@ -55,6 +58,7 @@ export const ALL_ADMIN_PERMISSIONS: Array<{
   { key: 'news.publish', label: 'Publish & Schedule Live News', group: 'Editorial' },
   { key: 'news.archive', label: 'Unpublish & Archive News', group: 'Editorial' },
   { key: 'news.delete', label: 'Delete News Permanently', group: 'Editorial' },
+  { key: 'ads.manage', label: 'Manage Local Advertisements', group: 'Content & Growth' },
   { key: 'ai.use', label: 'Use AI News Studio (Drafts Only)', group: 'Editorial' },
   { key: 'media.manage', label: 'Upload & Organize Media Centre', group: 'Content & Growth' },
   { key: 'messaging.manage', label: 'Reply to Inbox & Notifications', group: 'Content & Growth' },
@@ -77,6 +81,7 @@ export const ROLE_DEFAULT_PERMISSIONS: Record<AdminRole, AdminPermission[]> = {
     'news.publish',
     'news.archive',
     'news.delete',
+    'ads.manage',
     'ai.use',
     'media.manage',
     'messaging.manage',
@@ -94,6 +99,7 @@ export const ROLE_DEFAULT_PERMISSIONS: Record<AdminRole, AdminPermission[]> = {
     'news.edit',
     'news.publish',
     'news.archive',
+    'ads.manage',
     'ai.use',
     'media.manage',
     'messaging.manage',

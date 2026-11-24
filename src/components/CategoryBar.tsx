@@ -7,6 +7,7 @@ import {
   HeartPulse,
   Landmark,
   MapPin,
+  Megaphone,
   Mountain,
   Newspaper,
   Search,
@@ -24,7 +25,9 @@ import type { FilterCategory, NewsCategory } from '../types/news';
 
 interface CategoryBarProps {
   activeCategory: FilterCategory;
+  isAdsView?: boolean;
   onSelectCategory: (category: FilterCategory) => void;
+  onJumpToAds?: () => void;
   selectedLocation: string;
   onSelectLocation: (location: string) => void;
   searchQuery: string;
@@ -81,7 +84,9 @@ export function getCategoryShortIcon(category: NewsCategory) {
 
 export function CategoryBar({
   activeCategory,
+  isAdsView = false,
   onSelectCategory,
+  onJumpToAds,
   selectedLocation,
   onSelectLocation,
   searchQuery,
@@ -190,7 +195,7 @@ export function CategoryBar({
           className="flex items-center gap-2 overflow-x-auto pb-2"
         >
           {ALL_TABS.map((category) => {
-            const isActive = activeCategory === category;
+            const isActive = !isAdsView && activeCategory === category;
             return (
               <button
                 key={category}
@@ -209,6 +214,22 @@ export function CategoryBar({
               </button>
             );
           })}
+          {onJumpToAds && (
+            <button
+              role="tab"
+              type="button"
+              aria-selected={isAdsView}
+              onClick={onJumpToAds}
+              className={`inline-flex items-center gap-2 px-4 py-2.5 text-xs sm:text-sm font-semibold rounded-xl border transition-colors whitespace-nowrap shrink-0 cursor-pointer min-h-[42px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0F274A] ${
+                isAdsView
+                  ? 'bg-[#0F274A] text-white border-[#0F274A] shadow-xs'
+                  : 'bg-amber-50/80 text-[#0F274A] border-amber-300/80 hover:bg-amber-100/80'
+              }`}
+            >
+              <Megaphone className="w-4 h-4 shrink-0 text-amber-700" aria-hidden="true" />
+              <span>Local Ads</span>
+            </button>
+          )}
         </div>
       </section>
     </div>

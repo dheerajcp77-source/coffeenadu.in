@@ -7,10 +7,12 @@ interface HeaderProps {
   isBusTimingsView?: boolean;
   isEventsView?: boolean;
   isChatView?: boolean;
+  isAdsView?: boolean;
   onSelectCategory: (category: FilterCategory) => void;
   onResetHome: () => void;
   onJumpToBusTimings: () => void;
   onJumpToEvents: () => void;
+  onJumpToAds: () => void;
 }
 
 const HEADER_NAV_ITEMS: { label: string; category: FilterCategory }[] = [
@@ -26,12 +28,14 @@ export function Header({
   isBusTimingsView = false,
   isEventsView = false,
   isChatView = false,
+  isAdsView = false,
   onSelectCategory,
   onResetHome,
   onJumpToBusTimings,
   onJumpToEvents,
+  onJumpToAds,
 }: HeaderProps) {
-  const isFeedView = !isBusTimingsView && !isEventsView && !isChatView;
+  const isFeedView = !isBusTimingsView && !isEventsView && !isChatView && !isAdsView;
 
   return (
     <header className="sticky top-0 z-40 bg-white/95 backdrop-blur-sm border-b border-slate-200">
@@ -73,6 +77,18 @@ export function Header({
               </button>
             );
           })}
+          <button
+            type="button"
+            onClick={onJumpToAds}
+            aria-current={isAdsView ? 'page' : undefined}
+            className={`text-sm font-medium whitespace-nowrap shrink-0 py-1 border-b-2 transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0F274A] rounded-xs ${
+              isAdsView
+                ? 'border-amber-500 text-[#0F274A] font-semibold'
+                : 'border-transparent text-slate-600 hover:text-slate-950 hover:border-amber-400'
+            }`}
+          >
+            Local Ads
+          </button>
         </nav>
 
         {/* Zone 3: Bus Timings button followed by Programs & Events button */}

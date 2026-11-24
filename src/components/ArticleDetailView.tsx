@@ -2,8 +2,10 @@ import { useEffect } from 'react';
 import { ArrowLeft } from 'lucide-react';
 import { getKannadaLocationLabel, resolveArticleImage } from '../constants/newsData';
 import { recordArticleView } from '../services/articlesStore';
+import type { Advertisement } from '../types/ads';
 import type { NewsArticle } from '../types/news';
 import { sanitizeRichTextHtml, stripRichTextToPlainText } from '../utils/richText';
+import { ArticleEndAd } from './ArticleEndAd';
 import { ArticleShareBar } from './ArticleShareBar';
 import { NewsImage } from './NewsImage';
 import { WhatsAppGroupBanner } from './WhatsAppGroupBanner';
@@ -11,15 +13,19 @@ import { WhatsAppGroupBanner } from './WhatsAppGroupBanner';
 interface ArticleDetailViewProps {
   article: NewsArticle;
   relatedArticles: NewsArticle[];
+  activeAds?: Advertisement[];
   onBack: () => void;
   onSelectArticle: (article: NewsArticle) => void;
+  onSelectAd?: (ad: Advertisement) => void;
 }
 
 export function ArticleDetailView({
   article,
   relatedArticles,
+  activeAds = [],
   onBack,
   onSelectArticle,
+  onSelectAd,
 }: ArticleDetailViewProps) {
   const resolvedImage = resolveArticleImage(article);
 
@@ -174,6 +180,15 @@ export function ArticleDetailView({
           </div>
         </div>
       </article>
+
+      {/* Local Advertisement after Article Content and before Related Stories */}
+      {onSelectAd && activeAds.length > 0 && (
+        <ArticleEndAd
+          ads={activeAds}
+          articleId={article.id}
+          onOpenAd={onSelectAd}
+        />
+      )}
 
       {/* Related Stories */}
       {relatedArticles.length > 0 && (

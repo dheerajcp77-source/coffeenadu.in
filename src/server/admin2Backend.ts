@@ -27,6 +27,21 @@ import {
   type ArticleCmsOverlay,
   type ArticleSeoMeta,
 } from '../types/admin2.ts';
+import {
+  AD_CATEGORIES,
+  type AdExtraImage,
+  type AdStatus,
+  type Advertisement,
+} from '../types/ads.ts';
+import {
+  computeAdStats,
+  formatAdNumber,
+  getTodayIstYmd,
+  isAdCurrentlyActive,
+  isValidYmd,
+  sanitizeExternalWebsiteUrl,
+  sanitizePhoneDigits,
+} from '../utils/adHelpers.ts';
 import type { SheetsNewsItem, SheetsStorageManager, VerifiedAdminUser } from './sheetsStorageProxy.ts';
 
 const PROTECTED_SUPER_ADMINS = [
@@ -135,6 +150,8 @@ interface Admin2PersistedState {
   automations: Admin2AutomationItem[];
   settings: Admin2WebsiteSettings;
   trafficByDay: Record<string, DailyTrafficBucket>;
+  ads: Advertisement[];
+  adSequenceCounter: number;
 }
 
 export interface Admin2Request extends Request {
@@ -463,6 +480,7 @@ function createDefaultNotificationPrefs(): Admin2NotificationPreferences {
 export class Admin2Backend {
   private readonly stateFile: string;
   private readonly secretFile: string;
+  private readonly adMediaDir: string;
   private readonly hmacSecret: string;
   private readonly sheetsStorage: SheetsStorageManager;
   private state: Admin2PersistedState;
@@ -476,6 +494,12 @@ export class Admin2Backend {
     const resolvedDir = this.resolveWritableDir(baseDataDir);
     this.stateFile = path.join(resolvedDir, 'admin2-state.json');
     this.secretFile = path.join(resolvedDir, '.admin2-secret');
+    this.adMediaDir = path.join(resolvedDir, 'ads-media');
+    try {
+      fs.mkdirSync(this.adMediaDir, { recursive: true });
+    } catch {
+      // Non-fatal fallback
+    }
     this.hmacSecret = this.loadOrGenerateSecret();
     this.state = this.loadOrInitState();
 
@@ -574,6 +598,8 @@ export class Admin2Backend {
       automations: createDefaultAutomations(),
       settings: createDefaultSettings(),
       trafficByDay: {},
+      ads: [],
+      adSequenceCounter: 0,
     };
   }
 
@@ -582,6 +608,17 @@ export class Admin2Backend {
       if (fs.existsSync(this.stateFile)) {
         const raw = JSON.parse(fs.readFileSync(this.stateFile, 'utf8')) as Partial<Admin2PersistedState>;
         const defaults = this.createInitialState();
+        const loadedAds = Array.isArray(raw.ads) ? raw.ads : [];
+        const maxExistingAdSeq = loadedAds.reduce((maxSeq, ad) => {
+          const match = typeof ad?.adNumber === 'string' ? ad.adNumber.match(/^AD(\d+)$/i) : null;
+          const n = match ? Number(match[1]) : 0;
+          return Number.isFinite(n) && n > maxSeq ? n : maxSeq;
+        }, 0);
+        const rawSeq =
+          typeof raw.adSequenceCounter === 'number' && Number.isFinite(raw.adSequenceCounter)
+            ? Math.max(0, Math.floor(raw.adSequenceCounter))
+            : 0;
+
         const merged: Admin2PersistedState = {
           ...defaults,
           ...raw,
@@ -615,7 +652,19 @@ export class Admin2Backend {
               ? raw.automations
               : defaults.automations,
           trafficByDay: raw.trafficByDay && typeof raw.trafficByDay === 'object' ? raw.trafficByDay : {},
+          ads: loadedAds,
+          adSequenceCounter: Math.max(rawSeq, maxExistingAdSeq),
         };
+
+        // Ensure existing admin/editor accounts gain ads.manage cleanly
+        for (const acc of merged.accounts) {
+          if (
+            (acc.role === 'admin' || acc.role === 'editor') &&
+            !acc.permissions.includes('ads.manage')
+          ) {
+            acc.permissions.push('ads.manage');
+          }
+        }
 
         // Ensure protected super admins always exist & stay active super_admin
         for (const owner of PROTECTED_SUPER_ADMINS) {
@@ -1882,7 +1931,7 @@ export class Admin2Backend {
         news = [];
       }
 
-      const staticUrls = ['/', '/events', '/bus-timings', '/chat'].map(
+      const staticUrls = ['/', '/ads', '/events', '/bus-timings', '/chat'].map(
         (p) =>
           `  <url>\n    <loc>${baseUrl}${p}</loc>\n    <lastmod>${todayIso}</lastmod>\n    <changefreq>${p === '/' ? 'hourly' : 'daily'}</changefreq>\n    <priority>${p === '/' ? '1.0' : '0.8'}</priority>\n  </url>`
       );
@@ -3651,6 +3700,511 @@ export class Admin2Backend {
           protectedSuperAdmins: this.state.accounts.filter((a) => a.protectedSuperAdmin).length,
           auditLogEntries: this.state.auditLogs.length,
         },
+      });
+    });
+
+    // -------------------------------------------------------------------------
+    // 18. LOCAL ADVERTISEMENTS MANAGEMENT SYSTEM (PUBLIC + ADMIN RBAC)
+    // -------------------------------------------------------------------------
+
+    const sanitizeAdImageUrl = (raw: unknown): string => {
+      if (typeof raw !== 'string') return '';
+      const trimmed = raw.trim();
+      if (!trimmed) return '';
+      if (/^\/api\/(?:media\/drive|ads\/media)\/[a-zA-Z0-9._-]+(?:\?[^\s]*)?$/.test(trimmed)) {
+        return trimmed;
+      }
+      if (/^data:image\/(?:jpeg|jpg|png|webp|gif);base64,[a-zA-Z0-9+/=]+$/i.test(trimmed) && trimmed.length <= 700_000) {
+        return trimmed;
+      }
+      if (/^https:\/\//i.test(trimmed) && trimmed.length <= 500) {
+        return trimmed;
+      }
+      return '';
+    };
+
+    const sanitizeAdDescriptionServer = (raw: unknown): string => {
+      if (typeof raw !== 'string') return '';
+      return raw
+        .replace(/\u200B/g, '')
+        .replace(/<(script|style|iframe|object|embed|svg|link|meta)[^>]*>[\s\S]*?<\/\1>/gi, '')
+        .replace(/<(script|style|iframe|object|embed|svg|link|meta)[^>]*\/?>/gi, '')
+        .replace(/\son[a-z]+\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, '')
+        .replace(/javascript:/gi, '')
+        .trim()
+        .slice(0, 12_000);
+    };
+
+    const sanitizeAdditionalAdImages = (raw: unknown): AdExtraImage[] => {
+      if (!Array.isArray(raw)) return [];
+      const clean: AdExtraImage[] = [];
+      for (const item of raw.slice(0, 10)) {
+        if (!item || typeof item !== 'object') continue;
+        const entry = item as Record<string, unknown>;
+        const imageUrl = sanitizeAdImageUrl(entry.imageUrl);
+        if (!imageUrl) continue;
+        const imageThumbUrl = sanitizeAdImageUrl(entry.imageThumbUrl);
+        const imageDriveId =
+          typeof entry.imageDriveId === 'string' && /^[a-zA-Z0-9_-]{6,120}$/.test(entry.imageDriveId.trim())
+            ? entry.imageDriveId.trim()
+            : undefined;
+        const caption =
+          typeof entry.caption === 'string' ? stripMarkup(entry.caption).slice(0, 180) : undefined;
+        clean.push({
+          imageUrl,
+          ...(imageThumbUrl ? { imageThumbUrl } : {}),
+          ...(imageDriveId ? { imageDriveId } : {}),
+          ...(caption ? { caption } : {}),
+        });
+      }
+      return clean;
+    };
+
+    const sanitizeAdCategory = (raw: unknown): string => {
+      if (typeof raw === 'string') {
+        const matched = AD_CATEGORIES.find((c) => c.toLowerCase() === raw.trim().toLowerCase());
+        if (matched) return matched;
+        const custom = stripMarkup(raw).slice(0, 40);
+        if (custom) return custom;
+      }
+      return 'Business';
+    };
+
+    const sanitizeAdStatus = (raw: unknown): AdStatus => {
+      if (raw === 'active' || raw === 'inactive' || raw === 'draft') return raw;
+      return 'active';
+    };
+
+    const nextAvailableAdNumber = (): string => {
+      let nextSeq = (this.state.adSequenceCounter || 0) + 1;
+      const existingNumbers = new Set(this.state.ads.map((a) => a.adNumber.toUpperCase()));
+      while (existingNumbers.has(formatAdNumber(nextSeq))) {
+        nextSeq += 1;
+      }
+      return formatAdNumber(nextSeq);
+    };
+
+    // Public: list currently active, published, non-expired advertisements
+    app.get('/api/ads', (_req, res) => {
+      const todayYmd = getTodayIstYmd();
+      const activeAds = this.state.ads
+        .filter((ad) => isAdCurrentlyActive(ad, todayYmd))
+        .sort((a, b) => {
+          const dateDiff = b.publishDate.localeCompare(a.publishDate);
+          if (dateDiff !== 0) return dateDiff;
+          return b.createdAt.localeCompare(a.createdAt);
+        });
+      res.setHeader('Cache-Control', 'public, max-age=30, stale-while-revalidate=60');
+      res.json({ ok: true, items: activeAds, total: activeAds.length });
+    });
+
+    // Public: serve disk-persisted clean ad images when Google Drive is not configured
+    app.get('/api/ads/media/:fileName', (req, res) => {
+      const fileName = String(req.params.fileName || '').trim();
+      if (!/^[a-zA-Z0-9_-]{8,100}\.(jpg|jpeg|png|webp)$/i.test(fileName)) {
+        res.status(400).end();
+        return;
+      }
+      const targetPath = path.join(this.adMediaDir, fileName);
+      if (!targetPath.startsWith(this.adMediaDir + path.sep) || !fs.existsSync(targetPath)) {
+        res.status(404).end();
+        return;
+      }
+      const ext = path.extname(fileName).toLowerCase();
+      const contentType =
+        ext === '.png' ? 'image/png' : ext === '.webp' ? 'image/webp' : 'image/jpeg';
+      res.setHeader('Content-Type', contentType);
+      res.setHeader('Cache-Control', 'public, max-age=604800, immutable');
+      res.sendFile(targetPath);
+    });
+
+    // Public: single active advertisement details by id or ADxxx number
+    app.get('/api/ads/:id', (req, res) => {
+      const lookup = String(req.params.id || '').trim();
+      if (!lookup) {
+        res.status(400).json({ ok: false, error: 'Missing advertisement ID.' });
+        return;
+      }
+      const todayYmd = getTodayIstYmd();
+      const found = this.state.ads.find(
+        (ad) =>
+          (ad.id === lookup || ad.adNumber.toUpperCase() === lookup.toUpperCase()) &&
+          isAdCurrentlyActive(ad, todayYmd)
+      );
+      if (!found) {
+        res.status(404).json({ ok: false, error: 'Advertisement not found or no longer active.' });
+        return;
+      }
+      res.setHeader('Cache-Control', 'public, max-age=30, stale-while-revalidate=60');
+      res.json({ ok: true, item: found });
+    });
+
+    // Public: lightweight ad impression / click tracking
+    app.post('/api/ads/:id/track', (req, res) => {
+      const lookup = String(req.params.id || '').trim();
+      const type = req.body?.type === 'click' ? 'click' : 'view';
+      const found = this.state.ads.find((ad) => ad.id === lookup);
+      if (!found) {
+        res.status(404).json({ ok: false, error: 'Advertisement not found.' });
+        return;
+      }
+      if (type === 'click') {
+        found.clicks = (Number(found.clicks) || 0) + 1;
+      } else {
+        found.views = (Number(found.views) || 0) + 1;
+      }
+      this.schedulePersist();
+      res.status(202).json({ ok: true, views: found.views, clicks: found.clicks });
+    });
+
+    // Admin: list all advertisements (active, inactive, expired, draft) + summary stats
+    app.get('/api/admin2/ads', this.requireAuth('ads.manage'), (_req, res) => {
+      const todayYmd = getTodayIstYmd();
+      const sorted = [...this.state.ads].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+      res.json({
+        ok: true,
+        ads: sorted,
+        stats: computeAdStats(sorted, todayYmd),
+        nextAdNumber: nextAvailableAdNumber(),
+        todayYmd,
+      });
+    });
+
+    // Admin: clean local disk image upload fallback (no watermark / no overlays)
+    app.post('/api/admin2/ads/upload-image', this.requireAuth('ads.manage'), (req: Admin2Request, res) => {
+      try {
+        const rawBase64 = typeof req.body?.base64Data === 'string' ? req.body.base64Data : '';
+        const rawThumb = typeof req.body?.thumbBase64 === 'string' ? req.body.thumbBase64 : '';
+        const match = rawBase64.match(/^data:image\/(jpeg|jpg|png|webp);base64,([a-zA-Z0-9+/=]+)$/i);
+        if (!match) {
+          res.status(400).json({ ok: false, error: 'Valid base64 JPEG/PNG/WebP image is required.' });
+          return;
+        }
+        const extRaw = match[1].toLowerCase();
+        const ext = extRaw === 'jpeg' || extRaw === 'jpg' ? 'jpg' : extRaw;
+        const fullBuffer = Buffer.from(match[2], 'base64');
+        if (fullBuffer.length === 0 || fullBuffer.length > 4 * 1024 * 1024) {
+          res.status(400).json({ ok: false, error: 'Image file size must be under 4 MB.' });
+          return;
+        }
+
+        fs.mkdirSync(this.adMediaDir, { recursive: true });
+        const token = `${Date.now().toString(36)}-${crypto.randomBytes(5).toString('hex')}`;
+        const fullName = `ad-${token}.${ext}`;
+        fs.writeFileSync(path.join(this.adMediaDir, fullName), fullBuffer);
+
+        let thumbName = fullName;
+        const thumbMatch = rawThumb.match(/^data:image\/(jpeg|jpg|png|webp);base64,([a-zA-Z0-9+/=]+)$/i);
+        if (thumbMatch) {
+          const tExtRaw = thumbMatch[1].toLowerCase();
+          const tExt = tExtRaw === 'jpeg' || tExtRaw === 'jpg' ? 'jpg' : tExtRaw;
+          const thumbBuf = Buffer.from(thumbMatch[2], 'base64');
+          if (thumbBuf.length > 0 && thumbBuf.length <= 1024 * 1024) {
+            thumbName = `ad-${token}-thumb.${tExt}`;
+            fs.writeFileSync(path.join(this.adMediaDir, thumbName), thumbBuf);
+          }
+        }
+
+        res.status(201).json({
+          ok: true,
+          imageUrl: `/api/ads/media/${fullName}`,
+          imageThumbUrl: `/api/ads/media/${thumbName}`,
+        });
+      } catch (err) {
+        res.status(500).json({
+          ok: false,
+          error: err instanceof Error ? err.message : 'Unable to save advertisement image.',
+        });
+      }
+    });
+
+    // Admin: create new advertisement (auto-assigns sequential AD001, AD002...)
+    app.post('/api/admin2/ads', this.requireAuth('ads.manage'), (req: Admin2Request, res) => {
+      const b = req.body && typeof req.body === 'object' ? (req.body as Record<string, unknown>) : {};
+      const title = stripMarkup(typeof b.title === 'string' ? b.title : '').slice(0, 160);
+      if (!title) {
+        res.status(400).json({ ok: false, error: 'Advertisement title is required.' });
+        return;
+      }
+
+      const mainImageUrl = sanitizeAdImageUrl(b.mainImageUrl);
+      if (!mainImageUrl) {
+        res.status(400).json({ ok: false, error: 'Main advertisement image is required.' });
+        return;
+      }
+
+      const todayYmd = getTodayIstYmd();
+      const publishDate = isValidYmd(typeof b.publishDate === 'string' ? b.publishDate : '')
+        ? String(b.publishDate)
+        : todayYmd;
+      const expiryDate = isValidYmd(typeof b.expiryDate === 'string' ? b.expiryDate : '')
+        ? String(b.expiryDate)
+        : publishDate;
+
+      if (expiryDate < publishDate) {
+        res.status(400).json({ ok: false, error: 'Expiry date cannot be earlier than publish date.' });
+        return;
+      }
+
+      const description = sanitizeAdDescriptionServer(b.description);
+      if (!stripMarkup(description)) {
+        res.status(400).json({ ok: false, error: 'Advertisement description is required.' });
+        return;
+      }
+
+      let websiteUrl: string | undefined;
+      if (typeof b.websiteUrl === 'string' && b.websiteUrl.trim()) {
+        const safeUrl = sanitizeExternalWebsiteUrl(b.websiteUrl);
+        if (!safeUrl) {
+          res.status(400).json({ ok: false, error: 'Website link must be a valid http:// or https:// URL.' });
+          return;
+        }
+        websiteUrl = safeUrl;
+      }
+
+      const adNumber = nextAvailableAdNumber();
+      const seqMatch = adNumber.match(/^AD(\d+)$/i);
+      this.state.adSequenceCounter = Math.max(
+        this.state.adSequenceCounter || 0,
+        seqMatch ? Number(seqMatch[1]) : (this.state.adSequenceCounter || 0) + 1
+      );
+
+      const nowIso = new Date().toISOString();
+      const actorEmail = req.admin2User!.email;
+      const mainImageThumbUrl = sanitizeAdImageUrl(b.mainImageThumbUrl);
+      const mainImageDriveId =
+        typeof b.mainImageDriveId === 'string' && /^[a-zA-Z0-9_-]{6,120}$/.test(b.mainImageDriveId.trim())
+          ? b.mainImageDriveId.trim()
+          : undefined;
+
+      const created: Advertisement = {
+        id: makeId('ad'),
+        adNumber,
+        title,
+        description,
+        mainImageUrl,
+        ...(mainImageThumbUrl ? { mainImageThumbUrl } : {}),
+        ...(mainImageDriveId ? { mainImageDriveId } : {}),
+        additionalImages: sanitizeAdditionalAdImages(b.additionalImages),
+        contactNumber: sanitizePhoneDigits(typeof b.contactNumber === 'string' ? b.contactNumber : '') || undefined,
+        whatsappNumber: sanitizePhoneDigits(typeof b.whatsappNumber === 'string' ? b.whatsappNumber : '') || undefined,
+        businessAddress: stripMarkup(typeof b.businessAddress === 'string' ? b.businessAddress : '').slice(0, 260) || undefined,
+        websiteUrl,
+        category: sanitizeAdCategory(b.category),
+        status: sanitizeAdStatus(b.status),
+        publishDate,
+        expiryDate,
+        views: 0,
+        clicks: 0,
+        createdAt: nowIso,
+        updatedAt: nowIso,
+        createdBy: actorEmail,
+        updatedBy: actorEmail,
+      };
+
+      this.state.ads.unshift(created);
+      this.addAuditLog({
+        actorEmail,
+        actorRole: req.admin2User!.role,
+        action: 'ads.created',
+        targetType: 'advertisement',
+        targetId: created.id,
+        details: `Created advertisement ${created.adNumber} (${created.title}) [${created.status}]`,
+        severity: 'info',
+        ip: getClientIp(req),
+      });
+      this.addNotification({
+        category: 'publishing',
+        severity: 'success',
+        title: `Advertisement ${created.adNumber} Saved`,
+        message: `${created.title} (${created.status}) saved by ${actorEmail}.`,
+        entityId: created.id,
+      });
+      this.persistStateNow();
+
+      res.status(201).json({
+        ok: true,
+        ad: created,
+        nextAdNumber: nextAvailableAdNumber(),
+        stats: computeAdStats(this.state.ads, todayYmd),
+      });
+    });
+
+    // Admin: update existing advertisement
+    app.put('/api/admin2/ads/:id', this.requireAuth('ads.manage'), (req: Admin2Request, res) => {
+      const target = this.state.ads.find((a) => a.id === req.params.id);
+      if (!target) {
+        res.status(404).json({ ok: false, error: 'Advertisement not found.' });
+        return;
+      }
+
+      const b = req.body && typeof req.body === 'object' ? (req.body as Record<string, unknown>) : {};
+      const title =
+        typeof b.title === 'string' ? stripMarkup(b.title).slice(0, 160) : target.title;
+      if (!title) {
+        res.status(400).json({ ok: false, error: 'Advertisement title cannot be empty.' });
+        return;
+      }
+
+      const mainImageUrl =
+        b.mainImageUrl !== undefined ? sanitizeAdImageUrl(b.mainImageUrl) : target.mainImageUrl;
+      if (!mainImageUrl) {
+        res.status(400).json({ ok: false, error: 'Main advertisement image is required.' });
+        return;
+      }
+
+      const publishDate =
+        typeof b.publishDate === 'string' && isValidYmd(b.publishDate)
+          ? b.publishDate
+          : target.publishDate;
+      const expiryDate =
+        typeof b.expiryDate === 'string' && isValidYmd(b.expiryDate)
+          ? b.expiryDate
+          : target.expiryDate;
+
+      if (expiryDate < publishDate) {
+        res.status(400).json({ ok: false, error: 'Expiry date cannot be earlier than publish date.' });
+        return;
+      }
+
+      const description =
+        b.description !== undefined ? sanitizeAdDescriptionServer(b.description) : target.description;
+      if (!stripMarkup(description)) {
+        res.status(400).json({ ok: false, error: 'Advertisement description cannot be empty.' });
+        return;
+      }
+
+      let websiteUrl = target.websiteUrl;
+      if (b.websiteUrl !== undefined) {
+        if (typeof b.websiteUrl === 'string' && b.websiteUrl.trim()) {
+          const safeUrl = sanitizeExternalWebsiteUrl(b.websiteUrl);
+          if (!safeUrl) {
+            res.status(400).json({ ok: false, error: 'Website link must be a valid http:// or https:// URL.' });
+            return;
+          }
+          websiteUrl = safeUrl;
+        } else {
+          websiteUrl = undefined;
+        }
+      }
+
+      target.title = title;
+      target.description = description;
+      target.mainImageUrl = mainImageUrl;
+      if (b.mainImageThumbUrl !== undefined) {
+        const cleanThumb = sanitizeAdImageUrl(b.mainImageThumbUrl);
+        target.mainImageThumbUrl = cleanThumb || undefined;
+      }
+      if (b.mainImageDriveId !== undefined) {
+        target.mainImageDriveId =
+          typeof b.mainImageDriveId === 'string' && /^[a-zA-Z0-9_-]{6,120}$/.test(b.mainImageDriveId.trim())
+            ? b.mainImageDriveId.trim()
+            : undefined;
+      }
+      if (b.additionalImages !== undefined) {
+        target.additionalImages = sanitizeAdditionalAdImages(b.additionalImages);
+      }
+      if (b.contactNumber !== undefined) {
+        target.contactNumber = sanitizePhoneDigits(typeof b.contactNumber === 'string' ? b.contactNumber : '') || undefined;
+      }
+      if (b.whatsappNumber !== undefined) {
+        target.whatsappNumber = sanitizePhoneDigits(typeof b.whatsappNumber === 'string' ? b.whatsappNumber : '') || undefined;
+      }
+      if (b.businessAddress !== undefined) {
+        target.businessAddress = stripMarkup(typeof b.businessAddress === 'string' ? b.businessAddress : '').slice(0, 260) || undefined;
+      }
+      target.websiteUrl = websiteUrl;
+      if (b.category !== undefined) {
+        target.category = sanitizeAdCategory(b.category);
+      }
+      if (b.status !== undefined) {
+        target.status = sanitizeAdStatus(b.status);
+      }
+      target.publishDate = publishDate;
+      target.expiryDate = expiryDate;
+      target.updatedAt = new Date().toISOString();
+      target.updatedBy = req.admin2User!.email;
+
+      this.addAuditLog({
+        actorEmail: req.admin2User!.email,
+        actorRole: req.admin2User!.role,
+        action: 'ads.updated',
+        targetType: 'advertisement',
+        targetId: target.id,
+        details: `Updated advertisement ${target.adNumber} (${target.title}) [${target.status}]`,
+        severity: 'info',
+        ip: getClientIp(req),
+      });
+      this.persistStateNow();
+
+      res.json({
+        ok: true,
+        ad: target,
+        stats: computeAdStats(this.state.ads, getTodayIstYmd()),
+      });
+    });
+
+    // Admin: activate / deactivate / draft toggle
+    app.patch('/api/admin2/ads/:id/status', this.requireAuth('ads.manage'), (req: Admin2Request, res) => {
+      const target = this.state.ads.find((a) => a.id === req.params.id);
+      if (!target) {
+        res.status(404).json({ ok: false, error: 'Advertisement not found.' });
+        return;
+      }
+      const nextStatus = req.body?.status;
+      if (nextStatus !== 'active' && nextStatus !== 'inactive' && nextStatus !== 'draft') {
+        res.status(400).json({ ok: false, error: 'Status must be active, inactive, or draft.' });
+        return;
+      }
+      target.status = nextStatus;
+      target.updatedAt = new Date().toISOString();
+      target.updatedBy = req.admin2User!.email;
+
+      this.addAuditLog({
+        actorEmail: req.admin2User!.email,
+        actorRole: req.admin2User!.role,
+        action: `ads.status_${nextStatus}`,
+        targetType: 'advertisement',
+        targetId: target.id,
+        details: `Changed ${target.adNumber} (${target.title}) status to ${nextStatus}`,
+        severity: 'info',
+        ip: getClientIp(req),
+      });
+      this.persistStateNow();
+
+      res.json({
+        ok: true,
+        ad: target,
+        stats: computeAdStats(this.state.ads, getTodayIstYmd()),
+      });
+    });
+
+    // Admin: permanently delete advertisement
+    app.delete('/api/admin2/ads/:id', this.requireAuth('ads.manage'), (req: Admin2Request, res) => {
+      const idx = this.state.ads.findIndex((a) => a.id === req.params.id);
+      if (idx === -1) {
+        res.status(404).json({ ok: false, error: 'Advertisement not found.' });
+        return;
+      }
+      const [removed] = this.state.ads.splice(idx, 1);
+
+      this.addAuditLog({
+        actorEmail: req.admin2User!.email,
+        actorRole: req.admin2User!.role,
+        action: 'ads.deleted',
+        targetType: 'advertisement',
+        targetId: removed.id,
+        details: `Deleted advertisement ${removed.adNumber} (${removed.title})`,
+        severity: 'warning',
+        ip: getClientIp(req),
+      });
+      this.persistStateNow();
+
+      res.json({
+        ok: true,
+        deletedId: removed.id,
+        stats: computeAdStats(this.state.ads, getTodayIstYmd()),
+        nextAdNumber: nextAvailableAdNumber(),
       });
     });
   }

@@ -2,12 +2,14 @@ import { useEffect, useState } from 'react';
 import {
   AlertCircle,
   Archive,
+  BadgePlus,
   Bell,
   Clock,
   Cpu,
   Database,
   Eye,
   FileEdit,
+  FilePlus2,
   FileText,
   FolderArchive,
   HardDrive,
@@ -23,6 +25,8 @@ import { TrafficAreaChart } from './Admin2Charts';
 interface Admin2DashboardSectionProps {
   onNavigateSection: (section: AdminSectionId) => void;
   onUnreadCountChange?: (count: number) => void;
+  onQuickAddArticle?: () => void;
+  onQuickAddAd?: () => void;
 }
 
 function formatBytes(bytes: number): string {
@@ -46,6 +50,8 @@ function formatShortTime(iso?: string | null): string {
 export function Admin2DashboardSection({
   onNavigateSection,
   onUnreadCountChange,
+  onQuickAddArticle,
+  onQuickAddAd,
 }: Admin2DashboardSectionProps) {
   const [data, setData] = useState<Admin2DashboardResponse | null>(null);
   const [loading, setLoading] = useState(true);
@@ -156,15 +162,37 @@ export function Admin2DashboardSection({
             Live telemetry synced from Google Sheets, Google Drive, Apps Script, and server traffic logs.
           </p>
         </div>
-        <button
-          type="button"
-          onClick={() => void load()}
-          disabled={loading}
-          className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
-        >
-          <RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} />
-          Refresh Metrics
-        </button>
+        <div className="flex flex-wrap items-center gap-2">
+          {onQuickAddArticle && (
+            <button
+              type="button"
+              onClick={onQuickAddArticle}
+              className="inline-flex items-center gap-1.5 rounded-lg bg-[#0B192C] px-3 py-1.5 text-xs font-semibold text-white hover:bg-[#13294B] dark:bg-blue-600 dark:hover:bg-blue-500 cursor-pointer whitespace-nowrap"
+            >
+              <FilePlus2 className="h-3.5 w-3.5" />
+              <span>Publish Article</span>
+            </button>
+          )}
+          {onQuickAddAd && (
+            <button
+              type="button"
+              onClick={onQuickAddAd}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-amber-400/70 bg-amber-50 px-3 py-1.5 text-xs font-semibold text-[#0B192C] hover:bg-amber-100 dark:border-amber-500/50 dark:bg-amber-500/15 dark:text-amber-300 dark:hover:bg-amber-500/25 cursor-pointer whitespace-nowrap"
+            >
+              <BadgePlus className="h-3.5 w-3.5" />
+              <span>Add Advertisement</span>
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={() => void load()}
+            disabled={loading}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700 cursor-pointer whitespace-nowrap"
+          >
+            <RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} />
+            <span>Refresh Metrics</span>
+          </button>
+        </div>
       </div>
 
       {/* Primary KPI Grid */}

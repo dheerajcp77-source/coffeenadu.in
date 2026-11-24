@@ -1,13 +1,16 @@
 import { useEffect, useMemo, useState } from 'react';
 import { AlertCircle, Calendar, ChevronRight, Clock, Loader2, MessageSquare } from 'lucide-react';
 import { AdminPanel } from './components/AdminPanel';
+import { AdSlider } from './components/AdSlider';
 import { ArticleDetailView } from './components/ArticleDetailView';
 import { ArticleShareBar } from './components/ArticleShareBar';
 import { BusTimingsSection } from './components/BusTimingsSection';
 import { CategoryBar, getCategoryShortIcon } from './components/CategoryBar';
 import { CoffeeCupLogo } from './components/CoffeeCupLogo';
 import { FeaturedLeadCarousel } from './components/FeaturedLeadCarousel';
+import { FloatingScrollAd } from './components/FloatingScrollAd';
 import { Header } from './components/Header';
+import { LocalAdsSection } from './components/LocalAdsSection';
 import { NewsImage } from './components/NewsImage';
 import { PrivacyScreenGuard } from './components/PrivacyScreenGuard';
 import { ProgramsEventsSection } from './components/ProgramsEventsSection';
@@ -20,6 +23,11 @@ import {
   matchesSelectedLocation,
   resolveArticleImage,
 } from './constants/newsData';
+import {
+  fetchActiveAdById,
+  loadActiveAds,
+  subscribeToActiveAds,
+} from './services/adsClient';
 import {
   getArticleByIdFromFirestore,
   loadInitialArticles,
@@ -37,6 +45,7 @@ import {
   subscribeToEventsState,
 } from './services/eventsStore';
 import { subscribeToQuotaStatus, type QuotaStatus } from './services/firestoreOptimizer';
+import type { Advertisement } from './types/ads';
 import type { FilterCategory, NewsArticle, ProgramEvent, SupportThread } from './types/news';
 import { isArticleActivelyFeatured } from './utils/featuredLead';
 import { sanitizeRichTextHtml, stripRichTextToPlainText } from './utils/richText';
@@ -61,6 +70,11 @@ function isEventsPath(pathname: string): boolean {
 function isChatPath(pathname: string): boolean {
   const normalized = pathname.replace(/\/+$/, '') || '/';
   return normalized === '/chat' || normalized.startsWith('/chat/');
+}
+
+function isAdsPath(pathname: string): boolean {
+  const normalized = pathname.replace(/\/+$/, '') || '/';
+  return normalized === '/ads' || normalized.startsWith('/ads/');
 }
 
 function parseArticleDateToMidnight(dateStr: string, timestamp?: number): number | null {
@@ -177,6 +191,15 @@ function readEventIdFromUrl(): string | null {
   }
 }
 
+function readAdIdFromUrl(): string | null {
+  try {
+    const id = new URLSearchParams(window.location.search).get('ad');
+    return id && id.trim() ? id.trim() : null;
+  } catch {
+    return null;
+  }
+}
+
 function ArticleLoadingSkeleton({ onBack }: { onBack: () => void }) {
   return (
     <main
@@ -267,6 +290,15 @@ export default function App() {
   const [selectedEventId, setSelectedEventId] = useState<string | null>(() =>
     readEventIdFromUrl()
   );
+  const [activeAds, setActiveAds] = useState<Advertisement[]>([]);
+  const [adsLoaded, setAdsLoaded] = useState<boolean>(false);
+  const [selectedAdId, setSelectedAdId] = useState<string | null>(() =>
+    readAdIdFromUrl()
+  );
+  const [directAd, setDirectAd] = useState<Advertisement | null>(null);
+  const [directAdLoading, setDirectAdLoading] = useState<boolean>(() =>
+    Boolean(readAdIdFromUrl())
+  );
   const [leadNowMs, setLeadNowMs] = useState<number>(() => Date.now());
 
   useEffect(() => {
@@ -294,6 +326,7 @@ export default function App() {
       setPathname(window.location.pathname);
       setSelectedArticleId(readArticleIdFromUrl());
       setSelectedEventId(readEventIdFromUrl());
+      setSelectedAdId(readAdIdFromUrl());
     };
     window.addEventListener('popstate', handlePopState);
     return () => window.removeEventListener('popstate', handlePopState);
@@ -311,12 +344,17 @@ export default function App() {
       setEventsLoaded(state.loaded);
       setHasMoreEvents(state.hasMore);
     });
+    const unsubAds = subscribeToActiveAds((state) => {
+      setActiveAds(state.ads);
+      setAdsLoaded(state.loaded);
+    });
     const unsubQuota = subscribeToQuotaStatus((nextStatus) => {
       setQuotaStatus(nextStatus);
     });
     return () => {
       unsubArticles();
       unsubEvents();
+      unsubAds();
       unsubQuota();
     };
   }, []);
@@ -325,15 +363,24 @@ export default function App() {
   const busTimingsActiveCheck = isBusTimingsPath(pathname);
   const eventsActiveCheck = isEventsPath(pathname);
   const chatActiveCheck = isChatPath(pathname);
+  const adsActiveCheck = isAdsPath(pathname);
 
-  // Lazy-load initial news feed ONLY when viewing the public news feed (never on /admin, /events, /bus-timings, /chat, or direct ?article=id)
+  // Load active local advertisements on public routes
+  useEffect(() => {
+    if (adminRouteActive) return;
+    void loadActiveAds();
+  }, [adminRouteActive]);
+
+  // Lazy-load initial news feed ONLY when viewing the public news feed (never on /admin, /events, /bus-timings, /chat, /ads, or direct ?article=id)
   useEffect(() => {
     if (
       adminRouteActive ||
       busTimingsActiveCheck ||
       eventsActiveCheck ||
       chatActiveCheck ||
-      selectedArticleId
+      adsActiveCheck ||
+      selectedArticleId ||
+      selectedAdId
     ) {
       return;
     }
@@ -343,7 +390,9 @@ export default function App() {
     busTimingsActiveCheck,
     eventsActiveCheck,
     chatActiveCheck,
+    adsActiveCheck,
     selectedArticleId,
+    selectedAdId,
   ]);
 
   // Lazy-load initial events list ONLY when visiting /events without a direct ?event=id
@@ -440,6 +489,41 @@ export default function App() {
     };
   }, [eventsActiveCheck, selectedEventId, events]);
 
+  // Direct single-ad lookup for shared advertisement URLs (/ads?ad=<id>)
+  useEffect(() => {
+    if (!selectedAdId) {
+      setDirectAd(null);
+      setDirectAdLoading(false);
+      return;
+    }
+
+    const fromList = activeAds.find(
+      (a) => a.id === selectedAdId || a.adNumber.toUpperCase() === selectedAdId.toUpperCase()
+    );
+    if (fromList) {
+      setDirectAd(fromList);
+      setDirectAdLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+    setDirectAd(null);
+    setDirectAdLoading(true);
+    void fetchActiveAdById(selectedAdId)
+      .then((found) => {
+        if (cancelled) return;
+        setDirectAd(found);
+        setDirectAdLoading(false);
+      })
+      .catch(() => {
+        if (!cancelled) setDirectAdLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedAdId, activeAds]);
+
   const handleLoadMoreArticles = async () => {
     if (loadingMoreArticles || !hasMoreArticles) return;
     setLoadingMoreArticles(true);
@@ -524,12 +608,14 @@ export default function App() {
   const busTimingsActive = isBusTimingsPath(pathname);
   const eventsActive = isEventsPath(pathname);
   const chatActive = isChatPath(pathname);
-  const isSpecialRoute = busTimingsActive || eventsActive || chatActive;
+  const adsActive = isAdsPath(pathname);
+  const isSpecialRoute = busTimingsActive || eventsActive || chatActive || adsActive;
 
   const handleSelectCategory = (category: FilterCategory) => {
     setActiveCategory(category);
     setSelectedArticleId(null);
     setSelectedEventId(null);
+    setSelectedAdId(null);
     if (isSpecialRoute || window.location.search) {
       navigateTo('/');
     } else {
@@ -544,6 +630,7 @@ export default function App() {
     setSearchQuery('');
     setSelectedArticleId(null);
     setSelectedEventId(null);
+    setSelectedAdId(null);
     if (isSpecialRoute || window.location.search) {
       navigateTo('/');
     } else {
@@ -553,6 +640,7 @@ export default function App() {
 
   const handleOpenArticle = (article: NewsArticle) => {
     setSelectedEventId(null);
+    setSelectedAdId(null);
     setDirectArticle(article);
     setDirectArticleLoading(false);
     setSelectedArticleId(article.id);
@@ -568,6 +656,7 @@ export default function App() {
 
   const handleOpenEvent = (ev: ProgramEvent) => {
     setSelectedArticleId(null);
+    setSelectedAdId(null);
     setSelectedEventId(ev.id);
     navigateTo(`/events?event=${encodeURIComponent(ev.id)}`);
   };
@@ -580,19 +669,46 @@ export default function App() {
   const handleJumpToBusTimings = () => {
     setSelectedArticleId(null);
     setSelectedEventId(null);
+    setSelectedAdId(null);
     navigateTo('/bus-timings');
   };
 
   const handleJumpToEvents = () => {
     setSelectedArticleId(null);
     setSelectedEventId(null);
+    setSelectedAdId(null);
     navigateTo('/events');
   };
 
   const handleJumpToChat = () => {
     setSelectedArticleId(null);
     setSelectedEventId(null);
+    setSelectedAdId(null);
     navigateTo('/chat');
+  };
+
+  const handleJumpToAds = () => {
+    setSelectedArticleId(null);
+    setSelectedEventId(null);
+    setSelectedAdId(null);
+    void loadActiveAds();
+    navigateTo('/ads');
+  };
+
+  const handleOpenAd = (ad: Advertisement) => {
+    setSelectedArticleId(null);
+    setSelectedEventId(null);
+    setDirectAd(ad);
+    setDirectAdLoading(false);
+    setSelectedAdId(ad.id);
+    navigateTo(`/ads?ad=${encodeURIComponent(ad.id)}`, true);
+  };
+
+  const handleCloseAd = () => {
+    setSelectedAdId(null);
+    setDirectAd(null);
+    setDirectAdLoading(false);
+    navigateTo('/ads');
   };
 
   // Real-time auto-removal of expired Lead Stories without requiring a page reload
@@ -640,16 +756,20 @@ export default function App() {
           isBusTimingsView={busTimingsActive}
           isEventsView={eventsActive}
           isChatView={chatActive}
+          isAdsView={adsActive || Boolean(selectedAdId)}
           onSelectCategory={handleSelectCategory}
           onResetHome={handleResetHome}
           onJumpToBusTimings={handleJumpToBusTimings}
           onJumpToEvents={handleJumpToEvents}
+          onJumpToAds={handleJumpToAds}
         />
 
-        {!selectedArticleId && !isSpecialRoute && (
+        {!selectedArticleId && !selectedAdId && !isSpecialRoute && (
           <CategoryBar
             activeCategory={activeCategory}
+            isAdsView={adsActive || Boolean(selectedAdId)}
             onSelectCategory={handleSelectCategory}
+            onJumpToAds={handleJumpToAds}
             selectedLocation={selectedLocation}
             onSelectLocation={setSelectedLocation}
             searchQuery={searchQuery}
@@ -681,6 +801,18 @@ export default function App() {
           <main className="flex-1">
             <SupportChatSection onBackToNews={handleResetHome} />
           </main>
+        ) : adsActive || selectedAdId ? (
+          <main className="flex-1">
+            <LocalAdsSection
+              ads={activeAds}
+              directAd={directAd}
+              isLoading={selectedAdId ? directAdLoading && !directAd : !adsLoaded}
+              selectedAdId={selectedAdId}
+              onSelectAd={handleOpenAd}
+              onCloseAd={handleCloseAd}
+              onBackToNews={handleResetHome}
+            />
+          </main>
         ) : selectedArticleId ? (
           <div className="flex-1 bg-white">
             {selectedArticle ? (
@@ -688,8 +820,10 @@ export default function App() {
                 key={selectedArticle.id}
                 article={selectedArticle}
                 relatedArticles={relatedArticles}
+                activeAds={activeAds}
                 onBack={handleCloseArticle}
                 onSelectArticle={handleOpenArticle}
+                onSelectAd={handleOpenAd}
               />
             ) : isWaitingForSelectedArticle ? (
               <ArticleLoadingSkeleton onBack={handleCloseArticle} />
@@ -809,6 +943,15 @@ export default function App() {
                       leadArticles={leadArticles}
                       onOpenArticle={handleOpenArticle}
                     />
+
+                    {/* Automatic Local Advertisement Slider */}
+                    {activeAds.length > 0 && (
+                      <AdSlider
+                        ads={activeAds}
+                        onOpenAd={handleOpenAd}
+                        onViewAllAds={handleJumpToAds}
+                      />
+                    )}
 
                     {/* Date-Wise Sections: Today, Yesterday, and older dates */}
                     {dateGroups.map((group) => (
@@ -1008,6 +1151,13 @@ export default function App() {
               ))}
               <button
                 type="button"
+                onClick={handleJumpToAds}
+                className="font-semibold text-amber-800 hover:underline cursor-pointer whitespace-nowrap"
+              >
+                Local Ads
+              </button>
+              <button
+                type="button"
                 onClick={handleJumpToBusTimings}
                 className="font-semibold text-[#0F274A] hover:underline cursor-pointer whitespace-nowrap"
               >
@@ -1051,6 +1201,13 @@ export default function App() {
           </div>
         </div>
       </footer>
+
+      {/* Non-Intrusive Floating Local Advertisement While Scrolling */}
+      <FloatingScrollAd
+        ads={activeAds}
+        onOpenAd={handleOpenAd}
+        disabled={adsActive || Boolean(selectedAdId) || chatActive}
+      />
 
       {/* Floating Message Admin Button at Bottom-Right Corner */}
       {!chatActive && (

@@ -1,5 +1,6 @@
 const RESERVED_ARTICLE_SLUGS = new Set([
   'admin',
+  'ads',
   'events',
   'bus-timings',
   'chat',
