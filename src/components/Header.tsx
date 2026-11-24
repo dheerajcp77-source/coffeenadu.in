@@ -35,16 +35,21 @@ export function Header({
 
   return (
     <header className="sticky top-0 z-40 bg-white/95 backdrop-blur-sm border-b border-slate-200">
-      <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 h-16 flex items-center justify-between gap-3 sm:gap-6">
-        {/* Zone 1: Single-line brand wordmark with logo */}
-        <button
-          type="button"
-          onClick={onResetHome}
-          className="inline-flex items-center gap-2 font-masthead text-lg sm:text-2xl font-extrabold tracking-tight text-[#0F274A] hover:text-slate-950 transition-colors whitespace-nowrap shrink-0 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0F274A] rounded-sm"
-        >
-          <CoffeeCupLogo className="w-8 h-8 sm:w-9 sm:h-9 shrink-0" />
-          <span>Coffeenadu News</span>
-        </button>
+      <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 min-h-16 py-2 flex items-center justify-between gap-2 sm:gap-6">
+        {/* Zone 1: Brand wordmark with subtle developer credit directly below */}
+        <div className="flex flex-col items-start min-w-0 shrink-0">
+          <button
+            type="button"
+            onClick={onResetHome}
+            className="inline-flex items-center gap-2 font-masthead text-lg sm:text-2xl font-extrabold tracking-tight text-[#0F274A] hover:text-slate-950 transition-colors whitespace-nowrap shrink-0 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0F274A] rounded-sm"
+          >
+            <CoffeeCupLogo className="w-8 h-8 sm:w-9 sm:h-9 shrink-0" />
+            <span>Coffeenadu News</span>
+          </button>
+          <span className="pl-10 sm:pl-11 -mt-0.5 text-[10px] sm:text-[11px] font-normal tracking-wide text-slate-400 leading-tight whitespace-nowrap">
+            (Developed by Dheeraj)
+          </span>
+        </div>
 
         {/* Zone 2: Concise single-line English navigation links */}
         <nav

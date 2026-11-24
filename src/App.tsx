@@ -1030,19 +1030,24 @@ export default function App() {
             </div>
           </div>
 
-          <div className="pt-5 border-t border-slate-200 space-y-2.5">
-            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 text-xs text-slate-600">
-              <p className="font-medium text-slate-700">
-                © 2026 CoffeeNadu News. All rights reserved.
-              </p>
-              <p className="text-slate-600">
+          <div className="pt-6 border-t border-slate-200 space-y-4">
+            <div className="text-center py-2">
+              <p className="text-base sm:text-lg md:text-xl font-semibold tracking-tight text-[#0F274A]">
                 Developed &amp; Managed by{' '}
-                <span className="font-semibold text-[#0F274A]">Dheeraj</span>
+                <span className="font-extrabold text-[#0F274A] border-b-2 border-amber-400 pb-0.5">
+                  Dheeraj
+                </span>
               </p>
             </div>
-            <p className="text-[11px] text-slate-500 leading-relaxed">
-              Unauthorized copying, screenshotting, downloading, or redistribution of news content and photos is prohibited.
-            </p>
+
+            <div className="pt-4 border-t border-slate-100 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 text-center sm:text-left text-[11px] sm:text-xs text-slate-500">
+              <p className="font-medium text-slate-600">
+                © 2026 CoffeeNadu News. All rights reserved.
+              </p>
+              <p className="leading-relaxed">
+                Unauthorized copying, screenshotting, downloading, or redistribution of news content and photos is prohibited.
+              </p>
+            </div>
           </div>
         </div>
       </footer>
