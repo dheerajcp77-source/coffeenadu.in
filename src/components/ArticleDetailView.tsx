@@ -2,10 +2,11 @@ import { useEffect } from 'react';
 import { ArrowLeft } from 'lucide-react';
 import { getKannadaLocationLabel, resolveArticleImage } from '../constants/newsData';
 import { recordArticleView } from '../services/articlesStore';
-import type { Advertisement } from '../types/ads';
+import type { AdPlatformSettings, Advertisement } from '../types/ads';
 import type { NewsArticle } from '../types/news';
 import { sanitizeRichTextHtml, stripRichTextToPlainText } from '../utils/richText';
 import { ArticleEndAd } from './ArticleEndAd';
+import { ArticleInlineAd } from './ArticleInlineAd';
 import { ArticleShareBar } from './ArticleShareBar';
 import { NewsImage } from './NewsImage';
 import { WhatsAppGroupBanner } from './WhatsAppGroupBanner';
@@ -14,6 +15,7 @@ interface ArticleDetailViewProps {
   article: NewsArticle;
   relatedArticles: NewsArticle[];
   activeAds?: Advertisement[];
+  adSettings?: AdPlatformSettings | null;
   onBack: () => void;
   onSelectArticle: (article: NewsArticle) => void;
   onSelectAd?: (ad: Advertisement) => void;
@@ -23,6 +25,7 @@ export function ArticleDetailView({
   article,
   relatedArticles,
   activeAds = [],
+  adSettings,
   onBack,
   onSelectArticle,
   onSelectAd,
@@ -76,10 +79,32 @@ export function ArticleDetailView({
             dangerouslySetInnerHTML={{ __html: sanitizeRichTextHtml(article.titleKannada) }}
           />
 
+          {/* Inline Ad Position: Below Article Headline */}
+          {onSelectAd && activeAds.length > 0 && (
+            <ArticleInlineAd
+              ads={activeAds}
+              settings={adSettings}
+              articleId={article.id}
+              slot="belowHeadline"
+              onOpenAd={onSelectAd}
+            />
+          )}
+
           <div
             className="article-rich-content article-rich-inline font-kannada text-base sm:text-lg text-stone-700 leading-relaxed mb-6 pb-6 border-b border-stone-200"
             dangerouslySetInnerHTML={{ __html: sanitizeRichTextHtml(article.summaryKannada) }}
           />
+
+          {/* Inline Ad Position: Below Article Summary */}
+          {onSelectAd && activeAds.length > 0 && (
+            <ArticleInlineAd
+              ads={activeAds}
+              settings={adSettings}
+              articleId={article.id}
+              slot="belowSummary"
+              onOpenAd={onSelectAd}
+            />
+          )}
 
           <div className="flex items-center justify-between text-xs text-stone-500 mb-6">
             <span>
@@ -112,19 +137,27 @@ export function ArticleDetailView({
               const sanitized = sanitizeRichTextHtml(paragraph);
               if (!sanitized) return null;
               const isBlockWrapper = /^<(p|div|h2|h3|ul|ol|blockquote)\b/i.test(sanitized);
-              if (isBlockWrapper) {
-                return (
-                  <div
-                    key={index}
-                    dangerouslySetInnerHTML={{ __html: sanitized }}
-                  />
-                );
-              }
+              const paragraphNum = index + 1;
               return (
-                <p
-                  key={index}
-                  dangerouslySetInnerHTML={{ __html: sanitized }}
-                />
+                <div key={index} className="space-y-5">
+                  {isBlockWrapper ? (
+                    <div dangerouslySetInnerHTML={{ __html: sanitized }} />
+                  ) : (
+                    <p dangerouslySetInnerHTML={{ __html: sanitized }} />
+                  )}
+
+                  {/* Inline Ad Position: Between Article Paragraphs (configured insertion point) */}
+                  {onSelectAd && activeAds.length > 0 && (
+                    <ArticleInlineAd
+                      ads={activeAds}
+                      settings={adSettings}
+                      articleId={article.id}
+                      slot="betweenParagraphs"
+                      paragraphNumber={paragraphNum}
+                      onOpenAd={onSelectAd}
+                    />
+                  )}
+                </div>
               );
             })}
           </div>
@@ -171,6 +204,17 @@ export function ArticleDetailView({
             <WhatsAppGroupBanner variant="card" />
           </div>
 
+          {/* Inline Ad Position: Above Article Sharing Section */}
+          {onSelectAd && activeAds.length > 0 && (
+            <ArticleInlineAd
+              ads={activeAds}
+              settings={adSettings}
+              articleId={article.id}
+              slot="aboveSharing"
+              onOpenAd={onSelectAd}
+            />
+          )}
+
           {/* Share Bar below article */}
           <div className="mt-6 pt-6 border-t border-stone-200 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
             <span className="text-xs font-semibold uppercase tracking-wider text-stone-600">
@@ -181,11 +225,13 @@ export function ArticleDetailView({
         </div>
       </article>
 
-      {/* Local Advertisement after Article Content and before Related Stories */}
+      {/* End of Article Advertisement (Before Related Stories) */}
       {onSelectAd && activeAds.length > 0 && (
         <ArticleEndAd
           ads={activeAds}
+          settings={adSettings}
           articleId={article.id}
+          position="before_related"
           onOpenAd={onSelectAd}
         />
       )}
@@ -220,6 +266,17 @@ export function ArticleDetailView({
             ))}
           </div>
         </section>
+      )}
+
+      {/* End of Article Advertisement (After Related Stories) */}
+      {onSelectAd && activeAds.length > 0 && (
+        <ArticleEndAd
+          ads={activeAds}
+          settings={adSettings}
+          articleId={article.id}
+          position="after_related"
+          onOpenAd={onSelectAd}
+        />
       )}
     </main>
   );

@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { AlertCircle, Calendar, ChevronRight, Clock, Loader2, MessageSquare } from 'lucide-react';
 import { AdminPanel } from './components/AdminPanel';
-import { AdSlider } from './components/AdSlider';
 import { ArticleDetailView } from './components/ArticleDetailView';
 import { ArticleShareBar } from './components/ArticleShareBar';
 import { BusTimingsSection } from './components/BusTimingsSection';
@@ -10,12 +9,15 @@ import { CoffeeCupLogo } from './components/CoffeeCupLogo';
 import { FeaturedLeadCarousel } from './components/FeaturedLeadCarousel';
 import { FloatingScrollAd } from './components/FloatingScrollAd';
 import { Header } from './components/Header';
+import { HomepageAdSlot } from './components/HomepageAdSlot';
+import { HomepagePopupAd } from './components/HomepagePopupAd';
 import { LocalAdsSection } from './components/LocalAdsSection';
 import { NewsImage } from './components/NewsImage';
 import { PrivacyScreenGuard } from './components/PrivacyScreenGuard';
 import { ProgramsEventsSection } from './components/ProgramsEventsSection';
 import { RightRail } from './components/RightRail';
 import { SupportChatSection } from './components/SupportChatSection';
+import { WebsiteEntryAd } from './components/WebsiteEntryAd';
 import { WhatsAppGroupBanner } from './components/WhatsAppGroupBanner';
 import {
   NEWS_CATEGORIES,
@@ -45,8 +47,9 @@ import {
   subscribeToEventsState,
 } from './services/eventsStore';
 import { subscribeToQuotaStatus, type QuotaStatus } from './services/firestoreOptimizer';
-import type { Advertisement } from './types/ads';
+import type { AdPlatformSettings, Advertisement } from './types/ads';
 import type { FilterCategory, NewsArticle, ProgramEvent, SupportThread } from './types/news';
+import { createDefaultAdPlatformSettings } from './utils/adHelpers';
 import { isArticleActivelyFeatured } from './utils/featuredLead';
 import { sanitizeRichTextHtml, stripRichTextToPlainText } from './utils/richText';
 
@@ -200,6 +203,15 @@ function readAdIdFromUrl(): string | null {
   }
 }
 
+function readAdPreviewTokenFromUrl(): string | null {
+  try {
+    const token = new URLSearchParams(window.location.search).get('preview');
+    return token && token.trim() ? token.trim() : null;
+  } catch {
+    return null;
+  }
+}
+
 function ArticleLoadingSkeleton({ onBack }: { onBack: () => void }) {
   return (
     <main
@@ -291,14 +303,22 @@ export default function App() {
     readEventIdFromUrl()
   );
   const [activeAds, setActiveAds] = useState<Advertisement[]>([]);
+  const [adSettings, setAdSettings] = useState<AdPlatformSettings>(() =>
+    createDefaultAdPlatformSettings()
+  );
   const [adsLoaded, setAdsLoaded] = useState<boolean>(false);
   const [selectedAdId, setSelectedAdId] = useState<string | null>(() =>
     readAdIdFromUrl()
   );
+  const [selectedAdPreviewToken, setSelectedAdPreviewToken] = useState<string | null>(() =>
+    readAdPreviewTokenFromUrl()
+  );
   const [directAd, setDirectAd] = useState<Advertisement | null>(null);
+  const [isDirectAdPreview, setIsDirectAdPreview] = useState<boolean>(false);
   const [directAdLoading, setDirectAdLoading] = useState<boolean>(() =>
     Boolean(readAdIdFromUrl())
   );
+  const [entryOverlayActive, setEntryOverlayActive] = useState<boolean>(false);
   const [leadNowMs, setLeadNowMs] = useState<number>(() => Date.now());
 
   useEffect(() => {
@@ -327,6 +347,7 @@ export default function App() {
       setSelectedArticleId(readArticleIdFromUrl());
       setSelectedEventId(readEventIdFromUrl());
       setSelectedAdId(readAdIdFromUrl());
+      setSelectedAdPreviewToken(readAdPreviewTokenFromUrl());
     };
     window.addEventListener('popstate', handlePopState);
     return () => window.removeEventListener('popstate', handlePopState);
@@ -346,6 +367,7 @@ export default function App() {
     });
     const unsubAds = subscribeToActiveAds((state) => {
       setActiveAds(state.ads);
+      setAdSettings(state.settings);
       setAdsLoaded(state.loaded);
     });
     const unsubQuota = subscribeToQuotaStatus((nextStatus) => {
@@ -489,30 +511,39 @@ export default function App() {
     };
   }, [eventsActiveCheck, selectedEventId, events]);
 
-  // Direct single-ad lookup for shared advertisement URLs (/ads?ad=<id>)
+  // Direct single-ad lookup for shared advertisement URLs (/ads?ad=<id>&preview=<token>)
   useEffect(() => {
     if (!selectedAdId) {
       setDirectAd(null);
+      setIsDirectAdPreview(false);
       setDirectAdLoading(false);
       return;
     }
 
-    const fromList = activeAds.find(
-      (a) => a.id === selectedAdId || a.adNumber.toUpperCase() === selectedAdId.toUpperCase()
-    );
-    if (fromList) {
-      setDirectAd(fromList);
-      setDirectAdLoading(false);
-      return;
+    if (!selectedAdPreviewToken) {
+      const fromList = activeAds.find(
+        (a) =>
+          a.id === selectedAdId ||
+          a.adNumber.toUpperCase() === selectedAdId.toUpperCase() ||
+          (a.sharing?.customSlug && a.sharing.customSlug.toLowerCase() === selectedAdId.toLowerCase())
+      );
+      if (fromList) {
+        setDirectAd(fromList);
+        setIsDirectAdPreview(false);
+        setDirectAdLoading(false);
+        return;
+      }
     }
 
     let cancelled = false;
     setDirectAd(null);
     setDirectAdLoading(true);
-    void fetchActiveAdById(selectedAdId)
-      .then((found) => {
+    void fetchActiveAdById(selectedAdId, selectedAdPreviewToken)
+      .then((res) => {
         if (cancelled) return;
-        setDirectAd(found);
+        setDirectAd(res?.ad ?? null);
+        setIsDirectAdPreview(Boolean(res?.isPreview));
+        if (res?.settings) setAdSettings(res.settings);
         setDirectAdLoading(false);
       })
       .catch(() => {
@@ -522,7 +553,7 @@ export default function App() {
     return () => {
       cancelled = true;
     };
-  }, [selectedAdId, activeAds]);
+  }, [selectedAdId, selectedAdPreviewToken, activeAds]);
 
   const handleLoadMoreArticles = async () => {
     if (loadingMoreArticles || !hasMoreArticles) return;
@@ -698,14 +729,18 @@ export default function App() {
   const handleOpenAd = (ad: Advertisement) => {
     setSelectedArticleId(null);
     setSelectedEventId(null);
+    setSelectedAdPreviewToken(null);
+    setIsDirectAdPreview(false);
     setDirectAd(ad);
     setDirectAdLoading(false);
     setSelectedAdId(ad.id);
-    navigateTo(`/ads?ad=${encodeURIComponent(ad.id)}`, true);
+    navigateTo(`/ads?ad=${encodeURIComponent(ad.sharing?.customSlug || ad.id)}`, true);
   };
 
   const handleCloseAd = () => {
     setSelectedAdId(null);
+    setSelectedAdPreviewToken(null);
+    setIsDirectAdPreview(false);
     setDirectAd(null);
     setDirectAdLoading(false);
     navigateTo('/ads');
@@ -796,6 +831,18 @@ export default function App() {
               onCloseEvent={handleCloseEvent}
               onBackToNews={handleResetHome}
             />
+            {!selectedEventId && activeAds.length > 0 && (
+              <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pb-8">
+                <HomepageAdSlot
+                  ads={activeAds}
+                  settings={adSettings}
+                  position="custom"
+                  customPosition="after_events"
+                  onOpenAd={handleOpenAd}
+                  onViewAllAds={handleJumpToAds}
+                />
+              </div>
+            )}
           </main>
         ) : chatActive ? (
           <main className="flex-1">
@@ -805,7 +852,9 @@ export default function App() {
           <main className="flex-1">
             <LocalAdsSection
               ads={activeAds}
+              settings={adSettings}
               directAd={directAd}
+              isDirectPreview={isDirectAdPreview}
               isLoading={selectedAdId ? directAdLoading && !directAd : !adsLoaded}
               selectedAdId={selectedAdId}
               onSelectAd={handleOpenAd}
@@ -821,6 +870,7 @@ export default function App() {
                 article={selectedArticle}
                 relatedArticles={relatedArticles}
                 activeAds={activeAds}
+                adSettings={adSettings}
                 onBack={handleCloseArticle}
                 onSelectArticle={handleOpenArticle}
                 onSelectAd={handleOpenAd}
@@ -846,7 +896,19 @@ export default function App() {
             )}
           </div>
         ) : (
-        <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-5 sm:py-6">
+        <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-5 sm:py-6 space-y-6">
+          {/* Custom Top Banner Homepage Ad Slot */}
+          {activeAds.length > 0 && (
+            <HomepageAdSlot
+              ads={activeAds}
+              settings={adSettings}
+              position="custom"
+              customPosition="top_banner"
+              onOpenAd={handleOpenAd}
+              onViewAllAds={handleJumpToAds}
+            />
+          )}
+
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
             {/* Left/Main Timeline Feed (8 cols on desktop, full width on mobile) */}
             <div className="lg:col-span-8">
@@ -944,22 +1006,24 @@ export default function App() {
                       onOpenArticle={handleOpenArticle}
                     />
 
-                    {/* Automatic Local Advertisement Slider */}
+                    {/* Homepage Advertisement Section — Below Main Headline/Lead Section */}
                     {activeAds.length > 0 && (
-                      <AdSlider
+                      <HomepageAdSlot
                         ads={activeAds}
+                        settings={adSettings}
+                        position="below_headline"
                         onOpenAd={handleOpenAd}
                         onViewAllAds={handleJumpToAds}
                       />
                     )}
 
                     {/* Date-Wise Sections: Today, Yesterday, and older dates */}
-                    {dateGroups.map((group) => (
-                      <section
-                        key={group.key}
-                        aria-label={`${group.heading} news`}
-                        className="space-y-3"
-                      >
+                    {dateGroups.map((group, groupIdx) => (
+                      <div key={group.key} className="space-y-6">
+                        <section
+                          aria-label={`${group.heading} news`}
+                          className="space-y-3"
+                        >
                         <div className="relative flex items-center justify-between gap-3 pt-1">
                           <span
                             className="absolute -left-6 sm:-left-7 top-1/2 -translate-y-1/2 w-3.5 h-3.5 rounded-full bg-[#0F274A] border-2 border-amber-400 z-10"
@@ -1086,6 +1150,18 @@ export default function App() {
                           })}
                         </div>
                       </section>
+
+                      {/* Homepage Advertisement Section — Between News Sections (after first group) */}
+                      {groupIdx === 0 && activeAds.length > 0 && (
+                        <HomepageAdSlot
+                          ads={activeAds}
+                          settings={adSettings}
+                          position="between_news"
+                          onOpenAd={handleOpenAd}
+                          onViewAllAds={handleJumpToAds}
+                        />
+                      )}
+                    </div>
                     ))}
                   </div>
 
@@ -1120,9 +1196,24 @@ export default function App() {
                   setSelectedLocation(loc);
                   window.scrollTo({ top: 0, behavior: 'smooth' });
                 }}
+                activeAds={activeAds}
+                adSettings={adSettings}
+                onOpenAd={handleOpenAd}
+                onViewAllAds={handleJumpToAds}
               />
             </div>
           </div>
+
+          {/* Homepage Advertisement Section — Above Footer */}
+          {activeAds.length > 0 && (
+            <HomepageAdSlot
+              ads={activeAds}
+              settings={adSettings}
+              position="above_footer"
+              onOpenAd={handleOpenAd}
+              onViewAllAds={handleJumpToAds}
+            />
+          )}
         </main>
       )}
 
@@ -1202,11 +1293,41 @@ export default function App() {
         </div>
       </footer>
 
-      {/* Non-Intrusive Floating Local Advertisement While Scrolling */}
+      {/* Optional Website Entry Advertisement Overlay */}
+      <WebsiteEntryAd
+        ads={activeAds}
+        settings={adSettings}
+        onOpenAd={handleOpenAd}
+        disabled={
+          adsActive ||
+          Boolean(selectedAdId) ||
+          Boolean(selectedAdPreviewToken) ||
+          chatActive
+        }
+        onActiveChange={setEntryOverlayActive}
+      />
+
+      {/* Optional Main Homepage Popup Advertisement */}
+      <HomepagePopupAd
+        ads={activeAds}
+        settings={adSettings}
+        onOpenAd={handleOpenAd}
+        entryOverlayActive={entryOverlayActive}
+        disabled={
+          isSpecialRoute ||
+          Boolean(selectedArticleId) ||
+          Boolean(selectedAdId) ||
+          Boolean(selectedEventId)
+        }
+      />
+
+      {/* Article Reading / Scroll Popup Advertisement */}
       <FloatingScrollAd
         ads={activeAds}
+        settings={adSettings}
         onOpenAd={handleOpenAd}
-        disabled={adsActive || Boolean(selectedAdId) || chatActive}
+        articleId={selectedArticle ? selectedArticle.id : null}
+        disabled={adsActive || Boolean(selectedAdId) || chatActive || entryOverlayActive}
       />
 
       {/* Floating Message Admin Button at Bottom-Right Corner */}

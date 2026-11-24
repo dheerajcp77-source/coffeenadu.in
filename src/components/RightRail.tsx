@@ -1,16 +1,41 @@
 import { KOPPA_BRIEFS, KOPPA_MARKET_RATES, KOPPA_PLACE_OPTIONS } from '../constants/newsData';
+import type { AdPlatformSettings, Advertisement } from '../types/ads';
+import { HomepageAdSlot } from './HomepageAdSlot';
 import { WhatsAppGroupBanner } from './WhatsAppGroupBanner';
 
 interface RightRailProps {
   selectedLocation: string;
   onSelectLocation: (location: string) => void;
+  activeAds?: Advertisement[];
+  adSettings?: AdPlatformSettings | null;
+  onOpenAd?: (ad: Advertisement) => void;
+  onViewAllAds?: () => void;
 }
 
-export function RightRail({ selectedLocation, onSelectLocation }: RightRailProps) {
+export function RightRail({
+  selectedLocation,
+  onSelectLocation,
+  activeAds = [],
+  adSettings,
+  onOpenAd,
+  onViewAllAds,
+}: RightRailProps) {
   return (
     <aside aria-label="Koppa Taluk Quick Briefs and Market Rates" className="space-y-6">
       {/* Join Coffeenadu News WhatsApp Group */}
       <WhatsAppGroupBanner variant="card" />
+
+      {/* Custom Homepage Right Rail Advertisement Placement */}
+      {onOpenAd && activeAds.length > 0 && (
+        <HomepageAdSlot
+          ads={activeAds}
+          settings={adSettings}
+          position="custom"
+          customPosition="right_rail"
+          onOpenAd={onOpenAd}
+          onViewAllAds={onViewAllAds}
+        />
+      )}
 
       {/* Town / Hobli Quick Filter in Kannada */}
       <section className="bg-white border border-slate-200 rounded-xl p-4 sm:p-5">

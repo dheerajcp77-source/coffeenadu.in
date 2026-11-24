@@ -1,42 +1,67 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowRight, ChevronLeft, ChevronRight, Megaphone } from 'lucide-react';
-import { trackAdInteraction } from '../services/adsClient';
-import type { Advertisement } from '../types/ads';
+import { ChevronLeft, ChevronRight, Megaphone } from 'lucide-react';
+import { trackAdInteraction, type AdTrackPlacement } from '../services/adsClient';
+import type { AdPlatformSettings, Advertisement } from '../types/ads';
 import {
   formatReadableAdDate,
   isAdCurrentlyActive,
   orderAdsForFairSlider,
+  rememberRecentForPlacement,
+  selectRotatedAdsForPlacement,
 } from '../utils/adHelpers';
 import { stripRichTextToPlainText } from '../utils/richText';
+import { AdActionButtons } from './AdActionButtons';
 import { AdImage } from './AdImage';
+import { AdShareBar } from './AdShareBar';
 
 interface AdSliderProps {
   ads: Advertisement[];
+  settings?: AdPlatformSettings | null;
   onOpenAd: (ad: Advertisement) => void;
   onViewAllAds?: () => void;
   title?: string;
+  placement?: AdTrackPlacement;
+  homepagePosition?: 'below_headline' | 'between_news' | 'above_footer' | 'custom';
+  showAllActive?: boolean;
+  variant?: 'default' | 'compact' | 'rail';
+  isPreview?: boolean;
 }
-
-const AUTO_ROTATE_MS = 4500;
 
 export function AdSlider({
   ads,
+  settings,
   onOpenAd,
   onViewAllAds,
   title = 'Local Business Spotlight',
+  placement = 'homepageSection',
+  homepagePosition = 'below_headline',
+  showAllActive = false,
+  variant = 'default',
+  isPreview = false,
 }: AdSliderProps) {
   const activeAds = useMemo(() => {
-    const eligible = ads.filter((ad) => isAdCurrentlyActive(ad));
-    return orderAdsForFairSlider(eligible);
-  }, [ads]);
+    if (showAllActive) {
+      return orderAdsForFairSlider(ads.filter((ad) => isAdCurrentlyActive(ad)));
+    }
+    return selectRotatedAdsForPlacement(ads, settings, 'homepageSection', {
+      homepagePosition,
+    });
+  }, [ads, settings, showAllActive, homepagePosition]);
+
+  const rotationMode = settings?.rotationMode || 'both';
+  const allowAuto = rotationMode === 'automatic' || rotationMode === 'both';
+  const allowManual = rotationMode === 'manual' || rotationMode === 'both';
+  const intervalMs = Math.max(2000, (settings?.rotationSpeedSeconds || 5) * 1000);
 
   const trackRef = useRef<HTMLDivElement | null>(null);
   const activeIndexRef = useRef(0);
   const scrollSyncTimerRef = useRef<number | null>(null);
+  const impressedIdsRef = useRef<Set<string>>(new Set());
   const [activeIndex, setActiveIndex] = useState(0);
   const [isPaused, setIsPaused] = useState(false);
 
   const total = activeAds.length;
+  const currentAd = activeAds[activeIndex] || activeAds[0] || null;
 
   useEffect(() => {
     activeIndexRef.current = activeIndex;
@@ -52,6 +77,17 @@ export function AdSlider({
       }
     }
   }, [total]);
+
+  // Track real impression when active slide is displayed
+  useEffect(() => {
+    if (!currentAd || isPreview) return;
+    const key = `${placement}:${homepagePosition}:${currentAd.id}`;
+    if (!impressedIdsRef.current.has(key)) {
+      impressedIdsRef.current.add(key);
+      rememberRecentForPlacement(`homepageSection:${homepagePosition}`, currentAd.id);
+      void trackAdInteraction(currentAd.id, 'impression', { placement, isPreview });
+    }
+  }, [currentAd, placement, homepagePosition, isPreview]);
 
   const scrollToSlide = useCallback(
     (targetIndex: number) => {
@@ -70,12 +106,16 @@ export function AdSlider({
   );
 
   useEffect(() => {
-    if (total <= 1 || isPaused) return;
+    if (!allowAuto || total <= 1 || isPaused) return;
+    const activeRotationMs =
+      currentAd?.rotation?.customIntervalSeconds && currentAd.rotation.customIntervalSeconds >= 2
+        ? currentAd.rotation.customIntervalSeconds * 1000
+        : intervalMs;
     const timer = window.setInterval(() => {
       scrollToSlide(activeIndexRef.current + 1);
-    }, AUTO_ROTATE_MS);
+    }, activeRotationMs);
     return () => window.clearInterval(timer);
-  }, [total, isPaused, scrollToSlide]);
+  }, [allowAuto, total, isPaused, scrollToSlide, intervalMs, currentAd?.rotation?.customIntervalSeconds]);
 
   useEffect(() => {
     return () => {
@@ -103,6 +143,8 @@ export function AdSlider({
 
   if (total === 0) return null;
 
+  const isRail = variant === 'rail';
+
   return (
     <section
       aria-roledescription="carousel"
@@ -118,14 +160,18 @@ export function AdSlider({
       className="rounded-2xl overflow-hidden border border-slate-200 bg-white shadow-2xs"
     >
       {/* Header Strip */}
-      <div className="flex items-center justify-between gap-3 px-4 py-2.5 border-b border-slate-200 bg-slate-50/90">
+      <div className="flex items-center justify-between gap-2 px-4 py-2.5 border-b border-slate-200 bg-slate-50/90">
         <div className="flex items-center gap-2 text-xs font-bold text-[#0F274A] min-w-0">
           <Megaphone className="w-3.5 h-3.5 text-amber-600 shrink-0" aria-hidden="true" />
           <span className="truncate">{title}</span>
-          <span className="text-slate-400 font-normal" aria-hidden="true">·</span>
-          <span className="text-[11px] font-medium text-slate-500 tabular-nums whitespace-nowrap">
-            {activeIndex + 1} / {total}
-          </span>
+          {total > 1 && (
+            <>
+              <span className="text-slate-400 font-normal" aria-hidden="true">·</span>
+              <span className="text-[11px] font-medium text-slate-500 tabular-nums whitespace-nowrap">
+                {activeIndex + 1} / {total}
+              </span>
+            </>
+          )}
         </div>
 
         <div className="flex items-center gap-2 shrink-0">
@@ -138,7 +184,7 @@ export function AdSlider({
               All Local Ads
             </button>
           )}
-          {total > 1 && (
+          {allowManual && total > 1 && (
             <div className="inline-flex items-center gap-1">
               <button
                 type="button"
@@ -175,42 +221,56 @@ export function AdSlider({
               role="button"
               tabIndex={0}
               onClick={() => {
-                void trackAdInteraction(ad.id, 'click');
+                void trackAdInteraction(ad.id, 'click', { placement, isPreview });
                 onOpenAd(ad);
               }}
               onKeyDown={(e) => {
                 if (e.key === 'Enter' || e.key === ' ') {
                   e.preventDefault();
-                  void trackAdInteraction(ad.id, 'click');
+                  void trackAdInteraction(ad.id, 'click', { placement, isPreview });
                   onOpenAd(ad);
-                } else if (e.key === 'ArrowRight' && total > 1) {
+                } else if (allowManual && e.key === 'ArrowRight' && total > 1) {
                   e.preventDefault();
                   scrollToSlide(activeIndex + 1);
-                } else if (e.key === 'ArrowLeft' && total > 1) {
+                } else if (allowManual && e.key === 'ArrowLeft' && total > 1) {
                   e.preventDefault();
                   scrollToSlide(activeIndex - 1);
                 }
               }}
-              className="group w-full shrink-0 snap-start snap-always cursor-pointer grid grid-cols-1 sm:grid-cols-12 bg-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#0F274A]"
+              className={`group w-full shrink-0 snap-start snap-always cursor-pointer bg-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#0F274A] ${
+                isRail ? 'flex flex-col' : 'grid grid-cols-1 sm:grid-cols-12'
+              }`}
             >
               {/* Clean Original Advertisement Image (Unmodified, Zero Overlay) */}
-              <div className="sm:col-span-5 bg-slate-50 border-b sm:border-b-0 sm:border-r border-slate-100 flex items-center justify-center p-2">
+              <div
+                className={`${
+                  isRail
+                    ? 'w-full border-b'
+                    : 'sm:col-span-5 border-b sm:border-b-0 sm:border-r'
+                } bg-slate-50 border-slate-100 flex items-center justify-center p-2`}
+              >
                 <AdImage
                   src={ad.mainImageUrl}
                   alt={ad.title}
                   fit="contain"
-                  className="w-full h-44 sm:h-48 bg-slate-50 rounded-lg"
+                  className={`w-full ${isRail ? 'h-44' : variant === 'compact' ? 'h-36 sm:h-40' : 'h-44 sm:h-48'} bg-slate-50 rounded-lg`}
                 />
               </div>
 
               {/* Editorial Ad Summary */}
-              <div className="sm:col-span-7 p-4 sm:p-5 flex flex-col justify-between gap-3">
+              <div className={`${isRail ? '' : 'sm:col-span-7'} p-4 sm:p-5 flex flex-col justify-between gap-3`}>
                 <div className="space-y-1.5">
                   <div className="flex flex-wrap items-center gap-1.5 text-[11px] font-semibold text-slate-500">
                     <span className="font-mono font-bold text-[#0F274A]">{ad.adNumber}</span>
                     <span aria-hidden="true">·</span>
                     <span>{ad.category}</span>
-                    {ad.expiryDate && (
+                    {ad.advertiserName && (
+                      <>
+                        <span aria-hidden="true">·</span>
+                        <span className="truncate max-w-[140px]">{ad.advertiserName}</span>
+                      </>
+                    )}
+                    {ad.expiryDate && !isRail && (
                       <>
                         <span aria-hidden="true">·</span>
                         <span className="tabular-nums">Until {formatReadableAdDate(ad.expiryDate)}</span>
@@ -235,14 +295,24 @@ export function AdSlider({
                   )}
                 </div>
 
-                <div className="flex items-center justify-between gap-2 pt-1">
-                  <span className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold text-white bg-[#0F274A] group-hover:bg-[#173a6e] rounded-lg transition-colors whitespace-nowrap">
-                    <span>View Advertisement</span>
-                    <ArrowRight className="w-3.5 h-3.5" aria-hidden="true" />
-                  </span>
-                  <span className="text-[11px] font-medium text-slate-400">
-                    Local Ad
-                  </span>
+                <div
+                  className="flex flex-wrap items-center justify-between gap-2 pt-1"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <AdActionButtons
+                    ad={ad}
+                    placement={placement}
+                    onOpenAd={onOpenAd}
+                    isPreview={isPreview}
+                    compact
+                  />
+                  <AdShareBar
+                    ad={ad}
+                    settings={settings}
+                    placement={placement}
+                    compact
+                    isPreview={isPreview}
+                  />
                 </div>
               </div>
             </article>
@@ -250,8 +320,8 @@ export function AdSlider({
         })}
       </div>
 
-      {/* Seek Bar */}
-      {total > 1 && (
+      {/* Pagination Indicators */}
+      {allowManual && total > 1 && (
         <div
           className="px-4 py-2 bg-slate-50 border-t border-slate-100 flex items-center gap-1.5"
           role="tablist"

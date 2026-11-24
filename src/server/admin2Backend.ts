@@ -29,15 +29,33 @@ import {
 } from '../types/admin2.ts';
 import {
   AD_CATEGORIES,
+  DEFAULT_KANNADA_SHARE_TEMPLATE,
+  type AdAnalyticsDailyBucket,
+  type AdAnalyticsRange,
+  type AdApprovalStatus,
+  type AdCampaignSchedule,
+  type AdCtaType,
+  type AdDeviceTarget,
+  type AdDisplayFrequency,
   type AdExtraImage,
+  type AdPlacementSlotKey,
+  type AdPlacementsConfig,
+  type AdPlatformSettings,
+  type AdPriority,
+  type AdRotationOverrides,
+  type AdSharingConfig,
   type AdStatus,
   type Advertisement,
 } from '../types/ads.ts';
 import {
   computeAdStats,
+  createDefaultAdPlacements,
+  createDefaultAdPlatformSettings,
   formatAdNumber,
+  getCurrentIstHm,
   getTodayIstYmd,
   isAdCurrentlyActive,
+  isValidTimeHm,
   isValidYmd,
   sanitizeExternalWebsiteUrl,
   sanitizePhoneDigits,
@@ -152,6 +170,8 @@ interface Admin2PersistedState {
   trafficByDay: Record<string, DailyTrafficBucket>;
   ads: Advertisement[];
   adSequenceCounter: number;
+  adPlatformSettings: AdPlatformSettings;
+  adAnalyticsByDay: Record<string, AdAnalyticsDailyBucket>;
 }
 
 export interface Admin2Request extends Request {
@@ -600,6 +620,8 @@ export class Admin2Backend {
       trafficByDay: {},
       ads: [],
       adSequenceCounter: 0,
+      adPlatformSettings: createDefaultAdPlatformSettings(),
+      adAnalyticsByDay: {},
     };
   }
 
@@ -654,6 +676,24 @@ export class Admin2Backend {
           trafficByDay: raw.trafficByDay && typeof raw.trafficByDay === 'object' ? raw.trafficByDay : {},
           ads: loadedAds,
           adSequenceCounter: Math.max(rawSeq, maxExistingAdSeq),
+          adPlatformSettings: (() => {
+            const def = createDefaultAdPlatformSettings();
+            const rawSettings = raw.adPlatformSettings;
+            if (!rawSettings || typeof rawSettings !== 'object') return def;
+            return {
+              ...def,
+              ...rawSettings,
+              globalPlacementsEnabled: {
+                ...def.globalPlacementsEnabled,
+                ...(rawSettings.globalPlacementsEnabled || {}),
+              },
+              customCategories: Array.isArray(rawSettings.customCategories)
+                ? rawSettings.customCategories.filter((c): c is string => typeof c === 'string' && Boolean(c.trim()))
+                : def.customCategories,
+            };
+          })(),
+          adAnalyticsByDay:
+            raw.adAnalyticsByDay && typeof raw.adAnalyticsByDay === 'object' ? raw.adAnalyticsByDay : {},
         };
 
         // Ensure existing admin/editor accounts gain ads.manage cleanly
@@ -3760,19 +3800,200 @@ export class Admin2Backend {
       return clean;
     };
 
+    const VALID_AD_CATEGORIES_LOWER = new Set(AD_CATEGORIES.map((c) => c.toLowerCase()));
+
     const sanitizeAdCategory = (raw: unknown): string => {
       if (typeof raw === 'string') {
-        const matched = AD_CATEGORIES.find((c) => c.toLowerCase() === raw.trim().toLowerCase());
+        const clean = stripMarkup(raw).slice(0, 48);
+        if (!clean) return 'Business';
+        const matched = AD_CATEGORIES.find((c) => c.toLowerCase() === clean.toLowerCase());
         if (matched) return matched;
-        const custom = stripMarkup(raw).slice(0, 40);
-        if (custom) return custom;
+        const customMatch = (this.state.adPlatformSettings.customCategories || []).find(
+          (c) => c.toLowerCase() === clean.toLowerCase()
+        );
+        if (customMatch) return customMatch;
+        if (!VALID_AD_CATEGORIES_LOWER.has(clean.toLowerCase())) {
+          return clean;
+        }
       }
       return 'Business';
     };
 
     const sanitizeAdStatus = (raw: unknown): AdStatus => {
-      if (raw === 'active' || raw === 'inactive' || raw === 'draft') return raw;
+      if (raw === 'active' || raw === 'inactive' || raw === 'paused' || raw === 'draft') return raw;
       return 'active';
+    };
+
+    const sanitizeApprovalStatus = (raw: unknown): AdApprovalStatus => {
+      if (raw === 'approved' || raw === 'pending_approval' || raw === 'rejected') return raw;
+      return 'approved';
+    };
+
+    const sanitizeAdPriority = (raw: unknown): AdPriority => {
+      if (raw === 'high' || raw === 'medium' || raw === 'low') return raw;
+      return 'medium';
+    };
+
+    const sanitizeAdDevice = (raw: unknown): AdDeviceTarget => {
+      if (raw === 'all' || raw === 'desktop' || raw === 'mobile') return raw;
+      return 'all';
+    };
+
+    const sanitizeAdFrequency = (raw: unknown): AdDisplayFrequency => {
+      if (raw === 'every_visit' || raw === 'once_per_session' || raw === 'once_per_day') return raw;
+      return 'once_per_session';
+    };
+
+    const sanitizeCtaType = (raw: unknown): AdCtaType => {
+      if (
+        raw === 'contact_now' ||
+        raw === 'call_now' ||
+        raw === 'whatsapp_now' ||
+        raw === 'visit_website' ||
+        raw === 'get_directions' ||
+        raw === 'learn_more'
+      ) {
+        return raw;
+      }
+      return 'learn_more';
+    };
+
+    const clampNum = (raw: unknown, min: number, max: number, fallback: number): number => {
+      const n = Number(raw);
+      if (!Number.isFinite(n)) return fallback;
+      return Math.max(min, Math.min(max, Math.round(n)));
+    };
+
+    const sanitizePlacements = (raw: unknown): AdPlacementsConfig => {
+      const def = createDefaultAdPlacements();
+      if (!raw || typeof raw !== 'object') return def;
+      const r = raw as Record<string, unknown>;
+
+      const ap = r.articlePopup && typeof r.articlePopup === 'object' ? (r.articlePopup as Record<string, unknown>) : {};
+      const ea = r.endOfArticle && typeof r.endOfArticle === 'object' ? (r.endOfArticle as Record<string, unknown>) : {};
+      const hp = r.homepagePopup && typeof r.homepagePopup === 'object' ? (r.homepagePopup as Record<string, unknown>) : {};
+      const we = r.websiteEntry && typeof r.websiteEntry === 'object' ? (r.websiteEntry as Record<string, unknown>) : {};
+      const hs = r.homepageSection && typeof r.homepageSection === 'object' ? (r.homepageSection as Record<string, unknown>) : {};
+      const ai = r.articleInline && typeof r.articleInline === 'object' ? (r.articleInline as Record<string, unknown>) : {};
+
+      const scrollPct = Number(ap.scrollTriggerPercent);
+      const safeScroll: 25 | 50 | 75 = scrollPct === 25 || scrollPct === 75 ? scrollPct : 50;
+
+      return {
+        articlePopup: {
+          enabled: Boolean(ap.enabled),
+          scrollTriggerPercent: safeScroll,
+          size: ap.size === 'medium' || ap.size === 'large' ? ap.size : 'compact',
+          position:
+            ap.position === 'bottom-right' ||
+            ap.position === 'bottom-left' ||
+            ap.position === 'top-right' ||
+            ap.position === 'bottom-center'
+              ? ap.position
+              : 'bottom-left',
+          delaySeconds: clampNum(ap.delaySeconds, 0, 60, 1),
+        },
+        endOfArticle: {
+          enabled: Boolean(ea.enabled),
+          position: ea.position === 'after_related' ? 'after_related' : 'before_related',
+        },
+        homepagePopup: {
+          enabled: Boolean(hp.enabled),
+          delaySeconds: clampNum(hp.delaySeconds, 0, 60, 3),
+          position:
+            hp.position === 'bottom-right' || hp.position === 'bottom-left' ? hp.position : 'center',
+          design: hp.design === 'banner' || hp.design === 'spotlight' ? hp.design : 'card',
+          frequency: sanitizeAdFrequency(hp.frequency),
+        },
+        websiteEntry: {
+          enabled: Boolean(we.enabled),
+          delaySeconds: clampNum(we.delaySeconds, 0, 30, 0),
+          minDurationSeconds: clampNum(we.minDurationSeconds, 0, 15, 3),
+          layout: we.layout === 'fullscreen' ? 'fullscreen' : 'large',
+        },
+        homepageSection: {
+          enabled: Boolean(hs.enabled),
+          position:
+            hs.position === 'between_news' || hs.position === 'above_footer' || hs.position === 'custom'
+              ? hs.position
+              : 'below_headline',
+          customPosition:
+            hs.customPosition === 'top_banner' || hs.customPosition === 'after_events'
+              ? hs.customPosition
+              : 'right_rail',
+        },
+        articleInline: {
+          enabled: Boolean(ai.enabled),
+          belowHeadline: Boolean(ai.belowHeadline),
+          belowSummary: Boolean(ai.belowSummary),
+          betweenParagraphs: Boolean(ai.betweenParagraphs),
+          paragraphIndex: clampNum(ai.paragraphIndex, 1, 15, 2),
+          aboveSharing: Boolean(ai.aboveSharing),
+        },
+      };
+    };
+
+    const sanitizeSchedule = (raw: unknown): AdCampaignSchedule | undefined => {
+      if (!raw || typeof raw !== 'object') return undefined;
+      const r = raw as Record<string, unknown>;
+      const startTime = typeof r.startTime === 'string' && isValidTimeHm(r.startTime) ? r.startTime.trim() : undefined;
+      const expiryTime = typeof r.expiryTime === 'string' && isValidTimeHm(r.expiryTime) ? r.expiryTime.trim() : undefined;
+      const dailyStartTime =
+        typeof r.dailyStartTime === 'string' && isValidTimeHm(r.dailyStartTime) ? r.dailyStartTime.trim() : undefined;
+      const dailyEndTime =
+        typeof r.dailyEndTime === 'string' && isValidTimeHm(r.dailyEndTime) ? r.dailyEndTime.trim() : undefined;
+      const daysOfWeek = Array.isArray(r.daysOfWeek)
+        ? Array.from(
+            new Set(
+              r.daysOfWeek
+                .map((d) => Number(d))
+                .filter((d) => Number.isInteger(d) && d >= 0 && d <= 6)
+            )
+          ).sort()
+        : undefined;
+      if (!startTime && !expiryTime && !dailyStartTime && !dailyEndTime && (!daysOfWeek || daysOfWeek.length === 0)) {
+        return undefined;
+      }
+      return {
+        ...(startTime ? { startTime } : {}),
+        ...(expiryTime ? { expiryTime } : {}),
+        ...(daysOfWeek && daysOfWeek.length > 0 ? { daysOfWeek } : {}),
+        ...(dailyStartTime ? { dailyStartTime } : {}),
+        ...(dailyEndTime ? { dailyEndTime } : {}),
+      };
+    };
+
+    const sanitizeRotationOverrides = (raw: unknown): AdRotationOverrides | undefined => {
+      if (!raw || typeof raw !== 'object') return undefined;
+      const r = raw as Record<string, unknown>;
+      return {
+        allowAutoRotation: r.allowAutoRotation !== false,
+        weight: clampNum(r.weight, 1, 10, 5),
+        ...(r.customIntervalSeconds !== undefined && Number(r.customIntervalSeconds) > 0
+          ? { customIntervalSeconds: clampNum(r.customIntervalSeconds, 2, 60, 5) }
+          : {}),
+      };
+    };
+
+    const sanitizeSharingConfig = (raw: unknown): AdSharingConfig | undefined => {
+      if (!raw || typeof raw !== 'object') return undefined;
+      const r = raw as Record<string, unknown>;
+      const customShareMessage =
+        typeof r.customShareMessage === 'string' ? r.customShareMessage.trim().slice(0, 1800) : '';
+      const customSlug =
+        typeof r.customSlug === 'string'
+          ? r.customSlug
+              .trim()
+              .toLowerCase()
+              .replace(/[^a-z0-9-]+/g, '-')
+              .replace(/^-+|-+$/g, '')
+              .slice(0, 80)
+          : '';
+      if (!customShareMessage && !customSlug) return undefined;
+      return {
+        ...(customShareMessage ? { customShareMessage } : {}),
+        ...(customSlug ? { customSlug } : {}),
+      };
     };
 
     const nextAvailableAdNumber = (): string => {
@@ -3784,18 +4005,37 @@ export class Admin2Backend {
       return formatAdNumber(nextSeq);
     };
 
-    // Public: list currently active, published, non-expired advertisements
+    const generatePreviewToken = (): string => crypto.randomBytes(12).toString('hex');
+
+    const matchesPreviewToken = (ad: Advertisement, rawToken: unknown): boolean => {
+      if (typeof rawToken !== 'string' || !rawToken.trim() || !ad.previewToken) return false;
+      const provided = Buffer.from(rawToken.trim());
+      const expected = Buffer.from(ad.previewToken);
+      if (provided.length !== expected.length) return false;
+      return crypto.timingSafeEqual(provided, expected);
+    };
+
+    // Public: list currently active, published, approved, non-expired advertisements + platform settings
     app.get('/api/ads', (_req, res) => {
       const todayYmd = getTodayIstYmd();
+      const nowHm = getCurrentIstHm();
       const activeAds = this.state.ads
-        .filter((ad) => isAdCurrentlyActive(ad, todayYmd))
+        .filter((ad) => isAdCurrentlyActive(ad, todayYmd, nowHm))
         .sort((a, b) => {
+          const pMap: Record<AdPriority, number> = { high: 3, medium: 2, low: 1 };
+          const pDiff = (pMap[b.priority || 'medium'] || 2) - (pMap[a.priority || 'medium'] || 2);
+          if (pDiff !== 0) return pDiff;
           const dateDiff = b.publishDate.localeCompare(a.publishDate);
           if (dateDiff !== 0) return dateDiff;
           return b.createdAt.localeCompare(a.createdAt);
         });
-      res.setHeader('Cache-Control', 'public, max-age=30, stale-while-revalidate=60');
-      res.json({ ok: true, items: activeAds, total: activeAds.length });
+      res.setHeader('Cache-Control', 'public, max-age=20, stale-while-revalidate=40');
+      res.json({
+        ok: true,
+        items: activeAds,
+        settings: this.state.adPlatformSettings,
+        total: activeAds.length,
+      });
     });
 
     // Public: serve disk-persisted clean ad images when Google Drive is not configured
@@ -3818,55 +4058,514 @@ export class Admin2Backend {
       res.sendFile(targetPath);
     });
 
-    // Public: single active advertisement details by id or ADxxx number
+    // Public: single active advertisement details by id, ADxxx number, or custom slug (or draft/scheduled with valid preview token)
     app.get('/api/ads/:id', (req, res) => {
       const lookup = String(req.params.id || '').trim();
       if (!lookup) {
         res.status(400).json({ ok: false, error: 'Missing advertisement ID.' });
         return;
       }
+      const previewToken = typeof req.query.preview === 'string' ? req.query.preview.trim() : '';
       const todayYmd = getTodayIstYmd();
-      const found = this.state.ads.find(
+      const nowHm = getCurrentIstHm();
+      const candidate = this.state.ads.find(
         (ad) =>
-          (ad.id === lookup || ad.adNumber.toUpperCase() === lookup.toUpperCase()) &&
-          isAdCurrentlyActive(ad, todayYmd)
+          ad.id === lookup ||
+          ad.adNumber.toUpperCase() === lookup.toUpperCase() ||
+          (ad.sharing?.customSlug && ad.sharing.customSlug.toLowerCase() === lookup.toLowerCase())
       );
-      if (!found) {
+
+      if (!candidate) {
         res.status(404).json({ ok: false, error: 'Advertisement not found or no longer active.' });
         return;
       }
-      res.setHeader('Cache-Control', 'public, max-age=30, stale-while-revalidate=60');
-      res.json({ ok: true, item: found });
+
+      const isPrivatePreview = Boolean(previewToken && matchesPreviewToken(candidate, previewToken));
+      if (!isPrivatePreview && !isAdCurrentlyActive(candidate, todayYmd, nowHm)) {
+        res.status(404).json({ ok: false, error: 'Advertisement not found or no longer active.' });
+        return;
+      }
+
+      res.setHeader('Cache-Control', isPrivatePreview ? 'no-store' : 'public, max-age=20, stale-while-revalidate=40');
+      res.json({
+        ok: true,
+        item: candidate,
+        isPreview: isPrivatePreview,
+        settings: this.state.adPlatformSettings,
+      });
     });
 
-    // Public: lightweight ad impression / click tracking
+    // Public: real granular impression / click / CTA / placement / device tracking
     app.post('/api/ads/:id/track', (req, res) => {
       const lookup = String(req.params.id || '').trim();
-      const type = req.body?.type === 'click' ? 'click' : 'view';
       const found = this.state.ads.find((ad) => ad.id === lookup);
       if (!found) {
         res.status(404).json({ ok: false, error: 'Advertisement not found.' });
         return;
       }
-      if (type === 'click') {
-        found.clicks = (Number(found.clicks) || 0) + 1;
-      } else {
-        found.views = (Number(found.views) || 0) + 1;
+
+      const rawType = typeof req.body?.eventType === 'string' ? req.body.eventType : req.body?.type;
+      const eventType =
+        rawType === 'click' ||
+        rawType === 'whatsapp' ||
+        rawType === 'phone' ||
+        rawType === 'website' ||
+        rawType === 'directions' ||
+        rawType === 'share'
+          ? rawType
+          : 'impression';
+
+      const rawPlacement = typeof req.body?.placement === 'string' ? req.body.placement.trim() : 'direct';
+      const placementKey: AdPlacementSlotKey | 'directory' | 'direct' =
+        rawPlacement === 'articlePopup' ||
+        rawPlacement === 'endOfArticle' ||
+        rawPlacement === 'homepagePopup' ||
+        rawPlacement === 'websiteEntry' ||
+        rawPlacement === 'homepageSection' ||
+        rawPlacement === 'articleInline' ||
+        rawPlacement === 'directory' ||
+        rawPlacement === 'direct'
+          ? rawPlacement
+          : 'direct';
+
+      const uaDevice: 'desktop' | 'mobile' =
+        classifyDevice(req.headers['user-agent']) === 'Mobile' ? 'mobile' : 'desktop';
+      const device: 'desktop' | 'mobile' =
+        req.body?.device === 'mobile' || req.body?.device === 'desktop'
+          ? req.body.device
+          : uaDevice;
+
+      const rawVisitorId = typeof req.body?.visitorId === 'string' ? req.body.visitorId.trim().slice(0, 80) : '';
+      const visitorHash = sha256Hex(
+        rawVisitorId || `${getClientIp(req)}|${String(req.headers['user-agent'] || '').slice(0, 120)}`
+      ).slice(0, 24);
+
+      if (!found.counters) {
+        found.counters = {
+          whatsappClicks: 0,
+          phoneClicks: 0,
+          websiteClicks: 0,
+          directionsClicks: 0,
+          shareClicks: 0,
+          byPlacement: {},
+          byDevice: { desktop: 0, mobile: 0 },
+        };
       }
+
+      const todayKey = getTodayIstYmd();
+      if (!this.state.adAnalyticsByDay[todayKey]) {
+        this.state.adAnalyticsByDay[todayKey] = {
+          date: todayKey,
+          impressions: 0,
+          clicks: 0,
+          whatsappClicks: 0,
+          phoneClicks: 0,
+          websiteClicks: 0,
+          directionsClicks: 0,
+          shareClicks: 0,
+          desktopImpressions: 0,
+          mobileImpressions: 0,
+          visitorHashes: [],
+          byAd: {},
+        };
+      }
+      const dayBucket = this.state.adAnalyticsByDay[todayKey];
+      if (!dayBucket.byAd[found.id]) {
+        dayBucket.byAd[found.id] = {
+          impressions: 0,
+          clicks: 0,
+          whatsappClicks: 0,
+          phoneClicks: 0,
+          websiteClicks: 0,
+          directionsClicks: 0,
+          shareClicks: 0,
+          visitorHashes: [],
+          byPlacement: {},
+          byDevice: { desktop: 0, mobile: 0 },
+        };
+      }
+      const adDay = dayBucket.byAd[found.id];
+
+      if (!dayBucket.visitorHashes.includes(visitorHash) && dayBucket.visitorHashes.length < 50_000) {
+        dayBucket.visitorHashes.push(visitorHash);
+      }
+      if (!adDay.visitorHashes.includes(visitorHash) && adDay.visitorHashes.length < 25_000) {
+        adDay.visitorHashes.push(visitorHash);
+      }
+
+      if (eventType === 'impression') {
+        found.views = (Number(found.views) || 0) + 1;
+        found.counters.byPlacement[placementKey] = (found.counters.byPlacement[placementKey] || 0) + 1;
+        found.counters.byDevice[device] = (found.counters.byDevice[device] || 0) + 1;
+
+        dayBucket.impressions += 1;
+        if (device === 'mobile') dayBucket.mobileImpressions += 1;
+        else dayBucket.desktopImpressions += 1;
+
+        adDay.impressions += 1;
+        adDay.byPlacement[placementKey] = (adDay.byPlacement[placementKey] || 0) + 1;
+        adDay.byDevice[device] = (adDay.byDevice[device] || 0) + 1;
+      } else {
+        found.clicks = (Number(found.clicks) || 0) + 1;
+        dayBucket.clicks += 1;
+        adDay.clicks += 1;
+
+        if (eventType === 'whatsapp') {
+          found.counters.whatsappClicks += 1;
+          dayBucket.whatsappClicks += 1;
+          adDay.whatsappClicks += 1;
+        } else if (eventType === 'phone') {
+          found.counters.phoneClicks += 1;
+          dayBucket.phoneClicks += 1;
+          adDay.phoneClicks += 1;
+        } else if (eventType === 'website') {
+          found.counters.websiteClicks += 1;
+          dayBucket.websiteClicks += 1;
+          adDay.websiteClicks += 1;
+        } else if (eventType === 'directions') {
+          found.counters.directionsClicks += 1;
+          dayBucket.directionsClicks += 1;
+          adDay.directionsClicks += 1;
+        } else if (eventType === 'share') {
+          found.counters.shareClicks += 1;
+          dayBucket.shareClicks += 1;
+          adDay.shareClicks += 1;
+        }
+      }
+
       this.schedulePersist();
       res.status(202).json({ ok: true, views: found.views, clicks: found.clicks });
     });
 
-    // Admin: list all advertisements (active, inactive, expired, draft) + summary stats
+    // Admin: list all advertisements + stats + global platform settings
     app.get('/api/admin2/ads', this.requireAuth('ads.manage'), (_req, res) => {
       const todayYmd = getTodayIstYmd();
+      const nowHm = getCurrentIstHm();
       const sorted = [...this.state.ads].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
       res.json({
         ok: true,
         ads: sorted,
-        stats: computeAdStats(sorted, todayYmd),
+        stats: computeAdStats(sorted, todayYmd, nowHm),
         nextAdNumber: nextAvailableAdNumber(),
         todayYmd,
+        settings: this.state.adPlatformSettings,
+      });
+    });
+
+    // Admin: get global advertisement platform settings
+    app.get('/api/admin2/ads/settings', this.requireAuth('ads.manage'), (_req, res) => {
+      res.json({ ok: true, settings: this.state.adPlatformSettings });
+    });
+
+    // Admin: update global advertisement platform settings
+    app.put('/api/admin2/ads/settings', this.requireAuth('ads.manage'), (req: Admin2Request, res) => {
+      const b = req.body && typeof req.body === 'object' ? (req.body as Record<string, unknown>) : {};
+      const current = this.state.adPlatformSettings;
+
+      const rotationMode =
+        b.rotationMode === 'automatic' || b.rotationMode === 'manual' || b.rotationMode === 'both'
+          ? b.rotationMode
+          : current.rotationMode;
+
+      const rotationOrder =
+        b.rotationOrder === 'random' || b.rotationOrder === 'priority' ? b.rotationOrder : current.rotationOrder;
+
+      const defaultShareMessage =
+        typeof b.defaultShareMessage === 'string' && b.defaultShareMessage.trim()
+          ? b.defaultShareMessage.trim().slice(0, 2000)
+          : current.defaultShareMessage || DEFAULT_KANNADA_SHARE_TEMPLATE;
+
+      const customCategories = Array.isArray(b.customCategories)
+        ? Array.from(
+            new Set(
+              b.customCategories
+                .map((c) => (typeof c === 'string' ? stripMarkup(c).slice(0, 48) : ''))
+                .filter((c) => Boolean(c) && !VALID_AD_CATEGORIES_LOWER.has(c.toLowerCase()))
+            )
+          ).slice(0, 30)
+        : current.customCategories;
+
+      const rawGlobalPlacements =
+        b.globalPlacementsEnabled && typeof b.globalPlacementsEnabled === 'object'
+          ? (b.globalPlacementsEnabled as Record<string, unknown>)
+          : null;
+
+      const globalPlacementsEnabled: Record<AdPlacementSlotKey, boolean> = rawGlobalPlacements
+        ? {
+            articlePopup: rawGlobalPlacements.articlePopup !== false,
+            endOfArticle: rawGlobalPlacements.endOfArticle !== false,
+            homepagePopup: rawGlobalPlacements.homepagePopup !== false,
+            websiteEntry: rawGlobalPlacements.websiteEntry !== false,
+            homepageSection: rawGlobalPlacements.homepageSection !== false,
+            articleInline: rawGlobalPlacements.articleInline !== false,
+          }
+        : current.globalPlacementsEnabled;
+
+      const nextSettings: AdPlatformSettings = {
+        rotationMode,
+        rotationSpeedSeconds:
+          b.rotationSpeedSeconds !== undefined
+            ? clampNum(b.rotationSpeedSeconds, 2, 60, current.rotationSpeedSeconds)
+            : current.rotationSpeedSeconds,
+        maxAdsPerPlacement:
+          b.maxAdsPerPlacement !== undefined
+            ? clampNum(b.maxAdsPerPlacement, 1, 20, current.maxAdsPerPlacement)
+            : current.maxAdsPerPlacement,
+        rotationOrder,
+        avoidRepeatInSession:
+          b.avoidRepeatInSession !== undefined
+            ? Boolean(b.avoidRepeatInSession)
+            : current.avoidRepeatInSession,
+        defaultShareMessage,
+        customCategories,
+        approvalWorkflowEnabled:
+          b.approvalWorkflowEnabled !== undefined
+            ? Boolean(b.approvalWorkflowEnabled)
+            : current.approvalWorkflowEnabled,
+        defaultDisplayFrequency:
+          b.defaultDisplayFrequency !== undefined
+            ? sanitizeAdFrequency(b.defaultDisplayFrequency)
+            : current.defaultDisplayFrequency,
+        defaultMaxImpressionsPerVisitor:
+          b.defaultMaxImpressionsPerVisitor !== undefined
+            ? clampNum(b.defaultMaxImpressionsPerVisitor, 0, 100, current.defaultMaxImpressionsPerVisitor)
+            : current.defaultMaxImpressionsPerVisitor,
+        globalPlacementsEnabled,
+        updatedAt: new Date().toISOString(),
+        updatedBy: req.admin2User!.email,
+      };
+
+      this.state.adPlatformSettings = nextSettings;
+      this.addAuditLog({
+        actorEmail: req.admin2User!.email,
+        actorRole: req.admin2User!.role,
+        action: 'ads.settings_updated',
+        targetType: 'settings',
+        targetId: 'adPlatformSettings',
+        details: `Updated ad platform settings (rotation=${nextSettings.rotationMode}, speed=${nextSettings.rotationSpeedSeconds}s, approval=${nextSettings.approvalWorkflowEnabled})`,
+        severity: 'info',
+        ip: getClientIp(req),
+      });
+      this.persistStateNow();
+      res.json({ ok: true, settings: nextSettings });
+    });
+
+    // Admin: real analytics endpoint with daily / weekly / monthly / all breakdowns
+    app.get('/api/admin2/ads/analytics', this.requireAuth('ads.manage'), (req, res) => {
+      const rawRange = typeof req.query.range === 'string' ? req.query.range : 'monthly';
+      const range: AdAnalyticsRange =
+        rawRange === 'daily' || rawRange === 'weekly' || rawRange === 'monthly' || rawRange === 'all'
+          ? rawRange
+          : 'monthly';
+      const filterAdId = typeof req.query.adId === 'string' ? req.query.adId.trim() : '';
+
+      const todayYmd = getTodayIstYmd();
+      const cutoffDays = range === 'daily' ? 0 : range === 'weekly' ? 6 : range === 'monthly' ? 29 : 3650;
+      const [ty, tm, td] = todayYmd.split('-').map(Number);
+      const cutoffDate = new Date(Date.UTC(ty, tm - 1, td - cutoffDays)).toISOString().slice(0, 10);
+
+      const sortedDays = Object.values(this.state.adAnalyticsByDay)
+        .filter((b) => range === 'all' || b.date >= cutoffDate)
+        .sort((a, b) => a.date.localeCompare(b.date));
+
+      const uniqueVisitorSet = new Set<string>();
+      const byPlacement: Record<string, number> = {};
+      const perAdMap = new Map<
+        string,
+        {
+          impressions: number;
+          clicks: number;
+          whatsappClicks: number;
+          phoneClicks: number;
+          websiteClicks: number;
+          directionsClicks: number;
+          shareClicks: number;
+          desktopImpressions: number;
+          mobileImpressions: number;
+          visitorHashes: Set<string>;
+          byPlacement: Record<string, number>;
+        }
+      >();
+
+      let impressions = 0;
+      let clicks = 0;
+      let whatsappClicks = 0;
+      let phoneClicks = 0;
+      let websiteClicks = 0;
+      let directionsClicks = 0;
+      let shareClicks = 0;
+      let desktopImpressions = 0;
+      let mobileImpressions = 0;
+
+      const series = sortedDays.map((day) => {
+        let dayImpressions = 0;
+        let dayClicks = 0;
+        const dayVisitorHashes = new Set<string>();
+
+        for (const [adId, adStats] of Object.entries(day.byAd || {})) {
+          if (filterAdId && adId !== filterAdId) continue;
+
+          dayImpressions += adStats.impressions || 0;
+          dayClicks += adStats.clicks || 0;
+          for (const h of adStats.visitorHashes || []) {
+            dayVisitorHashes.add(h);
+            uniqueVisitorSet.add(h);
+          }
+
+          if (filterAdId) {
+            whatsappClicks += adStats.whatsappClicks || 0;
+            phoneClicks += adStats.phoneClicks || 0;
+            websiteClicks += adStats.websiteClicks || 0;
+            directionsClicks += adStats.directionsClicks || 0;
+            shareClicks += adStats.shareClicks || 0;
+            desktopImpressions += adStats.byDevice?.desktop || 0;
+            mobileImpressions += adStats.byDevice?.mobile || 0;
+          }
+
+          let entry = perAdMap.get(adId);
+          if (!entry) {
+            entry = {
+              impressions: 0,
+              clicks: 0,
+              whatsappClicks: 0,
+              phoneClicks: 0,
+              websiteClicks: 0,
+              directionsClicks: 0,
+              shareClicks: 0,
+              desktopImpressions: 0,
+              mobileImpressions: 0,
+              visitorHashes: new Set<string>(),
+              byPlacement: {},
+            };
+            perAdMap.set(adId, entry);
+          }
+          entry.impressions += adStats.impressions || 0;
+          entry.clicks += adStats.clicks || 0;
+          entry.whatsappClicks += adStats.whatsappClicks || 0;
+          entry.phoneClicks += adStats.phoneClicks || 0;
+          entry.websiteClicks += adStats.websiteClicks || 0;
+          entry.directionsClicks += adStats.directionsClicks || 0;
+          entry.shareClicks += adStats.shareClicks || 0;
+          entry.desktopImpressions += adStats.byDevice?.desktop || 0;
+          entry.mobileImpressions += adStats.byDevice?.mobile || 0;
+          for (const h of adStats.visitorHashes || []) entry.visitorHashes.add(h);
+          for (const [pl, count] of Object.entries(adStats.byPlacement || {})) {
+            entry.byPlacement[pl] = (entry.byPlacement[pl] || 0) + (count || 0);
+            byPlacement[pl] = (byPlacement[pl] || 0) + (count || 0);
+          }
+        }
+
+        if (filterAdId) {
+          impressions += dayImpressions;
+          clicks += dayClicks;
+          return {
+            date: day.date,
+            impressions: dayImpressions,
+            uniqueVisitors: dayVisitorHashes.size,
+            clicks: dayClicks,
+          };
+        }
+
+        impressions += day.impressions || 0;
+        clicks += day.clicks || 0;
+        whatsappClicks += day.whatsappClicks || 0;
+        phoneClicks += day.phoneClicks || 0;
+        websiteClicks += day.websiteClicks || 0;
+        directionsClicks += day.directionsClicks || 0;
+        shareClicks += day.shareClicks || 0;
+        desktopImpressions += day.desktopImpressions || 0;
+        mobileImpressions += day.mobileImpressions || 0;
+        for (const h of day.visitorHashes || []) uniqueVisitorSet.add(h);
+
+        return {
+          date: day.date,
+          impressions: day.impressions || 0,
+          uniqueVisitors: (day.visitorHashes || []).length,
+          clicks: day.clicks || 0,
+        };
+      });
+
+      const scopedAds = filterAdId ? this.state.ads.filter((a) => a.id === filterAdId) : this.state.ads;
+      const perAd = scopedAds.map((ad) => {
+        const tracked = perAdMap.get(ad.id);
+        // Include historical ad totals in 'all' range when day buckets didn't exist yet
+        const adImps = tracked
+          ? range === 'all'
+            ? Math.max(tracked.impressions, Number(ad.views) || 0)
+            : tracked.impressions
+          : range === 'all'
+          ? Number(ad.views) || 0
+          : 0;
+        const adClicks = tracked
+          ? range === 'all'
+            ? Math.max(tracked.clicks, Number(ad.clicks) || 0)
+            : tracked.clicks
+          : range === 'all'
+          ? Number(ad.clicks) || 0
+          : 0;
+        const ctrPct = adImps > 0 ? Number(((adClicks / adImps) * 100).toFixed(2)) : 0;
+        return {
+          adId: ad.id,
+          adNumber: ad.adNumber,
+          title: ad.title,
+          advertiserName: ad.advertiserName,
+          category: ad.category,
+          status: ad.status,
+          impressions: adImps,
+          uniqueVisitors: tracked ? tracked.visitorHashes.size : 0,
+          clicks: adClicks,
+          ctrPct,
+          whatsappClicks: tracked ? tracked.whatsappClicks : ad.counters?.whatsappClicks || 0,
+          phoneClicks: tracked ? tracked.phoneClicks : ad.counters?.phoneClicks || 0,
+          websiteClicks: tracked ? tracked.websiteClicks : ad.counters?.websiteClicks || 0,
+          directionsClicks: tracked ? tracked.directionsClicks : ad.counters?.directionsClicks || 0,
+          shareClicks: tracked ? tracked.shareClicks : ad.counters?.shareClicks || 0,
+          desktopImpressions: tracked ? tracked.desktopImpressions : ad.counters?.byDevice?.desktop || 0,
+          mobileImpressions: tracked ? tracked.mobileImpressions : ad.counters?.byDevice?.mobile || 0,
+          byPlacement: tracked ? tracked.byPlacement : ((ad.counters?.byPlacement as Record<string, number>) || {}),
+        };
+      });
+
+      if (range === 'all') {
+        const sumViews = this.state.ads.reduce((acc, a) => acc + (Number(a.views) || 0), 0);
+        const sumClicks = this.state.ads.reduce((acc, a) => acc + (Number(a.clicks) || 0), 0);
+        impressions = Math.max(impressions, sumViews);
+        clicks = Math.max(clicks, sumClicks);
+      }
+
+      const best = [...perAd]
+        .filter((p) => p.impressions > 0 || p.clicks > 0)
+        .sort((a, b) => b.clicks - a.clicks || b.impressions - a.impressions)[0];
+
+      res.json({
+        ok: true,
+        range,
+        totals: {
+          impressions,
+          uniqueVisitors: uniqueVisitorSet.size,
+          clicks,
+          ctrPct: impressions > 0 ? Number(((clicks / impressions) * 100).toFixed(2)) : 0,
+          whatsappClicks,
+          phoneClicks,
+          websiteClicks,
+          directionsClicks,
+          shareClicks,
+          desktopImpressions,
+          mobileImpressions,
+        },
+        byPlacement,
+        series,
+        perAd: perAd.sort((a, b) => b.impressions - a.impressions || b.clicks - a.clicks),
+        bestPerformingAd: best
+          ? {
+              adId: best.adId,
+              adNumber: best.adNumber,
+              title: best.title,
+              impressions: best.impressions,
+              clicks: best.clicks,
+              ctrPct: best.ctrPct,
+            }
+          : null,
       });
     });
 
@@ -3962,6 +4661,16 @@ export class Admin2Backend {
         websiteUrl = safeUrl;
       }
 
+      let ctaUrl: string | undefined;
+      if (typeof b.ctaUrl === 'string' && b.ctaUrl.trim()) {
+        const safeCtaUrl = sanitizeExternalWebsiteUrl(b.ctaUrl);
+        if (!safeCtaUrl) {
+          res.status(400).json({ ok: false, error: 'CTA Link URL must be a valid http:// or https:// URL.' });
+          return;
+        }
+        ctaUrl = safeCtaUrl;
+      }
+
       const adNumber = nextAvailableAdNumber();
       const seqMatch = adNumber.match(/^AD(\d+)$/i);
       this.state.adSequenceCounter = Math.max(
@@ -3977,10 +4686,20 @@ export class Admin2Backend {
           ? b.mainImageDriveId.trim()
           : undefined;
 
+      const requestedStatus = sanitizeAdStatus(b.status);
+      const defaultApproval: AdApprovalStatus =
+        this.state.adPlatformSettings.approvalWorkflowEnabled &&
+        req.admin2User!.role !== 'super_admin' &&
+        requestedStatus !== 'draft'
+          ? 'pending_approval'
+          : 'approved';
+
       const created: Advertisement = {
         id: makeId('ad'),
         adNumber,
         title,
+        campaignName: stripMarkup(typeof b.campaignName === 'string' ? b.campaignName : '').slice(0, 120) || undefined,
+        advertiserName: stripMarkup(typeof b.advertiserName === 'string' ? b.advertiserName : '').slice(0, 120) || undefined,
         description,
         mainImageUrl,
         ...(mainImageThumbUrl ? { mainImageThumbUrl } : {}),
@@ -3990,12 +4709,35 @@ export class Admin2Backend {
         whatsappNumber: sanitizePhoneDigits(typeof b.whatsappNumber === 'string' ? b.whatsappNumber : '') || undefined,
         businessAddress: stripMarkup(typeof b.businessAddress === 'string' ? b.businessAddress : '').slice(0, 260) || undefined,
         websiteUrl,
+        ctaType: sanitizeCtaType(b.ctaType),
+        ctaLabel: stripMarkup(typeof b.ctaLabel === 'string' ? b.ctaLabel : '').slice(0, 50) || undefined,
+        ctaUrl,
         category: sanitizeAdCategory(b.category),
-        status: sanitizeAdStatus(b.status),
+        status: requestedStatus,
+        approvalStatus: b.approvalStatus ? sanitizeApprovalStatus(b.approvalStatus) : defaultApproval,
+        previewToken: generatePreviewToken(),
         publishDate,
         expiryDate,
+        schedule: sanitizeSchedule(b.schedule),
+        priority: sanitizeAdPriority(b.priority),
+        targetDevice: sanitizeAdDevice(b.targetDevice),
+        displayFrequency: sanitizeAdFrequency(b.displayFrequency),
+        maxImpressionsPerVisitor:
+          b.maxImpressionsPerVisitor !== undefined ? clampNum(b.maxImpressionsPerVisitor, 0, 100, 0) : 0,
+        placements: sanitizePlacements(b.placements),
+        rotation: sanitizeRotationOverrides(b.rotation),
+        sharing: sanitizeSharingConfig(b.sharing),
         views: 0,
         clicks: 0,
+        counters: {
+          whatsappClicks: 0,
+          phoneClicks: 0,
+          websiteClicks: 0,
+          directionsClicks: 0,
+          shareClicks: 0,
+          byPlacement: {},
+          byDevice: { desktop: 0, mobile: 0 },
+        },
         createdAt: nowIso,
         updatedAt: nowIso,
         createdBy: actorEmail,
@@ -4026,7 +4768,7 @@ export class Admin2Backend {
         ok: true,
         ad: created,
         nextAdNumber: nextAvailableAdNumber(),
-        stats: computeAdStats(this.state.ads, todayYmd),
+        stats: computeAdStats(this.state.ads, todayYmd, getCurrentIstHm()),
       });
     });
 
@@ -4088,7 +4830,29 @@ export class Admin2Backend {
         }
       }
 
+      let ctaUrl = target.ctaUrl;
+      if (b.ctaUrl !== undefined) {
+        if (typeof b.ctaUrl === 'string' && b.ctaUrl.trim()) {
+          const safeCtaUrl = sanitizeExternalWebsiteUrl(b.ctaUrl);
+          if (!safeCtaUrl) {
+            res.status(400).json({ ok: false, error: 'CTA Link URL must be a valid http:// or https:// URL.' });
+            return;
+          }
+          ctaUrl = safeCtaUrl;
+        } else {
+          ctaUrl = undefined;
+        }
+      }
+
       target.title = title;
+      if (b.campaignName !== undefined) {
+        target.campaignName =
+          stripMarkup(typeof b.campaignName === 'string' ? b.campaignName : '').slice(0, 120) || undefined;
+      }
+      if (b.advertiserName !== undefined) {
+        target.advertiserName =
+          stripMarkup(typeof b.advertiserName === 'string' ? b.advertiserName : '').slice(0, 120) || undefined;
+      }
       target.description = description;
       target.mainImageUrl = mainImageUrl;
       if (b.mainImageThumbUrl !== undefined) {
@@ -4114,14 +4878,30 @@ export class Admin2Backend {
         target.businessAddress = stripMarkup(typeof b.businessAddress === 'string' ? b.businessAddress : '').slice(0, 260) || undefined;
       }
       target.websiteUrl = websiteUrl;
-      if (b.category !== undefined) {
-        target.category = sanitizeAdCategory(b.category);
+      if (b.ctaType !== undefined) target.ctaType = sanitizeCtaType(b.ctaType);
+      if (b.ctaLabel !== undefined) {
+        target.ctaLabel = stripMarkup(typeof b.ctaLabel === 'string' ? b.ctaLabel : '').slice(0, 50) || undefined;
       }
-      if (b.status !== undefined) {
-        target.status = sanitizeAdStatus(b.status);
+      target.ctaUrl = ctaUrl;
+      if (b.category !== undefined) target.category = sanitizeAdCategory(b.category);
+      if (b.status !== undefined) target.status = sanitizeAdStatus(b.status);
+      if (b.approvalStatus !== undefined && req.admin2User!.role === 'super_admin') {
+        target.approvalStatus = sanitizeApprovalStatus(b.approvalStatus);
       }
+      if (!target.previewToken) target.previewToken = generatePreviewToken();
       target.publishDate = publishDate;
       target.expiryDate = expiryDate;
+      if (b.schedule !== undefined) target.schedule = sanitizeSchedule(b.schedule);
+      if (b.priority !== undefined) target.priority = sanitizeAdPriority(b.priority);
+      if (b.targetDevice !== undefined) target.targetDevice = sanitizeAdDevice(b.targetDevice);
+      if (b.displayFrequency !== undefined) target.displayFrequency = sanitizeAdFrequency(b.displayFrequency);
+      if (b.maxImpressionsPerVisitor !== undefined) {
+        target.maxImpressionsPerVisitor = clampNum(b.maxImpressionsPerVisitor, 0, 100, 0);
+      }
+      if (b.placements !== undefined) target.placements = sanitizePlacements(b.placements);
+      if (b.rotation !== undefined) target.rotation = sanitizeRotationOverrides(b.rotation);
+      if (b.sharing !== undefined) target.sharing = sanitizeSharingConfig(b.sharing);
+
       target.updatedAt = new Date().toISOString();
       target.updatedBy = req.admin2User!.email;
 
@@ -4140,11 +4920,128 @@ export class Admin2Backend {
       res.json({
         ok: true,
         ad: target,
-        stats: computeAdStats(this.state.ads, getTodayIstYmd()),
+        stats: computeAdStats(this.state.ads, getTodayIstYmd(), getCurrentIstHm()),
       });
     });
 
-    // Admin: activate / deactivate / draft toggle
+    // Admin: duplicate an advertisement with new sequential ID
+    app.post('/api/admin2/ads/:id/duplicate', this.requireAuth('ads.manage'), (req: Admin2Request, res) => {
+      const source = this.state.ads.find((a) => a.id === req.params.id);
+      if (!source) {
+        res.status(404).json({ ok: false, error: 'Advertisement not found.' });
+        return;
+      }
+      const adNumber = nextAvailableAdNumber();
+      const seqMatch = adNumber.match(/^AD(\d+)$/i);
+      this.state.adSequenceCounter = Math.max(
+        this.state.adSequenceCounter || 0,
+        seqMatch ? Number(seqMatch[1]) : (this.state.adSequenceCounter || 0) + 1
+      );
+      const nowIso = new Date().toISOString();
+      const actorEmail = req.admin2User!.email;
+
+      const copy: Advertisement = {
+        ...JSON.parse(JSON.stringify(source)),
+        id: makeId('ad'),
+        adNumber,
+        title: `${source.title} (Copy)`.slice(0, 160),
+        status: 'draft',
+        approvalStatus: 'approved',
+        previewToken: generatePreviewToken(),
+        views: 0,
+        clicks: 0,
+        counters: {
+          whatsappClicks: 0,
+          phoneClicks: 0,
+          websiteClicks: 0,
+          directionsClicks: 0,
+          shareClicks: 0,
+          byPlacement: {},
+          byDevice: { desktop: 0, mobile: 0 },
+        },
+        createdAt: nowIso,
+        updatedAt: nowIso,
+        createdBy: actorEmail,
+        updatedBy: actorEmail,
+      };
+      this.state.ads.unshift(copy);
+      this.addAuditLog({
+        actorEmail,
+        actorRole: req.admin2User!.role,
+        action: 'ads.duplicated',
+        targetType: 'advertisement',
+        targetId: copy.id,
+        details: `Duplicated ${source.adNumber} into ${copy.adNumber} (${copy.title})`,
+        severity: 'info',
+        ip: getClientIp(req),
+      });
+      this.persistStateNow();
+
+      res.status(201).json({
+        ok: true,
+        ad: copy,
+        nextAdNumber: nextAvailableAdNumber(),
+        stats: computeAdStats(this.state.ads, getTodayIstYmd(), getCurrentIstHm()),
+      });
+    });
+
+    // Admin: toggle / update individual placements on an advertisement without deleting it
+    app.patch('/api/admin2/ads/:id/placements', this.requireAuth('ads.manage'), (req: Admin2Request, res) => {
+      const target = this.state.ads.find((a) => a.id === req.params.id);
+      if (!target) {
+        res.status(404).json({ ok: false, error: 'Advertisement not found.' });
+        return;
+      }
+      target.placements = sanitizePlacements(req.body?.placements);
+      target.updatedAt = new Date().toISOString();
+      target.updatedBy = req.admin2User!.email;
+      this.persistStateNow();
+      res.json({
+        ok: true,
+        ad: target,
+        stats: computeAdStats(this.state.ads, getTodayIstYmd(), getCurrentIstHm()),
+      });
+    });
+
+    // Admin: approval workflow transition
+    app.patch('/api/admin2/ads/:id/approval', this.requireAuth('ads.manage'), (req: Admin2Request, res) => {
+      const target = this.state.ads.find((a) => a.id === req.params.id);
+      if (!target) {
+        res.status(404).json({ ok: false, error: 'Advertisement not found.' });
+        return;
+      }
+      if (req.admin2User!.role !== 'super_admin' && req.admin2User!.role !== 'admin') {
+        res.status(403).json({ ok: false, error: 'Only Admin or Super Admin can approve advertisements.' });
+        return;
+      }
+      const nextApproval = sanitizeApprovalStatus(req.body?.approvalStatus);
+      target.approvalStatus = nextApproval;
+      if (typeof req.body?.approvalNotes === 'string') {
+        target.approvalNotes = stripMarkup(req.body.approvalNotes).slice(0, 300) || undefined;
+      }
+      target.updatedAt = new Date().toISOString();
+      target.updatedBy = req.admin2User!.email;
+
+      this.addAuditLog({
+        actorEmail: req.admin2User!.email,
+        actorRole: req.admin2User!.role,
+        action: `ads.approval_${nextApproval}`,
+        targetType: 'advertisement',
+        targetId: target.id,
+        details: `Set ${target.adNumber} approval status to ${nextApproval}`,
+        severity: 'info',
+        ip: getClientIp(req),
+      });
+      this.persistStateNow();
+
+      res.json({
+        ok: true,
+        ad: target,
+        stats: computeAdStats(this.state.ads, getTodayIstYmd(), getCurrentIstHm()),
+      });
+    });
+
+    // Admin: activate / pause / deactivate / draft toggle
     app.patch('/api/admin2/ads/:id/status', this.requireAuth('ads.manage'), (req: Admin2Request, res) => {
       const target = this.state.ads.find((a) => a.id === req.params.id);
       if (!target) {
@@ -4152,8 +5049,8 @@ export class Admin2Backend {
         return;
       }
       const nextStatus = req.body?.status;
-      if (nextStatus !== 'active' && nextStatus !== 'inactive' && nextStatus !== 'draft') {
-        res.status(400).json({ ok: false, error: 'Status must be active, inactive, or draft.' });
+      if (nextStatus !== 'active' && nextStatus !== 'inactive' && nextStatus !== 'paused' && nextStatus !== 'draft') {
+        res.status(400).json({ ok: false, error: 'Status must be active, paused, inactive, or draft.' });
         return;
       }
       target.status = nextStatus;
@@ -4175,7 +5072,7 @@ export class Admin2Backend {
       res.json({
         ok: true,
         ad: target,
-        stats: computeAdStats(this.state.ads, getTodayIstYmd()),
+        stats: computeAdStats(this.state.ads, getTodayIstYmd(), getCurrentIstHm()),
       });
     });
 
@@ -4203,9 +5100,50 @@ export class Admin2Backend {
       res.json({
         ok: true,
         deletedId: removed.id,
-        stats: computeAdStats(this.state.ads, getTodayIstYmd()),
+        stats: computeAdStats(this.state.ads, getTodayIstYmd(), getCurrentIstHm()),
         nextAdNumber: nextAvailableAdNumber(),
       });
     });
+  }
+
+  public getAdShareMetadata(lookup: string, previewToken?: string): {
+    id: string;
+    adNumber: string;
+    title: string;
+    description: string;
+    mainImageUrl: string;
+    category: string;
+  } | null {
+    const cleanLookup = String(lookup || '').trim();
+    if (!cleanLookup) return null;
+    const found = this.state.ads.find(
+      (ad) =>
+        ad.id === cleanLookup ||
+        ad.adNumber.toUpperCase() === cleanLookup.toUpperCase() ||
+        (ad.sharing?.customSlug && ad.sharing.customSlug.toLowerCase() === cleanLookup.toLowerCase())
+    );
+    if (!found) return null;
+
+    let previewAuthorized = false;
+    if (previewToken && found.previewToken) {
+      const a = Buffer.from(previewToken.trim());
+      const b = Buffer.from(found.previewToken);
+      if (a.length === b.length && crypto.timingSafeEqual(a, b)) {
+        previewAuthorized = true;
+      }
+    }
+
+    if (!previewAuthorized && !isAdCurrentlyActive(found, getTodayIstYmd(), getCurrentIstHm())) {
+      return null;
+    }
+
+    return {
+      id: found.id,
+      adNumber: found.adNumber,
+      title: found.title,
+      description: stripMarkup(found.description).slice(0, 260),
+      mainImageUrl: found.mainImageUrl,
+      category: found.category,
+    };
   }
 }

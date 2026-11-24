@@ -1,28 +1,59 @@
 import type {
+  AdAnalyticsRange,
+  AdAnalyticsSummaryResponse,
+  AdApprovalStatus,
+  AdPlacementSlotKey,
+  AdPlacementsConfig,
+  AdPlatformSettings,
   AdStatus,
   Advertisement,
   AdvertisementPayload,
   AdvertisementStats,
 } from '../types/ads';
+import {
+  createDefaultAdPlatformSettings,
+  detectVisitorDevice,
+  incrementLocalVisitorImpression,
+} from '../utils/adHelpers';
 import { resolveActiveAdminBearerToken } from './admin2Client';
 import { isSheetsStorageActive, uploadImageToDriveViaServer } from './sheetsStorageClient';
 
 type ActiveAdsListener = (state: {
   ads: Advertisement[];
+  settings: AdPlatformSettings;
   loaded: boolean;
   error: string;
 }) => void;
 
 const activeAdsListeners = new Set<ActiveAdsListener>();
 let activeAdsCache: Advertisement[] = [];
+let activeAdSettingsCache: AdPlatformSettings = createDefaultAdPlatformSettings();
 let activeAdsLoaded = false;
 let activeAdsError = '';
 let activeAdsInFlight: Promise<Advertisement[]> | null = null;
 let lastFetchedAt = 0;
 
+function getOrCreateAdVisitorId(): string {
+  if (typeof window === 'undefined') return 'server';
+  try {
+    const key = 'cn_ad_visitor_uid_v1';
+    const existing = window.localStorage.getItem(key);
+    if (existing && existing.length >= 8) return existing;
+    const generated =
+      typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+        ? crypto.randomUUID()
+        : `v-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+    window.localStorage.setItem(key, generated);
+    return generated;
+  } catch {
+    return `sess-${Math.random().toString(36).slice(2, 10)}`;
+  }
+}
+
 function notifyActiveAdsListeners() {
   const snapshot = {
     ads: activeAdsCache,
+    settings: activeAdSettingsCache,
     loaded: activeAdsLoaded,
     error: activeAdsError,
   };
@@ -35,6 +66,7 @@ export function subscribeToActiveAds(listener: ActiveAdsListener): () => void {
   activeAdsListeners.add(listener);
   listener({
     ads: activeAdsCache,
+    settings: activeAdSettingsCache,
     loaded: activeAdsLoaded,
     error: activeAdsError,
   });
@@ -44,7 +76,7 @@ export function subscribeToActiveAds(listener: ActiveAdsListener): () => void {
 }
 
 export async function loadActiveAds(forceRefresh = false): Promise<Advertisement[]> {
-  const freshEnough = activeAdsLoaded && !forceRefresh && Date.now() - lastFetchedAt < 45_000;
+  const freshEnough = activeAdsLoaded && !forceRefresh && Date.now() - lastFetchedAt < 30_000;
   if (freshEnough) {
     return activeAdsCache;
   }
@@ -65,12 +97,16 @@ export async function loadActiveAds(forceRefresh = false): Promise<Advertisement
       const json = (await resp.json()) as {
         ok?: boolean;
         items?: Advertisement[];
+        settings?: AdPlatformSettings;
         error?: string;
       };
       if (!json.ok || !Array.isArray(json.items)) {
         throw new Error(json.error || 'Invalid advertisements response.');
       }
       activeAdsCache = json.items;
+      if (json.settings && typeof json.settings === 'object') {
+        activeAdSettingsCache = json.settings;
+      }
       activeAdsLoaded = true;
       activeAdsError = '';
       lastFetchedAt = Date.now();
@@ -90,30 +126,72 @@ export async function loadActiveAds(forceRefresh = false): Promise<Advertisement
   return activeAdsInFlight;
 }
 
-export async function fetchActiveAdById(idOrNumber: string): Promise<Advertisement | null> {
+export async function fetchActiveAdById(
+  idOrNumber: string,
+  previewToken?: string | null
+): Promise<{ ad: Advertisement; isPreview: boolean; settings?: AdPlatformSettings } | null> {
   try {
-    const resp = await fetch(`/api/ads/${encodeURIComponent(idOrNumber)}`, {
+    const query = previewToken ? `?preview=${encodeURIComponent(previewToken)}` : '';
+    const resp = await fetch(`/api/ads/${encodeURIComponent(idOrNumber)}${query}`, {
       headers: { Accept: 'application/json' },
+      cache: previewToken ? 'no-store' : 'default',
     });
     if (!resp.ok) return null;
-    const json = (await resp.json()) as { ok?: boolean; item?: Advertisement };
+    const json = (await resp.json()) as {
+      ok?: boolean;
+      item?: Advertisement;
+      isPreview?: boolean;
+      settings?: AdPlatformSettings;
+    };
     if (!json.ok || !json.item) return null;
-    return json.item;
+    return {
+      ad: json.item,
+      isPreview: Boolean(json.isPreview),
+      settings: json.settings,
+    };
   } catch {
     return null;
   }
 }
 
+export type AdTrackEventType =
+  | 'view'
+  | 'impression'
+  | 'click'
+  | 'whatsapp'
+  | 'phone'
+  | 'website'
+  | 'directions'
+  | 'share';
+
+export type AdTrackPlacement =
+  | AdPlacementSlotKey
+  | 'directory'
+  | 'direct';
+
 export async function trackAdInteraction(
   adId: string,
-  type: 'view' | 'click'
+  type: AdTrackEventType,
+  options?: {
+    placement?: AdTrackPlacement;
+    isPreview?: boolean;
+  }
 ): Promise<void> {
-  if (!adId) return;
+  if (!adId || options?.isPreview) return;
+  const eventType = type === 'view' ? 'impression' : type;
+  if (eventType === 'impression') {
+    incrementLocalVisitorImpression(adId);
+  }
   try {
     await fetch(`/api/ads/${encodeURIComponent(adId)}/track`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ type }),
+      body: JSON.stringify({
+        eventType,
+        placement: options?.placement || 'direct',
+        device: detectVisitorDevice(),
+        visitorId: getOrCreateAdVisitorId(),
+      }),
       keepalive: true,
     });
   } catch {
@@ -153,8 +231,41 @@ export async function fetchAdminAds(): Promise<{
   stats: AdvertisementStats;
   nextAdNumber: string;
   todayYmd: string;
+  settings: AdPlatformSettings;
 }> {
   return adsAdminFetch('/api/admin2/ads');
+}
+
+export async function fetchAdPlatformSettings(): Promise<AdPlatformSettings> {
+  const res = await adsAdminFetch<{ ok: boolean; settings: AdPlatformSettings }>(
+    '/api/admin2/ads/settings'
+  );
+  activeAdSettingsCache = res.settings;
+  notifyActiveAdsListeners();
+  return res.settings;
+}
+
+export async function updateAdPlatformSettings(
+  patch: Partial<AdPlatformSettings>
+): Promise<AdPlatformSettings> {
+  const res = await adsAdminFetch<{ ok: boolean; settings: AdPlatformSettings }>(
+    '/api/admin2/ads/settings',
+    {
+      method: 'PUT',
+      body: patch,
+    }
+  );
+  activeAdSettingsCache = res.settings;
+  void loadActiveAds(true);
+  return res.settings;
+}
+
+export async function fetchAdminAdAnalytics(
+  range: AdAnalyticsRange = 'monthly',
+  adId?: string
+): Promise<AdAnalyticsSummaryResponse> {
+  const adQuery = adId ? `&adId=${encodeURIComponent(adId)}` : '';
+  return adsAdminFetch(`/api/admin2/ads/analytics?range=${encodeURIComponent(range)}${adQuery}`);
 }
 
 export async function createAdminAd(payload: AdvertisementPayload): Promise<{
@@ -189,6 +300,62 @@ export async function updateAdminAd(
   }>(`/api/admin2/ads/${encodeURIComponent(id)}`, {
     method: 'PUT',
     body: payload,
+  });
+  void loadActiveAds(true);
+  return res;
+}
+
+export async function duplicateAdminAd(id: string): Promise<{
+  ad: Advertisement;
+  stats: AdvertisementStats;
+  nextAdNumber: string;
+}> {
+  const res = await adsAdminFetch<{
+    ok: boolean;
+    ad: Advertisement;
+    stats: AdvertisementStats;
+    nextAdNumber: string;
+  }>(`/api/admin2/ads/${encodeURIComponent(id)}/duplicate`, {
+    method: 'POST',
+  });
+  void loadActiveAds(true);
+  return res;
+}
+
+export async function updateAdminAdPlacements(
+  id: string,
+  placements: AdPlacementsConfig
+): Promise<{
+  ad: Advertisement;
+  stats: AdvertisementStats;
+}> {
+  const res = await adsAdminFetch<{
+    ok: boolean;
+    ad: Advertisement;
+    stats: AdvertisementStats;
+  }>(`/api/admin2/ads/${encodeURIComponent(id)}/placements`, {
+    method: 'PATCH',
+    body: { placements },
+  });
+  void loadActiveAds(true);
+  return res;
+}
+
+export async function updateAdminAdApproval(
+  id: string,
+  approvalStatus: AdApprovalStatus,
+  approvalNotes?: string
+): Promise<{
+  ad: Advertisement;
+  stats: AdvertisementStats;
+}> {
+  const res = await adsAdminFetch<{
+    ok: boolean;
+    ad: Advertisement;
+    stats: AdvertisementStats;
+  }>(`/api/admin2/ads/${encodeURIComponent(id)}/approval`, {
+    method: 'PATCH',
+    body: { approvalStatus, approvalNotes },
   });
   void loadActiveAds(true);
   return res;
@@ -289,7 +456,6 @@ export async function processAndUploadAdImage(file: File): Promise<{
 
   const source = await decodeCleanImageFile(file);
   const preserveTransparency = file.type === 'image/png' || file.type === 'image/webp';
-  const outMime = preserveTransparency ? 'image/png' : 'image/jpeg';
 
   try {
     const renderCleanVariant = (maxDim: number, quality: number, forceJpeg = false): string => {

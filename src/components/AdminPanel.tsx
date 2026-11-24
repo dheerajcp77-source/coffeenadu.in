@@ -111,11 +111,11 @@ import {
   fetchAdminAds,
   updateAdminAd,
 } from '../services/adsClient';
-import type { Advertisement, AdvertisementPayload } from '../types/ads';
+import type { AdPlatformSettings, Advertisement, AdvertisementPayload } from '../types/ads';
 import { AdminAdModal } from './admin2/AdminAdModal';
 import { Admin2AdsSection } from './admin2/Admin2AdsSection';
 import { Admin2HealthSection } from './admin2/Admin2HealthSection';
-import { buildAdPublicUrl } from '../utils/adHelpers';
+import { buildAdPublicUrl, createDefaultAdPlatformSettings } from '../utils/adHelpers';
 import { stripRichTextToPlainText } from '../utils/richText';
 import { buildArticlePublicUrl } from '../utils/slug';
 
@@ -217,6 +217,9 @@ export function AdminPanel({ articles, onNavigateHome }: AdminPanelProps) {
   const [editingAd, setEditingAd] = useState<Advertisement | null>(null);
   const [isSavingAd, setIsSavingAd] = useState(false);
   const [nextAdNumber, setNextAdNumber] = useState('AD001');
+  const [adPlatformSettings, setAdPlatformSettings] = useState<AdPlatformSettings>(() =>
+    createDefaultAdPlatformSettings()
+  );
   const [adsRefreshNonce, setAdsRefreshNonce] = useState(0);
 
   // Preserved Reader Inbox & Chat state
@@ -764,6 +767,7 @@ export function AdminPanel({ articles, onNavigateHome }: AdminPanelProps) {
     void fetchAdminAds()
       .then((res) => {
         if (res.nextAdNumber) setNextAdNumber(res.nextAdNumber);
+        if (res.settings) setAdPlatformSettings(res.settings);
       })
       .catch(() => {
         // Ignore if fetch fails; backend always assigns authoritative sequential AD number
@@ -1204,6 +1208,7 @@ export function AdminPanel({ articles, onNavigateHome }: AdminPanelProps) {
       case 'ads':
         return (
           <Admin2AdsSection
+            initialTab="dashboard"
             onOpenAddAd={openNewAdComposer}
             onEditAd={(ad) => {
               setEditingAd(ad);
@@ -1218,39 +1223,18 @@ export function AdminPanel({ articles, onNavigateHome }: AdminPanelProps) {
 
       case 'add-ad':
         return (
-          <div className="space-y-6">
-            <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-              <div className="flex flex-wrap items-start justify-between gap-4">
-                <div className="max-w-2xl">
-                  <h2 className="text-xl font-bold tracking-tight text-slate-900 dark:text-white">
-                    Add Local Advertisement
-                  </h2>
-                  <p className="mt-1 text-sm text-slate-600 dark:text-slate-400">
-                    Publish local business advertisements completely separate from news stories. Original uploaded posters and banners are displayed cleanly with zero CoffeeNadu logos, watermarks, or promotional overlays.
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  onClick={openNewAdComposer}
-                  className="inline-flex cursor-pointer items-center gap-2 rounded-lg bg-[#0B192C] px-5 py-3 text-sm font-semibold text-white shadow-sm hover:bg-[#132945] dark:bg-amber-500 dark:text-slate-950 dark:hover:bg-amber-400 whitespace-nowrap"
-                >
-                  <BadgePlus className="h-4 w-4" />
-                  <span>Open Advertisement Publisher</span>
-                </button>
-              </div>
-
-              <div className="mt-6 flex flex-wrap items-center gap-3 border-t border-slate-200 pt-5 dark:border-slate-800">
-                <button
-                  type="button"
-                  onClick={() => setActiveSection('ads')}
-                  className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
-                >
-                  <Megaphone className="h-3.5 w-3.5" />
-                  <span>Manage All Local Advertisements</span>
-                </button>
-              </div>
-            </div>
-          </div>
+          <Admin2AdsSection
+            initialTab="create"
+            onOpenAddAd={openNewAdComposer}
+            onEditAd={(ad) => {
+              setEditingAd(ad);
+              setAdModalOpen(true);
+            }}
+            refreshNonce={adsRefreshNonce}
+            onDataChanged={(nextNum) => {
+              if (nextNum) setNextAdNumber(nextNum);
+            }}
+          />
         );
 
       case 'calendar':
@@ -1507,6 +1491,7 @@ export function AdminPanel({ articles, onNavigateHome }: AdminPanelProps) {
         isOpen={adModalOpen}
         editingAd={editingAd}
         nextAdNumber={nextAdNumber}
+        platformSettings={adPlatformSettings}
         isSaving={isSavingAd}
         onClose={() => {
           setAdModalOpen(false);

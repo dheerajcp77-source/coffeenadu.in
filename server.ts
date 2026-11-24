@@ -2733,6 +2733,46 @@ Rules:
     );
   });
 
+  // Public OG image for Local Advertisements (serves exact unmodified advertiser image — zero watermark)
+  app.get('/api/ad-image/:id', async (req, res) => {
+    const adLookup = typeof req.params.id === 'string' ? req.params.id.trim() : '';
+    const previewToken = typeof req.query.preview === 'string' ? req.query.preview.trim() : undefined;
+    const meta = admin2Backend.getAdShareMetadata(adLookup, previewToken);
+    if (!meta || !meta.mainImageUrl) {
+      const fallbackFile = resolvePresetImageFilePath('koppa-landscape', 'Local');
+      await sendResolvedImageResponse(res, `ad-fallback:${adLookup}`, '', true, fallbackFile);
+      return;
+    }
+
+    const imgUrl = meta.mainImageUrl;
+    if (imgUrl.startsWith('/api/ads/media/')) {
+      const fileName = path.basename(imgUrl.split('?')[0]);
+      const candidates = [
+        path.join(DATA_DIR, 'ads-media', fileName),
+        path.join(os.tmpdir(), 'coffeenadu-admin2-data', 'ads-media', fileName),
+      ];
+      for (const candidate of candidates) {
+        if (/^[a-zA-Z0-9_-]{8,100}\.(jpg|jpeg|png|webp)$/i.test(fileName) && fs.existsSync(candidate)) {
+          const rawBuf = fs.readFileSync(candidate);
+          const optimized = await optimizeImageForWhatsAppOg(rawBuf);
+          res.setHeader('Content-Type', 'image/jpeg');
+          res.setHeader('Cache-Control', previewToken ? 'no-store' : 'public, max-age=3600');
+          res.send(optimized);
+          return;
+        }
+      }
+    }
+
+    const fallbackFile = resolvePresetImageFilePath('koppa-landscape', 'Local');
+    await sendResolvedImageResponse(
+      res,
+      `ad:${meta.id}`,
+      imgUrl,
+      true, // CRITICAL: Never apply CoffeeNadu watermark to advertisement images
+      fallbackFile
+    );
+  });
+
   const PUBLIC_SHARE_DOMAIN = (process.env.PUBLIC_SITE_URL || 'https://coffeenadu.in').replace(/\/+$/, '');
   const CUSTOM_DOMAIN_PROBE_TTL_MS = 5 * 60 * 1000;
   let customDomainDeepLinkCache: { supported: boolean; checkedAt: number } | null = null;
@@ -2948,7 +2988,7 @@ Rules:
     res.redirect(301, `/?article=${encodeURIComponent(id)}`);
   });
 
-  app.get(['/', '/events'], async (req, res, next) => {
+  app.get(['/', '/events', '/ads'], async (req, res, next) => {
     const articleId =
       req.path === '/' && typeof req.query.article === 'string'
         ? req.query.article.trim()
@@ -2957,6 +2997,14 @@ Rules:
       req.path === '/events' && typeof req.query.event === 'string'
         ? req.query.event.trim()
         : '';
+    const adId =
+      req.path === '/ads' && typeof req.query.ad === 'string'
+        ? req.query.ad.trim()
+        : '';
+    const adPreviewToken =
+      req.path === '/ads' && typeof req.query.preview === 'string'
+        ? req.query.preview.trim()
+        : undefined;
 
     try {
       // Keep og:image directly on the live HTTPS Express origin so WhatsApp always fetches HTTP 200 without redirect issues
@@ -2969,6 +3017,8 @@ Rules:
       let ogUrl =
         req.path === '/events'
           ? `${deepLinkOrigin}/events`
+          : req.path === '/ads'
+          ? `${deepLinkOrigin}/ads`
           : `${deepLinkOrigin}/`;
 
       const stripMarkupForMeta = (raw: string): string =>
@@ -3007,6 +3057,26 @@ Rules:
           ogDescription = cleanMetaSummary || ogDescription;
           ogImageUrl = `${origin}/api/event-image/${encodeURIComponent(eventId)}`;
         }
+      } else if (adId) {
+        ogUrl = `${deepLinkOrigin}/ads?ad=${encodeURIComponent(adId)}`;
+        const adMeta = admin2Backend.getAdShareMetadata(adId, adPreviewToken);
+        if (adMeta) {
+          const cleanAdTitle = stripMarkupForMeta(adMeta.title);
+          const cleanAdDesc = stripMarkupForMeta(adMeta.description);
+          ogTitle = cleanAdTitle
+            ? `${cleanAdTitle} — Coffeenadu Local Ads`
+            : 'Local Advertisement — Coffeenadu News';
+          ogDescription =
+            cleanAdDesc ||
+            `${adMeta.category} advertisement on Coffeenadu News (${adMeta.adNumber})`;
+          ogImageUrl = `${origin}/api/ad-image/${encodeURIComponent(adMeta.id)}${
+            adPreviewToken ? `?preview=${encodeURIComponent(adPreviewToken)}` : ''
+          }`;
+        }
+      } else if (req.path === '/ads') {
+        ogTitle = 'Local Advertisements — Coffeenadu News';
+        ogDescription =
+          'Browse Koppa Taluk local business advertisements, services, education, real estate, and offers on Coffeenadu News.';
       }
 
       const rawTemplate = fs.readFileSync(vite ? rootIndex : distIndex, 'utf8');

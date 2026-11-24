@@ -3,21 +3,18 @@ import {
   ArrowLeft,
   ArrowRight,
   Calendar,
-  Check,
-  Copy,
+  Eye,
   Globe,
   MapPin,
   Megaphone,
   MessageCircle,
   Phone,
   Search,
-  Share2,
   X,
 } from 'lucide-react';
 import { trackAdInteraction } from '../services/adsClient';
-import { AD_CATEGORIES, type Advertisement } from '../types/ads';
+import { AD_CATEGORIES, type AdPlatformSettings, type Advertisement } from '../types/ads';
 import {
-  buildAdPublicUrl,
   buildTelHref,
   buildWhatsAppAdHref,
   formatReadableAdDate,
@@ -25,12 +22,16 @@ import {
   sanitizeExternalWebsiteUrl,
 } from '../utils/adHelpers';
 import { sanitizeRichTextHtml, stripRichTextToPlainText } from '../utils/richText';
+import { AdActionButtons } from './AdActionButtons';
 import { AdImage } from './AdImage';
+import { AdShareBar } from './AdShareBar';
 import { AdSlider } from './AdSlider';
 
 interface LocalAdsSectionProps {
   ads: Advertisement[];
+  settings?: AdPlatformSettings | null;
   directAd: Advertisement | null;
+  isDirectPreview?: boolean;
   isLoading: boolean;
   selectedAdId: string | null;
   onSelectAd: (ad: Advertisement) => void;
@@ -40,7 +41,9 @@ interface LocalAdsSectionProps {
 
 export function LocalAdsSection({
   ads,
+  settings,
   directAd,
+  isDirectPreview = false,
   isLoading,
   selectedAdId,
   onSelectAd,
@@ -49,7 +52,6 @@ export function LocalAdsSection({
 }: LocalAdsSectionProps) {
   const [selectedCategory, setSelectedCategory] = useState<string>('All');
   const [searchQuery, setSearchQuery] = useState<string>('');
-  const [copiedLink, setCopiedLink] = useState<boolean>(false);
   const [lightboxImage, setLightboxImage] = useState<{ url: string; caption?: string } | null>(null);
 
   const activeAds = useMemo(
@@ -60,13 +62,17 @@ export function LocalAdsSection({
   const selectedAd = useMemo(() => {
     if (!selectedAdId) return null;
     const fromList = activeAds.find(
-      (a) => a.id === selectedAdId || a.adNumber.toUpperCase() === selectedAdId.toUpperCase()
+      (a) =>
+        a.id === selectedAdId ||
+        a.adNumber.toUpperCase() === selectedAdId.toUpperCase() ||
+        (a.sharing?.customSlug && a.sharing.customSlug.toLowerCase() === selectedAdId.toLowerCase())
     );
     if (fromList) return fromList;
     if (
       directAd &&
       (directAd.id === selectedAdId ||
-        directAd.adNumber.toUpperCase() === selectedAdId.toUpperCase())
+        directAd.adNumber.toUpperCase() === selectedAdId.toUpperCase() ||
+        (directAd.sharing?.customSlug && directAd.sharing.customSlug.toLowerCase() === selectedAdId.toLowerCase()))
     ) {
       return directAd;
     }
@@ -75,17 +81,21 @@ export function LocalAdsSection({
 
   useEffect(() => {
     if (!selectedAd?.id) return;
-    void trackAdInteraction(selectedAd.id, 'view');
-  }, [selectedAd?.id]);
+    void trackAdInteraction(selectedAd.id, 'impression', {
+      placement: 'direct',
+      isPreview: isDirectPreview,
+    });
+  }, [selectedAd?.id, isDirectPreview]);
 
   const availableCategories = useMemo(() => {
     const present = new Set(activeAds.map((a) => a.category));
     const ordered = AD_CATEGORIES.filter((cat) => present.has(cat));
+    const customConfigured = (settings?.customCategories || []).filter((cat) => present.has(cat));
     const extras = Array.from(present).filter(
-      (cat) => !(AD_CATEGORIES as readonly string[]).includes(cat)
+      (cat) => !(AD_CATEGORIES as readonly string[]).includes(cat) && !customConfigured.includes(cat)
     );
-    return ['All', ...ordered, ...extras];
-  }, [activeAds]);
+    return ['All', ...ordered, ...customConfigured, ...extras];
+  }, [activeAds, settings?.customCategories]);
 
   const filteredAds = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
@@ -97,6 +107,7 @@ export function LocalAdsSection({
         const haystack = [
           ad.adNumber,
           ad.title,
+          ad.advertiserName || '',
           ad.category,
           stripRichTextToPlainText(ad.description),
           ad.businessAddress || '',
@@ -109,16 +120,6 @@ export function LocalAdsSection({
       return true;
     });
   }, [activeAds, selectedCategory, searchQuery]);
-
-  const handleCopyAdLink = async (ad: Advertisement) => {
-    try {
-      await navigator.clipboard.writeText(buildAdPublicUrl(ad.id));
-      setCopiedLink(true);
-      window.setTimeout(() => setCopiedLink(false), 2000);
-    } catch {
-      // Ignore clipboard errors
-    }
-  };
 
   // --- Full Advertisement Details Page ---
   if (selectedAdId) {
@@ -167,12 +168,20 @@ export function LocalAdsSection({
       ? buildWhatsAppAdHref(selectedAd.whatsappNumber, selectedAd)
       : '';
     const websiteHref = sanitizeExternalWebsiteUrl(selectedAd.websiteUrl);
-    const shareText = `${selectedAd.title} (${selectedAd.adNumber}) - CoffeeNadu News Local Ads: ${buildAdPublicUrl(selectedAd.id)}`;
-    const shareWaHref = `https://wa.me/?text=${encodeURIComponent(shareText)}`;
 
     return (
       <div className="bg-white border-b border-slate-200">
         <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-8 sm:py-10">
+          {isDirectPreview && (
+            <div className="mb-4 flex items-center gap-2 rounded-xl border border-amber-300 bg-amber-50 px-4 py-2.5 text-xs font-semibold text-amber-950">
+              <Eye className="w-4 h-4 text-amber-700 shrink-0" aria-hidden="true" />
+              <span>
+                Private Advertisement Preview Mode — this advertisement is currently{' '}
+                <strong className="uppercase">{selectedAd.status}</strong> and visible via your private preview link.
+              </span>
+            </div>
+          )}
+
           {/* Top Navigation & Share Row */}
           <div className="flex flex-wrap items-center justify-between gap-3 pb-5 border-b border-stone-200">
             <button
@@ -184,25 +193,12 @@ export function LocalAdsSection({
               <span>Back to Local Ads</span>
             </button>
 
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={() => void handleCopyAdLink(selectedAd)}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors cursor-pointer whitespace-nowrap"
-              >
-                {copiedLink ? <Check className="w-3.5 h-3.5 text-emerald-700" /> : <Copy className="w-3.5 h-3.5" />}
-                <span>{copiedLink ? 'Link Copied' : 'Copy Link'}</span>
-              </button>
-              <a
-                href={shareWaHref}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-white bg-emerald-700 hover:bg-emerald-800 rounded-lg transition-colors whitespace-nowrap"
-              >
-                <Share2 className="w-3.5 h-3.5" />
-                <span>Share</span>
-              </a>
-            </div>
+            <AdShareBar
+              ad={selectedAd}
+              settings={settings}
+              placement="direct"
+              isPreview={isDirectPreview}
+            />
           </div>
 
           {/* Editorial Metadata & Headline */}
@@ -213,6 +209,12 @@ export function LocalAdsSection({
               <span className="uppercase tracking-wider font-semibold text-[#0F274A]">
                 {selectedAd.category}
               </span>
+              {selectedAd.advertiserName && (
+                <>
+                  <span aria-hidden="true">·</span>
+                  <span className="font-semibold text-stone-700">{selectedAd.advertiserName}</span>
+                </>
+              )}
               <span aria-hidden="true">·</span>
               <span className="inline-flex items-center gap-1 tabular-nums">
                 <Calendar className="w-3.5 h-3.5" aria-hidden="true" />
@@ -248,8 +250,8 @@ export function LocalAdsSection({
               </button>
             </figure>
 
-            {/* Business Contact & Location Strip */}
-            {(selectedAd.businessAddress || telHref || waHref || websiteHref) && (
+            {/* Business Contact, CTA & Location Strip */}
+            {(selectedAd.businessAddress || telHref || waHref || websiteHref || selectedAd.ctaUrl) && (
               <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-4 sm:p-5 space-y-3.5">
                 {selectedAd.businessAddress && (
                   <div className="flex items-start gap-2.5 text-sm text-slate-800">
@@ -259,13 +261,24 @@ export function LocalAdsSection({
                 )}
 
                 <div className="flex flex-wrap items-center gap-2.5">
+                  <AdActionButtons
+                    ad={selectedAd}
+                    placement="direct"
+                    isPreview={isDirectPreview}
+                  />
+
                   {telHref && (
                     <a
                       href={telHref}
-                      onClick={() => void trackAdInteraction(selectedAd.id, 'click')}
-                      className="inline-flex items-center gap-2 px-4 py-2.5 text-xs sm:text-sm font-bold text-white bg-[#0F274A] hover:bg-[#173a6e] rounded-lg transition-colors whitespace-nowrap"
+                      onClick={() =>
+                        void trackAdInteraction(selectedAd.id, 'phone', {
+                          placement: 'direct',
+                          isPreview: isDirectPreview,
+                        })
+                      }
+                      className="inline-flex items-center gap-2 px-4 py-2 text-xs font-bold text-[#0F274A] bg-white border border-slate-300 hover:bg-slate-100 rounded-lg transition-colors whitespace-nowrap"
                     >
-                      <Phone className="w-4 h-4" aria-hidden="true" />
+                      <Phone className="w-3.5 h-3.5" aria-hidden="true" />
                       <span>Call {selectedAd.contactNumber}</span>
                     </a>
                   )}
@@ -275,10 +288,15 @@ export function LocalAdsSection({
                       href={waHref}
                       target="_blank"
                       rel="noopener noreferrer"
-                      onClick={() => void trackAdInteraction(selectedAd.id, 'click')}
-                      className="inline-flex items-center gap-2 px-4 py-2.5 text-xs sm:text-sm font-bold text-white bg-emerald-700 hover:bg-emerald-800 rounded-lg transition-colors whitespace-nowrap"
+                      onClick={() =>
+                        void trackAdInteraction(selectedAd.id, 'whatsapp', {
+                          placement: 'direct',
+                          isPreview: isDirectPreview,
+                        })
+                      }
+                      className="inline-flex items-center gap-2 px-4 py-2 text-xs font-bold text-white bg-emerald-700 hover:bg-emerald-800 rounded-lg transition-colors whitespace-nowrap"
                     >
-                      <MessageCircle className="w-4 h-4" aria-hidden="true" />
+                      <MessageCircle className="w-3.5 h-3.5" aria-hidden="true" />
                       <span>WhatsApp</span>
                     </a>
                   )}
@@ -288,10 +306,15 @@ export function LocalAdsSection({
                       href={websiteHref}
                       target="_blank"
                       rel="noopener noreferrer"
-                      onClick={() => void trackAdInteraction(selectedAd.id, 'click')}
-                      className="inline-flex items-center gap-2 px-4 py-2.5 text-xs sm:text-sm font-semibold text-slate-800 bg-white border border-slate-300 hover:bg-slate-100 rounded-lg transition-colors whitespace-nowrap"
+                      onClick={() =>
+                        void trackAdInteraction(selectedAd.id, 'website', {
+                          placement: 'direct',
+                          isPreview: isDirectPreview,
+                        })
+                      }
+                      className="inline-flex items-center gap-2 px-4 py-2 text-xs font-semibold text-slate-800 bg-white border border-slate-300 hover:bg-slate-100 rounded-lg transition-colors whitespace-nowrap"
                     >
-                      <Globe className="w-4 h-4" aria-hidden="true" />
+                      <Globe className="w-3.5 h-3.5" aria-hidden="true" />
                       <span>Visit Website</span>
                     </a>
                   )}
@@ -306,6 +329,19 @@ export function LocalAdsSection({
                 dangerouslySetInnerHTML={{ __html: sanitizeRichTextHtml(selectedAd.description) }}
               />
             )}
+
+            {/* Share Bar below description */}
+            <div className="pt-5 border-t border-stone-200 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+              <span className="text-xs font-bold uppercase tracking-wider text-stone-500">
+                Share this Advertisement (Kannada Message)
+              </span>
+              <AdShareBar
+                ad={selectedAd}
+                settings={settings}
+                placement="direct"
+                isPreview={isDirectPreview}
+              />
+            </div>
 
             {/* Additional Images Gallery */}
             {selectedAd.additionalImages && selectedAd.additionalImages.length > 0 && (
@@ -473,11 +509,14 @@ export function LocalAdsSection({
         </div>
       )}
 
-      {/* Automatic Spotlight Slider (only when browsing All and 2+ ads exist) */}
+      {/* Spotlight Slider */}
       {selectedCategory === 'All' && !searchQuery.trim() && activeAds.length > 1 && (
         <AdSlider
           ads={activeAds}
+          settings={settings}
           onOpenAd={onSelectAd}
+          showAllActive
+          placement="directory"
           title="Featured Local Advertisements"
         />
       )}
@@ -534,10 +573,14 @@ export function LocalAdsSection({
             return (
               <article
                 key={ad.id}
-                onClick={() => onSelectAd(ad)}
+                onClick={() => {
+                  void trackAdInteraction(ad.id, 'click', { placement: 'directory' });
+                  onSelectAd(ad);
+                }}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter' || e.key === ' ') {
                     e.preventDefault();
+                    void trackAdInteraction(ad.id, 'click', { placement: 'directory' });
                     onSelectAd(ad);
                   }
                 }}
@@ -604,7 +647,7 @@ export function LocalAdsSection({
                       {telHref && (
                         <a
                           href={telHref}
-                          onClick={() => void trackAdInteraction(ad.id, 'click')}
+                          onClick={() => void trackAdInteraction(ad.id, 'phone', { placement: 'directory' })}
                           aria-label={`Call ${ad.title}`}
                           className="inline-flex items-center gap-1 rounded-lg bg-[#0F274A] px-2.5 py-1.5 text-[11px] font-semibold text-white hover:bg-[#173a6e] transition-colors whitespace-nowrap"
                         >
@@ -617,7 +660,7 @@ export function LocalAdsSection({
                           href={waHref}
                           target="_blank"
                           rel="noopener noreferrer"
-                          onClick={() => void trackAdInteraction(ad.id, 'click')}
+                          onClick={() => void trackAdInteraction(ad.id, 'whatsapp', { placement: 'directory' })}
                           aria-label={`WhatsApp ${ad.title}`}
                           className="inline-flex items-center gap-1 rounded-lg bg-emerald-700 px-2.5 py-1.5 text-[11px] font-semibold text-white hover:bg-emerald-800 transition-colors whitespace-nowrap"
                         >
@@ -625,6 +668,12 @@ export function LocalAdsSection({
                           <span>WhatsApp</span>
                         </a>
                       )}
+                      <AdShareBar
+                        ad={ad}
+                        settings={settings}
+                        placement="directory"
+                        compact
+                      />
                     </div>
                   </div>
                 </div>
