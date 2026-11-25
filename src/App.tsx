@@ -1,8 +1,19 @@
-import { useEffect, useMemo, useState } from 'react';
-import { AlertCircle, Calendar, ChevronRight, Clock, Loader2, MessageSquare } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  AlertCircle,
+  Bookmark,
+  Calendar,
+  ChevronRight,
+  Clock,
+  Loader2,
+  MessageSquare,
+} from 'lucide-react';
 import { AdminPanel } from './components/AdminPanel';
+import { AdvancedSearchModal } from './components/AdvancedSearchModal';
 import { ArticleDetailView } from './components/ArticleDetailView';
 import { ArticleShareBar } from './components/ArticleShareBar';
+import { BottomMobileNav, type MobileNavTab } from './components/BottomMobileNav';
+import { BreakingNewsStrip } from './components/BreakingNewsStrip';
 import { BusTimingsSection } from './components/BusTimingsSection';
 import { CategoryBar, getCategoryShortIcon } from './components/CategoryBar';
 import { CoffeeCupLogo } from './components/CoffeeCupLogo';
@@ -13,10 +24,14 @@ import { HomepageAdSlot } from './components/HomepageAdSlot';
 import { HomepagePopupAd } from './components/HomepagePopupAd';
 import { LocalAdsSection } from './components/LocalAdsSection';
 import { NewsImage } from './components/NewsImage';
+import { NotificationCenterDrawer } from './components/NotificationCenterDrawer';
 import { PrivacyScreenGuard } from './components/PrivacyScreenGuard';
 import { ProgramsEventsSection } from './components/ProgramsEventsSection';
 import { RightRail } from './components/RightRail';
+import { SavedAndHistoryDrawer } from './components/SavedAndHistoryDrawer';
+import { SiteInfoModal, type SiteInfoPageKey } from './components/SiteInfoModal';
 import { SupportChatSection } from './components/SupportChatSection';
+import { TrendingNewsSection } from './components/TrendingNewsSection';
 import { WebsiteEntryAd } from './components/WebsiteEntryAd';
 import { WhatsAppGroupBanner } from './components/WhatsAppGroupBanner';
 import {
@@ -51,9 +66,39 @@ import type { AdPlatformSettings, Advertisement } from './types/ads';
 import type { FilterCategory, NewsArticle, ProgramEvent, SupportThread } from './types/news';
 import { createDefaultAdPlatformSettings } from './utils/adHelpers';
 import { isArticleActivelyFeatured } from './utils/featuredLead';
+import {
+  getBreakingNewsArticles,
+  getTrendingArticles,
+  parseArticleDateToMidnight,
+  searchArticlesAdvanced,
+  type TimeframeFilter,
+} from './utils/newsHelpers';
+import {
+  clearReadingHistory,
+  markArticleIdsNotified,
+  persistNotificationFeed,
+  persistNotificationSettings,
+  persistPublicTheme,
+  persistReadingPreferences,
+  readBookmarks,
+  readNotificationFeed,
+  readNotificationSettings,
+  readNotifiedArticleIds,
+  readInitialPublicTheme,
+  readReadingHistory,
+  readReadingPreferences,
+  recordReadingHistoryEntry,
+  removeBookmarkById,
+  toggleArticleBookmark,
+  type HistoryArticleSnapshot,
+  type InAppNotificationItem,
+  type PublicThemeMode,
+  type ReaderNotificationSettings,
+  type ReadingPreferences,
+  type SavedArticleSnapshot,
+} from './utils/readerPreferences';
 import { sanitizeRichTextHtml, stripRichTextToPlainText } from './utils/richText';
-
-type TimeframeFilter = 'All' | 'Today' | 'Yesterday' | 'This Week';
+import { buildArticlePublicUrl } from './utils/slug';
 
 function isAdminPath(pathname: string): boolean {
   const normalized = pathname.replace(/\/+$/, '') || '/';
@@ -78,16 +123,6 @@ function isChatPath(pathname: string): boolean {
 function isAdsPath(pathname: string): boolean {
   const normalized = pathname.replace(/\/+$/, '') || '/';
   return normalized === '/ads' || normalized.startsWith('/ads/');
-}
-
-function parseArticleDateToMidnight(dateStr: string, timestamp?: number): number | null {
-  if (typeof timestamp === 'number' && Number.isFinite(timestamp) && timestamp > 0) {
-    const dt = new Date(timestamp);
-    return new Date(dt.getFullYear(), dt.getMonth(), dt.getDate()).getTime();
-  }
-  const parsed = new Date(dateStr.trim());
-  if (Number.isNaN(parsed.getTime())) return null;
-  return new Date(parsed.getFullYear(), parsed.getMonth(), parsed.getDate()).getTime();
 }
 
 function formatDateLabelFromMidnight(midnightMs: number): string {
@@ -115,7 +150,8 @@ function groupArticlesByDate(list: NewsArticle[]): DateWiseArticleGroup[] {
   for (const article of list) {
     const midnight = parseArticleDateToMidnight(article.publishedDate, article.publishedTimestamp);
     const sortDayMs = midnight ?? 0;
-    const formattedDate = midnight !== null ? formatDateLabelFromMidnight(midnight) : article.publishedDate || 'Archive';
+    const formattedDate =
+      midnight !== null ? formatDateLabelFromMidnight(midnight) : article.publishedDate || 'Archive';
     const diffDays = midnight !== null ? Math.round((todayMidnight - midnight) / oneDayMs) : null;
 
     let heading = formattedDate;
@@ -151,29 +187,6 @@ function groupArticlesByDate(list: NewsArticle[]): DateWiseArticleGroup[] {
         (a, b) => (b.publishedTimestamp ?? 0) - (a.publishedTimestamp ?? 0)
       ),
     }));
-}
-
-function matchesTimeframe(article: NewsArticle, timeframe: TimeframeFilter): boolean {
-  if (timeframe === 'All') return true;
-
-  const articleMidnight = parseArticleDateToMidnight(
-    article.publishedDate,
-    article.publishedTimestamp
-  );
-  if (articleMidnight === null) return false;
-
-  const now = new Date();
-  const todayMidnight = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
-  const diffDays = Math.round((todayMidnight - articleMidnight) / (24 * 60 * 60 * 1000));
-
-  if (timeframe === 'Today') {
-    return diffDays === 0;
-  }
-  if (timeframe === 'Yesterday') {
-    return diffDays === 1;
-  }
-  // This Week (last 7 days including today)
-  return diffDays >= 0 && diffDays <= 6;
 }
 
 function readArticleIdFromUrl(): string | null {
@@ -219,26 +232,26 @@ function ArticleLoadingSkeleton({ onBack }: { onBack: () => void }) {
       aria-label="Loading selected article"
       className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-8 sm:py-10"
     >
-      <div className="flex items-center justify-between gap-4 pb-6 border-b border-stone-200">
+      <div className="flex items-center justify-between gap-4 pb-6 border-b border-slate-200 dark:border-slate-800">
         <button
           type="button"
           onClick={onBack}
-          className="text-sm font-medium text-stone-600 hover:text-[#0F274A] cursor-pointer px-2 -ml-2 min-h-[40px]"
+          className="text-sm font-semibold text-slate-600 dark:text-slate-300 hover:text-[#10243D] dark:hover:text-white cursor-pointer px-2 -ml-2 min-h-[40px]"
         >
           ← Back to Feed
         </button>
-        <div className="h-8 w-36 rounded-md bg-stone-200 animate-pulse" />
+        <div className="h-8 w-36 rounded-md bg-slate-200 dark:bg-slate-800 animate-pulse" />
       </div>
       <div className="py-8 max-w-3xl mx-auto space-y-5">
-        <div className="h-4 w-56 rounded bg-stone-200 animate-pulse" />
-        <div className="h-9 w-full rounded bg-stone-200 animate-pulse" />
-        <div className="h-9 w-4/5 rounded bg-stone-200 animate-pulse" />
-        <div className="h-5 w-full rounded bg-stone-100 animate-pulse" />
-        <div className="aspect-[16/9] w-full rounded-md bg-stone-200 animate-pulse" />
+        <div className="h-4 w-56 rounded bg-slate-200 dark:bg-slate-800 animate-pulse" />
+        <div className="h-9 w-full rounded bg-slate-200 dark:bg-slate-800 animate-pulse" />
+        <div className="h-9 w-4/5 rounded bg-slate-200 dark:bg-slate-800 animate-pulse" />
+        <div className="h-5 w-full rounded bg-slate-100 dark:bg-slate-800/70 animate-pulse" />
+        <div className="aspect-[16/9] w-full rounded-md bg-slate-200 dark:bg-slate-800 animate-pulse" />
         <div className="space-y-3 pt-2">
-          <div className="h-4 w-full rounded bg-stone-100 animate-pulse" />
-          <div className="h-4 w-11/12 rounded bg-stone-100 animate-pulse" />
-          <div className="h-4 w-5/6 rounded bg-stone-100 animate-pulse" />
+          <div className="h-4 w-full rounded bg-slate-100 dark:bg-slate-800/70 animate-pulse" />
+          <div className="h-4 w-11/12 rounded bg-slate-100 dark:bg-slate-800/70 animate-pulse" />
+          <div className="h-4 w-5/6 rounded bg-slate-100 dark:bg-slate-800/70 animate-pulse" />
         </div>
       </div>
     </main>
@@ -248,17 +261,17 @@ function ArticleLoadingSkeleton({ onBack }: { onBack: () => void }) {
 function FeedLoadingSkeleton() {
   return (
     <div aria-busy="true" aria-label="Loading latest news" className="space-y-4">
-      <div className="rounded-2xl h-[250px] sm:h-[275px] bg-slate-200 animate-pulse" />
+      <div className="rounded-2xl h-[250px] sm:h-[275px] bg-slate-200 dark:bg-slate-800 animate-pulse" />
       {[1, 2, 3, 4].map((idx) => (
         <div
           key={idx}
-          className="bg-white border border-slate-200 rounded-xl p-3 sm:p-4 flex items-center gap-3.5 sm:gap-4"
+          className="bg-white dark:bg-[#0F1E33] border border-slate-200 dark:border-slate-800 rounded-xl p-3 sm:p-4 flex items-center gap-3.5 sm:gap-4"
         >
-          <div className="w-24 h-20 sm:w-36 sm:h-24 shrink-0 rounded-lg bg-slate-200 animate-pulse" />
+          <div className="w-24 h-20 sm:w-36 sm:h-24 shrink-0 rounded-lg bg-slate-200 dark:bg-slate-800 animate-pulse" />
           <div className="flex-1 space-y-2.5">
-            <div className="h-3 w-28 rounded bg-slate-200 animate-pulse" />
-            <div className="h-4 w-full rounded bg-slate-200 animate-pulse" />
-            <div className="h-3 w-3/4 rounded bg-slate-100 animate-pulse" />
+            <div className="h-3 w-28 rounded bg-slate-200 dark:bg-slate-800 animate-pulse" />
+            <div className="h-4 w-full rounded bg-slate-200 dark:bg-slate-800 animate-pulse" />
+            <div className="h-3 w-3/4 rounded bg-slate-100 dark:bg-slate-800/60 animate-pulse" />
           </div>
         </div>
       ))}
@@ -321,8 +334,52 @@ export default function App() {
   const [entryOverlayActive, setEntryOverlayActive] = useState<boolean>(false);
   const [leadNowMs, setLeadNowMs] = useState<number>(() => Date.now());
 
+  // Frontend 2.0 + Reader Addons state
+  const [publicTheme, setPublicTheme] = useState<PublicThemeMode>(() => readInitialPublicTheme());
+  const [readingPrefs, setReadingPrefs] = useState<ReadingPreferences>(() =>
+    readReadingPreferences()
+  );
+  const [bookmarks, setBookmarks] = useState<SavedArticleSnapshot[]>(() => readBookmarks());
+  const [readingHistory, setReadingHistory] = useState<HistoryArticleSnapshot[]>(() =>
+    readReadingHistory()
+  );
+  const [notifSettings, setNotifSettings] = useState<ReaderNotificationSettings>(() =>
+    readNotificationSettings()
+  );
+  const [notificationFeed, setNotificationFeed] = useState<InAppNotificationItem[]>(() =>
+    readNotificationFeed()
+  );
+  const [browserNotifPermission, setBrowserNotifPermission] = useState<
+    NotificationPermission | 'unsupported'
+  >(() =>
+    typeof window !== 'undefined' && 'Notification' in window
+      ? window.Notification.permission
+      : 'unsupported'
+  );
+  const [searchModalOpen, setSearchModalOpen] = useState(false);
+  const [libraryDrawerTab, setLibraryDrawerTab] = useState<'saved' | 'history' | null>(null);
+  const [notifDrawerOpen, setNotifDrawerOpen] = useState(false);
+  const [siteInfoPage, setSiteInfoPage] = useState<SiteInfoPageKey | null>(null);
+  const [activeMobileTab, setActiveMobileTab] = useState<MobileNavTab>('home');
+
+  const recordedHistoryArticleIdRef = useRef<string | null>(null);
+
+  const adminRouteActive = isAdminPath(pathname);
+
+  // Sync theme and reduced motion classes on documentElement for public routes
   useEffect(() => {
-    // Prune only legacy pre-PWA CacheStorage buckets (never touch active CoffeeNadu PWA cache or Service Worker)
+    if (adminRouteActive) {
+      document.documentElement.classList.remove('dark');
+      return;
+    }
+    persistPublicTheme(publicTheme);
+  }, [publicTheme, adminRouteActive]);
+
+  useEffect(() => {
+    persistReadingPreferences(readingPrefs);
+  }, [readingPrefs]);
+
+  useEffect(() => {
     try {
       if ('caches' in window && window.caches && typeof window.caches.keys === 'function') {
         void window.caches
@@ -334,9 +391,7 @@ export default function App() {
                 .map((key) => window.caches.delete(key))
             )
           )
-          .catch(() => {
-            // Ignore restricted storage/iframe CacheStorage errors
-          });
+          .catch(() => {});
       }
     } catch {
       // Ignore cache cleanup errors
@@ -353,7 +408,7 @@ export default function App() {
     return () => window.removeEventListener('popstate', handlePopState);
   }, []);
 
-  // Subscribe to in-memory shared stores & quota monitor (0 Firestore reads)
+  // Subscribe to in-memory shared stores & quota monitor
   useEffect(() => {
     const unsubArticles = subscribeToArticlesState((state) => {
       setArticles(state.articles);
@@ -381,19 +436,16 @@ export default function App() {
     };
   }, []);
 
-  const adminRouteActive = isAdminPath(pathname);
   const busTimingsActiveCheck = isBusTimingsPath(pathname);
   const eventsActiveCheck = isEventsPath(pathname);
   const chatActiveCheck = isChatPath(pathname);
   const adsActiveCheck = isAdsPath(pathname);
 
-  // Load active local advertisements on public routes
   useEffect(() => {
     if (adminRouteActive) return;
     void loadActiveAds();
   }, [adminRouteActive]);
 
-  // Lazy-load initial news feed ONLY when viewing the public news feed (never on /admin, /events, /bus-timings, /chat, /ads, or direct ?article=id)
   useEffect(() => {
     if (
       adminRouteActive ||
@@ -417,7 +469,6 @@ export default function App() {
     selectedAdId,
   ]);
 
-  // Lazy-load initial events list ONLY when visiting /events without a direct ?event=id
   useEffect(() => {
     if (adminRouteActive || !eventsActiveCheck || selectedEventId) {
       return;
@@ -425,7 +476,6 @@ export default function App() {
     void loadInitialEvents();
   }, [adminRouteActive, eventsActiveCheck, selectedEventId]);
 
-  // Lightweight cached check for reader chat unread badge (0 reads unless reader actually started a thread)
   useEffect(() => {
     if (adminRouteActive) return;
     let cancelled = false;
@@ -439,7 +489,6 @@ export default function App() {
     };
   }, [adminRouteActive, readerThreadId, chatActiveCheck]);
 
-  // Direct single-doc lookup for shared article URLs (1 read max, or 0 if cached)
   useEffect(() => {
     if (!selectedArticleId) {
       setDirectArticle(null);
@@ -475,7 +524,6 @@ export default function App() {
     };
   }, [selectedArticleId, articles]);
 
-  // Direct single-doc lookup for shared program/event URLs (1 read max, or 0 if cached)
   useEffect(() => {
     if (!eventsActiveCheck || !selectedEventId) {
       setDirectEvent(null);
@@ -511,7 +559,6 @@ export default function App() {
     };
   }, [eventsActiveCheck, selectedEventId, events]);
 
-  // Direct single-ad lookup for shared advertisement URLs (/ads?ad=<id>&preview=<token>)
   useEffect(() => {
     if (!selectedAdId) {
       setDirectAd(null);
@@ -584,34 +631,21 @@ export default function App() {
     window.scrollTo({ top: 0, behavior: instantScroll ? 'auto' : 'smooth' });
   };
 
-  const filteredArticles = useMemo(() => {
-    const q = searchQuery.trim().toLowerCase();
-    return articles.filter((article) => {
-      if (activeCategory !== 'All' && article.category !== activeCategory) {
-        return false;
-      }
-      if (!matchesSelectedLocation(article.location, selectedLocation)) {
-        return false;
-      }
-      if (!matchesTimeframe(article, timeframe)) {
-        return false;
-      }
-      if (q) {
-        const haystack = [
-          stripRichTextToPlainText(article.titleKannada),
-          stripRichTextToPlainText(article.summaryKannada),
-          article.category,
-          article.location,
-          article.reporter,
-          ...article.bodyKannada.map((part) => stripRichTextToPlainText(part)),
-        ]
-          .join(' ')
-          .toLowerCase();
-        return haystack.includes(q);
-      }
-      return true;
-    });
-  }, [articles, activeCategory, selectedLocation, timeframe, searchQuery]);
+  const filteredArticles = useMemo(
+    () =>
+      searchArticlesAdvanced(
+        articles,
+        {
+          query: searchQuery,
+          category: activeCategory,
+          location: selectedLocation,
+          timeframe,
+        },
+        leadNowMs,
+        matchesSelectedLocation
+      ),
+    [articles, activeCategory, selectedLocation, timeframe, searchQuery, leadNowMs]
+  );
 
   const selectedArticle = useMemo(() => {
     if (!selectedArticleId) return null;
@@ -623,6 +657,50 @@ export default function App() {
     return null;
   }, [articles, selectedArticleId, directArticle]);
 
+  // Record reading history automatically when an article opens
+  useEffect(() => {
+    if (!selectedArticle) {
+      recordedHistoryArticleIdRef.current = null;
+      return;
+    }
+    if (recordedHistoryArticleIdRef.current === selectedArticle.id) return;
+    recordedHistoryArticleIdRef.current = selectedArticle.id;
+    setReadingHistory(recordReadingHistoryEntry(selectedArticle));
+  }, [selectedArticle]);
+
+  // Keep client-side <title> and OG/canonical meta tags synced during SPA transitions
+  useEffect(() => {
+    if (adminRouteActive) return;
+    if (selectedArticle) {
+      const cleanTitle = stripRichTextToPlainText(selectedArticle.titleKannada);
+      const cleanSummary = stripRichTextToPlainText(selectedArticle.summaryKannada);
+      document.title = `${cleanTitle} — Coffeenadu News`;
+      const descMeta = document.querySelector('meta[name="description"]');
+      if (descMeta && cleanSummary) descMeta.setAttribute('content', cleanSummary.slice(0, 280));
+      const ogTitleMeta = document.querySelector('meta[property="og:title"]');
+      if (ogTitleMeta) ogTitleMeta.setAttribute('content', cleanTitle);
+      const ogUrlMeta = document.querySelector('meta[property="og:url"]');
+      if (ogUrlMeta) ogUrlMeta.setAttribute('content', buildArticlePublicUrl(selectedArticle.id));
+    } else if (busTimingsActiveCheck) {
+      document.title = 'Bus Timings — Coffeenadu News';
+    } else if (eventsActiveCheck) {
+      document.title = 'Programs & Events — Coffeenadu News';
+    } else if (adsActiveCheck) {
+      document.title = 'Local Advertisements — Coffeenadu News';
+    } else if (chatActiveCheck) {
+      document.title = 'Message Editorial Desk — Coffeenadu News';
+    } else {
+      document.title = 'Coffeenadu News — Koppa Taluk Local Kannada News';
+    }
+  }, [
+    adminRouteActive,
+    selectedArticle,
+    busTimingsActiveCheck,
+    eventsActiveCheck,
+    adsActiveCheck,
+    chatActiveCheck,
+  ]);
+
   const isWaitingForSelectedArticle = Boolean(
     selectedArticleId && !selectedArticle && (!articlesLoaded || directArticleLoading)
   );
@@ -630,11 +708,74 @@ export default function App() {
   const relatedArticles = useMemo(() => {
     if (!selectedArticle) return [];
     return articles
-      .filter(
-        (a) => a.id !== selectedArticle.id && a.category === selectedArticle.category
-      )
-      .slice(0, 3);
+      .filter((a) => a.id !== selectedArticle.id && a.category === selectedArticle.category)
+      .slice(0, 4);
   }, [articles, selectedArticle]);
+
+  const breakingArticles = useMemo(
+    () => getBreakingNewsArticles(articles, leadNowMs, 6),
+    [articles, leadNowMs]
+  );
+
+  const trendingResult = useMemo(() => getTrendingArticles(articles, 5), [articles]);
+
+  // Populate in-app alerts & optionally dispatch browser notifications once per article ID
+  useEffect(() => {
+    if (adminRouteActive || !articlesLoaded || breakingArticles.length === 0) return;
+
+    const existingIds = new Set(notificationFeed.map((n) => n.articleId));
+    const additions: InAppNotificationItem[] = [];
+
+    for (const item of breakingArticles.slice(0, 5)) {
+      if (!existingIds.has(item.id)) {
+        additions.push({
+          id: `notif-${item.id}`,
+          articleId: item.id,
+          title: stripRichTextToPlainText(item.titleKannada),
+          category: item.category,
+          location: item.location,
+          createdAt: item.publishedTimestamp || Date.now(),
+          read: false,
+        });
+      }
+    }
+
+    if (additions.length > 0) {
+      const nextFeed = [...additions, ...notificationFeed].slice(0, 20);
+      setNotificationFeed(nextFeed);
+      persistNotificationFeed(nextFeed);
+    }
+
+    if (
+      notifSettings.browserEnabled &&
+      typeof window !== 'undefined' &&
+      'Notification' in window &&
+      window.Notification.permission === 'granted'
+    ) {
+      const alreadyNotified = readNotifiedArticleIds();
+      const fresh = breakingArticles.filter((a) => !alreadyNotified.has(a.id)).slice(0, 2);
+      if (fresh.length > 0) {
+        for (const item of fresh) {
+          try {
+            const notif = new window.Notification('Coffeenadu Breaking News', {
+              body: stripRichTextToPlainText(item.titleKannada),
+              icon: '/pwa-192x192.png',
+              tag: `cn-breaking-${item.id}`,
+            });
+            notif.onclick = () => {
+              window.focus();
+              handleOpenArticle(item);
+              notif.close();
+            };
+          } catch {
+            // Ignore browser Notification restrictions
+          }
+        }
+        markArticleIdsNotified(fresh.map((a) => a.id));
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [adminRouteActive, articlesLoaded, breakingArticles, notifSettings.browserEnabled]);
 
   const busTimingsActive = isBusTimingsPath(pathname);
   const eventsActive = isEventsPath(pathname);
@@ -647,6 +788,7 @@ export default function App() {
     setSelectedArticleId(null);
     setSelectedEventId(null);
     setSelectedAdId(null);
+    setActiveMobileTab('home');
     if (isSpecialRoute || window.location.search) {
       navigateTo('/');
     } else {
@@ -662,6 +804,7 @@ export default function App() {
     setSelectedArticleId(null);
     setSelectedEventId(null);
     setSelectedAdId(null);
+    setActiveMobileTab('home');
     if (isSpecialRoute || window.location.search) {
       navigateTo('/');
     } else {
@@ -669,14 +812,14 @@ export default function App() {
     }
   };
 
-  const handleOpenArticle = (article: NewsArticle) => {
+  const handleOpenArticle = useCallback((article: NewsArticle) => {
     setSelectedEventId(null);
     setSelectedAdId(null);
     setDirectArticle(article);
     setDirectArticleLoading(false);
     setSelectedArticleId(article.id);
     navigateTo(`/?article=${encodeURIComponent(article.id)}`, true);
-  };
+  }, []);
 
   const handleCloseArticle = () => {
     setSelectedArticleId(null);
@@ -746,7 +889,31 @@ export default function App() {
     navigateTo('/ads');
   };
 
-  // Real-time auto-removal of expired Lead Stories without requiring a page reload
+  const handleToggleBookmark = (article: NewsArticle) => {
+    const res = toggleArticleBookmark(article);
+    setBookmarks(res.bookmarks);
+  };
+
+  const handleRequestBrowserPermission = async () => {
+    if (typeof window === 'undefined' || !('Notification' in window)) {
+      setBrowserNotifPermission('unsupported');
+      return;
+    }
+    try {
+      const perm = await window.Notification.requestPermission();
+      setBrowserNotifPermission(perm);
+      const next: ReaderNotificationSettings = {
+        ...notifSettings,
+        browserEnabled: perm === 'granted',
+      };
+      setNotifSettings(next);
+      persistNotificationSettings(next);
+    } catch {
+      // Ignore permission rejection
+    }
+  };
+
+  // Real-time auto-removal of expired Lead Stories
   useEffect(() => {
     let earliestExpiry = Number.POSITIVE_INFINITY;
     for (const article of articles) {
@@ -773,7 +940,13 @@ export default function App() {
   );
   const dateGroups = useMemo(() => groupArticlesByDate(filteredArticles), [filteredArticles]);
 
-  if (isAdminPath(pathname)) {
+  const bookmarkedIdSet = useMemo(() => new Set(bookmarks.map((b) => b.id)), [bookmarks]);
+  const unreadNotificationsCount = useMemo(
+    () => notificationFeed.filter((n) => !n.read).length,
+    [notificationFeed]
+  );
+
+  if (adminRouteActive) {
     return (
       <AdminPanel
         articles={articles}
@@ -783,8 +956,8 @@ export default function App() {
   }
 
   return (
-    <PrivacyScreenGuard enabled={!isAdminPath(pathname)}>
-      <div className="min-h-screen flex flex-col bg-[#F2F5F8] text-slate-900">
+    <PrivacyScreenGuard enabled={!adminRouteActive}>
+      <div className="min-h-screen flex flex-col bg-[#F3F6F8] dark:bg-[#0B1626] text-[#17263A] dark:text-slate-100 transition-colors">
         <WhatsAppGroupBanner variant="top-bar" />
         <Header
           activeCategory={activeCategory}
@@ -792,12 +965,29 @@ export default function App() {
           isEventsView={eventsActive}
           isChatView={chatActive}
           isAdsView={adsActive || Boolean(selectedAdId)}
+          theme={publicTheme}
+          bookmarkCount={bookmarks.length}
+          unreadNotificationsCount={unreadNotificationsCount}
           onSelectCategory={handleSelectCategory}
           onResetHome={handleResetHome}
           onJumpToBusTimings={handleJumpToBusTimings}
           onJumpToEvents={handleJumpToEvents}
           onJumpToAds={handleJumpToAds}
+          onOpenSearch={() => setSearchModalOpen(true)}
+          onOpenSaved={() => setLibraryDrawerTab('saved')}
+          onOpenNotifications={() => setNotifDrawerOpen(true)}
+          onToggleTheme={() =>
+            setPublicTheme((prev) => (prev === 'dark' ? 'light' : 'dark'))
+          }
         />
+
+        {/* Breaking News Strip across homepage feed */}
+        {!selectedArticleId && !selectedAdId && !isSpecialRoute && (
+          <BreakingNewsStrip
+            articles={breakingArticles}
+            onSelectArticle={handleOpenArticle}
+          />
+        )}
 
         {!selectedArticleId && !selectedAdId && !isSpecialRoute && (
           <CategoryBar
@@ -809,6 +999,7 @@ export default function App() {
             onSelectLocation={setSelectedLocation}
             searchQuery={searchQuery}
             onSearchChange={setSearchQuery}
+            onOpenAdvancedSearch={() => setSearchModalOpen(true)}
           />
         )}
 
@@ -863,32 +1054,39 @@ export default function App() {
             />
           </main>
         ) : selectedArticleId ? (
-          <div className="flex-1 bg-white">
+          <div className="flex-1 bg-white dark:bg-[#0B1626]">
             {selectedArticle ? (
               <ArticleDetailView
                 key={selectedArticle.id}
                 article={selectedArticle}
+                allArticles={articles}
                 relatedArticles={relatedArticles}
                 activeAds={activeAds}
                 adSettings={adSettings}
+                isBookmarked={bookmarkedIdSet.has(selectedArticle.id)}
+                readingPrefs={readingPrefs}
+                readingHistory={readingHistory}
+                onToggleBookmark={handleToggleBookmark}
+                onUpdateReadingPrefs={setReadingPrefs}
                 onBack={handleCloseArticle}
                 onSelectArticle={handleOpenArticle}
                 onSelectAd={handleOpenAd}
+                onOpenMessageAdmin={handleJumpToChat}
               />
             ) : isWaitingForSelectedArticle ? (
               <ArticleLoadingSkeleton onBack={handleCloseArticle} />
             ) : (
               <main className="max-w-2xl mx-auto px-4 py-16 text-center space-y-3">
-                <h1 className="text-lg font-bold text-slate-900">
+                <h1 className="text-lg font-bold text-[#17263A] dark:text-white">
                   Selected article could not be found
                 </h1>
-                <p className="text-sm text-slate-600">
+                <p className="text-sm text-[#738093] dark:text-slate-400">
                   This story may have been removed or moved by the editorial desk.
                 </p>
                 <button
                   type="button"
                   onClick={handleCloseArticle}
-                  className="px-4 py-2 text-xs font-semibold text-white bg-[#0F274A] hover:bg-[#173a6e] rounded-lg cursor-pointer min-h-[40px]"
+                  className="px-4 py-2 text-xs font-semibold text-white bg-[#10243D] hover:bg-[#19385F] rounded-lg cursor-pointer min-h-[40px]"
                 >
                   Back to Latest News
                 </button>
@@ -896,454 +1094,639 @@ export default function App() {
             )}
           </div>
         ) : (
-        <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-5 sm:py-6 space-y-6">
-          {/* Custom Top Banner Homepage Ad Slot */}
-          {activeAds.length > 0 && (
-            <HomepageAdSlot
-              ads={activeAds}
-              settings={adSettings}
-              position="custom"
-              customPosition="top_banner"
-              onOpenAd={handleOpenAd}
-              onViewAllAds={handleJumpToAds}
-            />
-          )}
+          <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-5 sm:py-6 space-y-6">
+            {/* Custom Top Banner Homepage Ad Slot */}
+            {activeAds.length > 0 && (
+              <HomepageAdSlot
+                ads={activeAds}
+                settings={adSettings}
+                position="custom"
+                customPosition="top_banner"
+                onOpenAd={handleOpenAd}
+                onViewAllAds={handleJumpToAds}
+              />
+            )}
 
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
-            {/* Left/Main Timeline Feed (8 cols on desktop, full width on mobile) */}
-            <div className="lg:col-span-8">
-              {/* Section Heading & Timeframe Filter Row */}
-              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-5">
-                <div className="flex items-start gap-3">
-                  <span
-                    className="mt-2 w-3 h-3 rounded-full border-2 border-amber-400 bg-white shrink-0"
-                    aria-hidden="true"
-                  />
-                  <div>
-                    <h1 className="text-lg sm:text-xl font-extrabold text-[#0F274A] tracking-tight">
-                      {activeCategory === 'All'
-                        ? 'Koppa Latest Updates'
-                        : `${activeCategory} Updates`}
-                    </h1>
-                    <div
-                      className="h-1 w-20 bg-amber-400 rounded-full mt-1"
+            {/* Mobile/Tablet Trending News Horizontal Strip */}
+            {trendingResult.items.length > 0 && (
+              <div id="trending-news-mobile" className="lg:hidden">
+                <TrendingNewsSection
+                  articles={trendingResult.items}
+                  isViewRanked={trendingResult.isViewRanked}
+                  onSelectArticle={handleOpenArticle}
+                  variant="horizontal"
+                />
+              </div>
+            )}
+
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
+              {/* Left/Main Timeline Feed (8 cols on desktop, full width on mobile) */}
+              <div id="latest-news-feed" className="lg:col-span-8">
+                {/* Section Heading & Timeframe Filter Row */}
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-5">
+                  <div className="flex items-start gap-3">
+                    <span
+                      className="mt-2 w-3 h-3 rounded-full border-2 border-[#D9A441] bg-white dark:bg-[#0B1626] shrink-0"
                       aria-hidden="true"
                     />
+                    <div>
+                      <h1 className="text-lg sm:text-xl font-extrabold text-[#10243D] dark:text-white tracking-tight">
+                        {activeCategory === 'All'
+                          ? 'Koppa Latest Updates'
+                          : `${activeCategory} Updates`}
+                      </h1>
+                      <div
+                        className="h-1 w-20 bg-[#D9A441] rounded-full mt-1"
+                        aria-hidden="true"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Segmented Timeframe Control */}
+                  <div
+                    role="group"
+                    aria-label="Filter by timeframe"
+                    className="inline-flex items-center bg-white dark:bg-[#0F1E33] border border-slate-200 dark:border-slate-800 rounded-xl p-1 self-start sm:self-auto"
+                  >
+                    {(['All', 'Today', 'Yesterday', 'This Week'] as TimeframeFilter[]).map(
+                      (tf) => {
+                        const active = timeframe === tf;
+                        return (
+                          <button
+                            key={tf}
+                            type="button"
+                            onClick={() => setTimeframe(tf)}
+                            className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
+                              active
+                                ? 'bg-[#10243D] text-white dark:bg-[#D9A441] dark:text-[#10243D]'
+                                : 'text-[#738093] dark:text-slate-300 hover:text-[#17263A] dark:hover:text-white'
+                            }`}
+                          >
+                            {active && <Calendar className="w-3.5 h-3.5" aria-hidden="true" />}
+                            <span>{tf}</span>
+                          </button>
+                        );
+                      }
+                    )}
                   </div>
                 </div>
 
-                {/* Segmented Timeframe Control */}
-                <div
-                  role="group"
-                  aria-label="Filter by timeframe"
-                  className="inline-flex items-center bg-white border border-slate-200 rounded-xl p-1 self-start sm:self-auto"
-                >
-                  {(['All', 'Today', 'Yesterday', 'This Week'] as TimeframeFilter[]).map(
-                    (tf) => {
-                      const active = timeframe === tf;
-                      return (
-                        <button
-                          key={tf}
-                          type="button"
-                          onClick={() => setTimeframe(tf)}
-                          className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
-                            active
-                              ? 'bg-[#0F274A] text-white'
-                              : 'text-slate-600 hover:text-slate-950'
-                          }`}
-                        >
-                          {active && <Calendar className="w-3.5 h-3.5" aria-hidden="true" />}
-                          <span>{tf}</span>
-                        </button>
-                      );
-                    }
-                  )}
-                </div>
-              </div>
-
-              {quotaStatus.quotaExceeded && (
-                <div
-                  role="status"
-                  className="mb-4 px-4 py-3 bg-amber-50 border border-amber-200 rounded-xl flex items-start gap-2.5 text-xs text-amber-950"
-                >
-                  <AlertCircle className="w-4 h-4 text-amber-700 shrink-0 mt-0.5" aria-hidden="true" />
-                  <p className="font-kannada leading-relaxed">
-                    Daily live database read limit temporarily reached. Showing saved news stories — live sync resumes automatically after quota reset.
-                  </p>
-                </div>
-              )}
-
-              {!articlesLoaded ? (
-                <FeedLoadingSkeleton />
-              ) : filteredArticles.length === 0 ? (
-                <div className="bg-white border border-slate-200 rounded-xl p-8 text-center">
-                  <h2 className="text-base font-bold text-slate-900 mb-1.5">
-                    No matching updates found
-                  </h2>
-                  <p className="text-sm text-slate-600 mb-4">
-                    Try clearing your search or switching back to all Koppa Taluk updates.
-                  </p>
-                  <button
-                    type="button"
-                    onClick={handleResetHome}
-                    className="px-4 py-2 text-xs font-semibold text-white bg-[#0F274A] hover:bg-[#173a6e] rounded-lg transition-colors cursor-pointer min-h-[40px]"
-                  >
-                    Reset Filters
-                  </button>
-                </div>
-              ) : (
-                <div className="relative pl-6 sm:pl-7">
-                  {/* Continuous vertical timeline rail */}
+                {quotaStatus.quotaExceeded && (
                   <div
-                    className="absolute left-[5px] top-0 bottom-4 w-px bg-slate-300"
-                    aria-hidden="true"
-                  />
+                    role="status"
+                    className="mb-4 px-4 py-3 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 rounded-xl flex items-start gap-2.5 text-xs text-amber-950 dark:text-amber-200"
+                  >
+                    <AlertCircle className="w-4 h-4 text-amber-700 dark:text-amber-400 shrink-0 mt-0.5" aria-hidden="true" />
+                    <p className="font-kannada leading-relaxed">
+                      Daily live database read limit temporarily reached. Showing saved news stories — live sync resumes automatically after quota reset.
+                    </p>
+                  </div>
+                )}
 
-                  <div className="space-y-6">
-                    {/* Sliding Featured Lead Stories Carousel */}
-                    <FeaturedLeadCarousel
-                      leadArticles={leadArticles}
-                      onOpenArticle={handleOpenArticle}
+                {!articlesLoaded ? (
+                  <FeedLoadingSkeleton />
+                ) : filteredArticles.length === 0 ? (
+                  <div className="bg-white dark:bg-[#0F1E33] border border-slate-200 dark:border-slate-800 rounded-xl p-8 text-center">
+                    <h2 className="text-base font-bold text-[#17263A] dark:text-white mb-1.5">
+                      No matching updates found
+                    </h2>
+                    <p className="text-sm text-[#738093] dark:text-slate-400 mb-4">
+                      Try clearing your search or switching back to all Koppa Taluk updates.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={handleResetHome}
+                      className="px-4 py-2 text-xs font-semibold text-white bg-[#10243D] hover:bg-[#19385F] dark:bg-[#D9A441] dark:text-[#10243D] rounded-lg transition-colors cursor-pointer min-h-[40px]"
+                    >
+                      Reset Filters
+                    </button>
+                  </div>
+                ) : (
+                  <div className="relative pl-5 sm:pl-7">
+                    <div
+                      className="absolute left-[4px] sm:left-[5px] top-0 bottom-4 w-px bg-slate-300 dark:bg-slate-700"
+                      aria-hidden="true"
                     />
 
-                    {/* Homepage Advertisement Section — Below Main Headline/Lead Section */}
-                    {activeAds.length > 0 && (
-                      <HomepageAdSlot
-                        ads={activeAds}
-                        settings={adSettings}
-                        position="below_headline"
-                        onOpenAd={handleOpenAd}
-                        onViewAllAds={handleJumpToAds}
+                    <div className="space-y-6">
+                      <FeaturedLeadCarousel
+                        leadArticles={leadArticles}
+                        onOpenArticle={handleOpenArticle}
                       />
-                    )}
 
-                    {/* Date-Wise Sections: Today, Yesterday, and older dates */}
-                    {dateGroups.map((group, groupIdx) => (
-                      <div key={group.key} className="space-y-6">
-                        <section
-                          aria-label={`${group.heading} news`}
-                          className="space-y-3"
-                        >
-                        <div className="relative flex items-center justify-between gap-3 pt-1">
-                          <span
-                            className="absolute -left-6 sm:-left-7 top-1/2 -translate-y-1/2 w-3.5 h-3.5 rounded-full bg-[#0F274A] border-2 border-amber-400 z-10"
-                            aria-hidden="true"
-                          />
-                          <div className="flex items-baseline gap-2.5">
-                            <h2 className="text-sm sm:text-base font-extrabold text-[#0F274A] tracking-tight">
-                              {group.heading}
-                            </h2>
-                            {group.subLabel && (
-                              <span className="text-xs font-medium text-slate-500">
-                                {group.subLabel}
-                              </span>
-                            )}
-                          </div>
-                          <span className="text-[11px] font-semibold text-slate-500 tabular-nums">
-                            {group.articles.length}{' '}
-                            {group.articles.length === 1 ? 'story' : 'stories'}
-                          </span>
-                        </div>
-
-                        <div className="space-y-3">
-                          {group.articles.map((article, index) => {
-                            const imgSrc = resolveArticleImage(article);
-                            const isAccentNode = index % 2 === 1;
-                            return (
-                              <div key={article.id} className="relative">
-                                <span
-                                  className={`absolute -left-6 sm:-left-7 top-1/2 -translate-y-1/2 w-2.5 h-2.5 rounded-full border-2 bg-white z-10 ${
-                                    isAccentNode ? 'border-amber-400' : 'border-slate-400'
-                                  }`}
-                                  aria-hidden="true"
-                                />
-
-                                <article
-                                  onClick={() => handleOpenArticle(article)}
-                                  onKeyDown={(e) => {
-                                    if (e.key === 'Enter' || e.key === ' ') {
-                                      e.preventDefault();
-                                      handleOpenArticle(article);
-                                    }
-                                  }}
-                                  role="button"
-                                  tabIndex={0}
-                                  className="group bg-white border border-slate-200 hover:border-slate-300 rounded-xl p-3 sm:p-4 shadow-2xs transition-colors flex items-center gap-3.5 sm:gap-4 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0F274A]"
-                                >
-                                  {/* Left Thumbnail */}
-                                  <div className="w-28 h-24 sm:w-40 sm:h-28 shrink-0 rounded-lg overflow-hidden bg-slate-950 border border-slate-200">
-                                    {imgSrc ? (
-                                      <NewsImage
-                                        src={imgSrc}
-                                        alt={stripRichTextToPlainText(article.titleKannada)}
-                                        fitMode="contain-blur"
-                                        aspectClass="w-full h-full"
-                                        watermarkApplied={Boolean(article.watermarkApplied && article.imageUrl)}
-                                        className="h-full"
-                                      />
-                                    ) : (
-                                      <div className="w-full h-full flex flex-col items-center justify-center text-[#0F274A] bg-slate-100 p-2 text-center">
-                                        {getCategoryShortIcon(article.category)}
-                                        <span className="text-[10px] font-semibold mt-1 text-slate-600">
-                                          {article.category}
-                                        </span>
-                                      </div>
-                                    )}
-                                  </div>
-
-                                  {/* Center Content */}
-                                  <div className="flex-1 min-w-0 space-y-1">
-                                    <div className="flex flex-wrap items-center gap-1.5 text-[11px] font-semibold text-slate-500">
-                                      <span className="text-[#0F274A]">{article.category}</span>
-                                      <span aria-hidden="true">·</span>
-                                      <span className="font-kannada">{getKannadaLocationLabel(article.location)}</span>
-                                      {isArticleActivelyFeatured(article, leadNowMs) && (
-                                        <>
-                                          <span aria-hidden="true">·</span>
-                                          <span className="text-amber-700">Featured</span>
-                                        </>
-                                      )}
-                                    </div>
-
-                                    <h3
-                                      className="article-rich-content article-rich-inline-compact font-kannada text-sm sm:text-base font-bold text-slate-900 group-hover:text-[#0F274A] transition-colors leading-snug line-clamp-2"
-                                      dangerouslySetInnerHTML={{
-                                        __html: sanitizeRichTextHtml(article.titleKannada),
-                                      }}
-                                    />
-
-                                    <div
-                                      className="article-rich-content article-rich-inline-compact font-kannada text-xs text-slate-600 line-clamp-1"
-                                      dangerouslySetInnerHTML={{
-                                        __html: sanitizeRichTextHtml(article.summaryKannada),
-                                      }}
-                                    />
-
-                                    <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
-                                      <div className="flex items-center gap-2 text-[11px] text-slate-500 tabular-nums">
-                                        <span className="inline-flex items-center gap-1">
-                                          <Clock className="w-3 h-3" aria-hidden="true" />
-                                          <span>{article.publishedDate}</span>
-                                        </span>
-                                        <span aria-hidden="true">·</span>
-                                        <span>{article.publishedTime}</span>
-                                        <span aria-hidden="true">·</span>
-                                        <span>{article.readTimeMinutes} min read</span>
-                                      </div>
-
-                                      <ArticleShareBar article={article} compact variant="light" />
-                                    </div>
-
-                                    <WhatsAppGroupBanner variant="inline-news" />
-                                  </div>
-
-                                  {/* Right Chevron Affordance */}
-                                  <div
-                                    className="hidden sm:flex w-8 h-8 rounded-full bg-slate-100 text-slate-700 group-hover:bg-[#0F274A] group-hover:text-white transition-colors items-center justify-center shrink-0"
-                                    aria-hidden="true"
-                                  >
-                                    <ChevronRight className="w-4 h-4" />
-                                  </div>
-                                </article>
-                              </div>
-                            );
-                          })}
-                        </div>
-                      </section>
-
-                      {/* Homepage Advertisement Section — Between News Sections (after first group) */}
-                      {groupIdx === 0 && activeAds.length > 0 && (
+                      {activeAds.length > 0 && (
                         <HomepageAdSlot
                           ads={activeAds}
                           settings={adSettings}
-                          position="between_news"
+                          position="below_headline"
                           onOpenAd={handleOpenAd}
                           onViewAllAds={handleJumpToAds}
                         />
                       )}
-                    </div>
-                    ))}
-                  </div>
 
-                  {hasMoreArticles && (
-                    <div className="pt-5 flex justify-center">
-                      <button
-                        type="button"
-                        onClick={handleLoadMoreArticles}
-                        disabled={loadingMoreArticles}
-                        className="inline-flex items-center gap-2 px-5 py-2.5 text-xs sm:text-sm font-semibold text-[#0F274A] bg-white hover:bg-slate-50 border border-slate-300 rounded-xl shadow-2xs transition-colors cursor-pointer disabled:opacity-60 min-h-[42px]"
-                      >
-                        {loadingMoreArticles ? (
-                          <>
-                            <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" />
-                            <span>Loading older stories...</span>
-                          </>
-                        ) : (
-                          <span>Load More News</span>
-                        )}
-                      </button>
+                      {dateGroups.map((group, groupIdx) => (
+                        <div key={group.key} className="space-y-6">
+                          <section aria-label={`${group.heading} news`} className="space-y-3">
+                            <div className="relative flex items-center justify-between gap-3 pt-1">
+                              <span
+                                className="absolute -left-5 sm:-left-7 top-1/2 -translate-y-1/2 w-3.5 h-3.5 rounded-full bg-[#10243D] border-2 border-[#D9A441] z-10"
+                                aria-hidden="true"
+                              />
+                              <div className="flex items-baseline gap-2.5">
+                                <h2 className="text-sm sm:text-base font-extrabold text-[#10243D] dark:text-white tracking-tight">
+                                  {group.heading}
+                                </h2>
+                                {group.subLabel && (
+                                  <span className="text-xs font-medium text-[#738093] dark:text-slate-400">
+                                    {group.subLabel}
+                                  </span>
+                                )}
+                              </div>
+                              <span className="text-[11px] font-semibold text-[#738093] dark:text-slate-400 tabular-nums">
+                                {group.articles.length}{' '}
+                                {group.articles.length === 1 ? 'story' : 'stories'}
+                              </span>
+                            </div>
+
+                            <div className="space-y-3">
+                              {group.articles.map((article, index) => {
+                                const imgSrc = resolveArticleImage(article);
+                                const isAccentNode = index % 2 === 1;
+                                const isSaved = bookmarkedIdSet.has(article.id);
+                                return (
+                                  <div key={article.id} className="relative">
+                                    <span
+                                      className={`absolute -left-5 sm:-left-7 top-1/2 -translate-y-1/2 w-2.5 h-2.5 rounded-full border-2 bg-white dark:bg-[#0B1626] z-10 ${
+                                        isAccentNode ? 'border-[#D9A441]' : 'border-slate-400 dark:border-slate-600'
+                                      }`}
+                                      aria-hidden="true"
+                                    />
+
+                                    <article
+                                      onClick={() => handleOpenArticle(article)}
+                                      onKeyDown={(e) => {
+                                        if (e.key === 'Enter' || e.key === ' ') {
+                                          e.preventDefault();
+                                          handleOpenArticle(article);
+                                        }
+                                      }}
+                                      role="button"
+                                      tabIndex={0}
+                                      className="group bg-white dark:bg-[#0F1E33] border border-slate-200 dark:border-slate-800 hover:border-[#10243D]/40 dark:hover:border-[#D9A441]/60 rounded-xl p-3 sm:p-4 shadow-xs transition-colors flex items-center gap-3.5 sm:gap-4 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#10243D]"
+                                    >
+                                      {/* Left Thumbnail */}
+                                      <div className="w-28 h-24 sm:w-40 sm:h-28 shrink-0 rounded-lg overflow-hidden bg-slate-950 border border-slate-200 dark:border-slate-700">
+                                        {imgSrc ? (
+                                          <NewsImage
+                                            src={imgSrc}
+                                            alt={stripRichTextToPlainText(article.titleKannada)}
+                                            fitMode="contain-blur"
+                                            aspectClass="w-full h-full"
+                                            watermarkApplied={Boolean(
+                                              article.watermarkApplied && article.imageUrl
+                                            )}
+                                            className="h-full"
+                                          />
+                                        ) : (
+                                          <div className="w-full h-full flex flex-col items-center justify-center text-[#10243D] dark:text-slate-200 bg-slate-100 dark:bg-slate-800 p-2 text-center">
+                                            {getCategoryShortIcon(article.category)}
+                                            <span className="text-[10px] font-semibold mt-1 text-slate-600 dark:text-slate-300">
+                                              {article.category}
+                                            </span>
+                                          </div>
+                                        )}
+                                      </div>
+
+                                      {/* Center Content */}
+                                      <div className="flex-1 min-w-0 space-y-1">
+                                        <div className="flex flex-wrap items-center justify-between gap-1.5 text-[11px] font-semibold text-[#738093] dark:text-slate-400">
+                                          <div className="flex flex-wrap items-center gap-1.5">
+                                            <span className="text-[#176B4A] dark:text-[#D9A441] font-bold">
+                                              {article.category}
+                                            </span>
+                                            <span aria-hidden="true">·</span>
+                                            <span className="font-kannada">
+                                              {getKannadaLocationLabel(article.location)}
+                                            </span>
+                                            {isArticleActivelyFeatured(article, leadNowMs) && (
+                                              <>
+                                                <span aria-hidden="true">·</span>
+                                                <span className="text-amber-700 dark:text-[#D9A441]">
+                                                  Featured
+                                                </span>
+                                              </>
+                                            )}
+                                          </div>
+
+                                          <button
+                                            type="button"
+                                            onClick={(e) => {
+                                              e.stopPropagation();
+                                              handleToggleBookmark(article);
+                                            }}
+                                            aria-label={isSaved ? 'Remove saved article' : 'Save article'}
+                                            title={isSaved ? 'Saved' : 'Save for later'}
+                                            className={`p-1 rounded-md transition-colors cursor-pointer ${
+                                              isSaved
+                                                ? 'text-[#176B4A] dark:text-[#D9A441]'
+                                                : 'text-slate-400 hover:text-[#10243D] dark:hover:text-white'
+                                            }`}
+                                          >
+                                            <Bookmark
+                                              className={`w-3.5 h-3.5 ${isSaved ? 'fill-current' : ''}`}
+                                            />
+                                          </button>
+                                        </div>
+
+                                        <h3
+                                          className="article-rich-content article-rich-inline-compact font-kannada text-sm sm:text-base font-bold text-[#17263A] dark:text-slate-100 group-hover:text-[#176B4A] dark:group-hover:text-[#D9A441] transition-colors leading-snug line-clamp-2"
+                                          dangerouslySetInnerHTML={{
+                                            __html: sanitizeRichTextHtml(article.titleKannada),
+                                          }}
+                                        />
+
+                                        <div
+                                          className="article-rich-content article-rich-inline-compact font-kannada text-xs text-[#738093] dark:text-slate-400 line-clamp-1"
+                                          dangerouslySetInnerHTML={{
+                                            __html: sanitizeRichTextHtml(article.summaryKannada),
+                                          }}
+                                        />
+
+                                        <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
+                                          <div className="flex items-center gap-2 text-[11px] text-[#738093] dark:text-slate-400 tabular-nums">
+                                            <span className="inline-flex items-center gap-1">
+                                              <Clock className="w-3 h-3" aria-hidden="true" />
+                                              <span>{article.publishedDate}</span>
+                                            </span>
+                                            <span aria-hidden="true">·</span>
+                                            <span>{article.publishedTime}</span>
+                                            <span aria-hidden="true">·</span>
+                                            <span>{article.readTimeMinutes} min read</span>
+                                          </div>
+
+                                          <ArticleShareBar
+                                            article={article}
+                                            compact
+                                            variant={publicTheme === 'dark' ? 'dark' : 'light'}
+                                          />
+                                        </div>
+
+                                        <WhatsAppGroupBanner variant="inline-news" />
+                                      </div>
+
+                                      {/* Right Chevron Affordance */}
+                                      <div
+                                        className="hidden sm:flex w-8 h-8 rounded-full bg-slate-100 dark:bg-slate-800 text-[#17263A] dark:text-slate-200 group-hover:bg-[#10243D] group-hover:text-white dark:group-hover:bg-[#D9A441] dark:group-hover:text-[#10243D] transition-colors items-center justify-center shrink-0"
+                                        aria-hidden="true"
+                                      >
+                                        <ChevronRight className="w-4 h-4" />
+                                      </div>
+                                    </article>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </section>
+
+                          {groupIdx === 0 && activeAds.length > 0 && (
+                            <HomepageAdSlot
+                              ads={activeAds}
+                              settings={adSettings}
+                              position="between_news"
+                              onOpenAd={handleOpenAd}
+                              onViewAllAds={handleJumpToAds}
+                            />
+                          )}
+                        </div>
+                      ))}
                     </div>
-                  )}
-                </div>
-              )}
+
+                    {hasMoreArticles && (
+                      <div className="pt-5 flex justify-center">
+                        <button
+                          type="button"
+                          onClick={handleLoadMoreArticles}
+                          disabled={loadingMoreArticles}
+                          className="inline-flex items-center gap-2 px-5 py-2.5 text-xs sm:text-sm font-semibold text-[#10243D] dark:text-slate-100 bg-white dark:bg-[#0F1E33] hover:bg-slate-50 dark:hover:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl shadow-xs transition-colors cursor-pointer disabled:opacity-60 min-h-[42px]"
+                        >
+                          {loadingMoreArticles ? (
+                            <>
+                              <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" />
+                              <span>Loading older stories...</span>
+                            </>
+                          ) : (
+                            <span>Load More News</span>
+                          )}
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* Right Rail (4 cols on desktop, stacks below on mobile) */}
+              <div id="koppa-right-rail" className="lg:col-span-4">
+                <RightRail
+                  selectedLocation={selectedLocation}
+                  onSelectLocation={(loc) => {
+                    setSelectedLocation(loc);
+                    window.scrollTo({ top: 0, behavior: 'smooth' });
+                  }}
+                  trendingArticles={trendingResult.items}
+                  trendingIsViewRanked={trendingResult.isViewRanked}
+                  onSelectArticle={handleOpenArticle}
+                  activeAds={activeAds}
+                  adSettings={adSettings}
+                  onOpenAd={handleOpenAd}
+                  onViewAllAds={handleJumpToAds}
+                />
+              </div>
             </div>
 
-            {/* Right Rail (4 cols on desktop, stacks below on mobile) */}
-            <div id="koppa-right-rail" className="lg:col-span-4">
-              <RightRail
-                selectedLocation={selectedLocation}
-                onSelectLocation={(loc) => {
-                  setSelectedLocation(loc);
-                  window.scrollTo({ top: 0, behavior: 'smooth' });
-                }}
-                activeAds={activeAds}
-                adSettings={adSettings}
+            {activeAds.length > 0 && (
+              <HomepageAdSlot
+                ads={activeAds}
+                settings={adSettings}
+                position="above_footer"
                 onOpenAd={handleOpenAd}
                 onViewAllAds={handleJumpToAds}
               />
-            </div>
-          </div>
+            )}
+          </main>
+        )}
 
-          {/* Homepage Advertisement Section — Above Footer */}
-          {activeAds.length > 0 && (
-            <HomepageAdSlot
-              ads={activeAds}
-              settings={adSettings}
-              position="above_footer"
-              onOpenAd={handleOpenAd}
-              onViewAllAds={handleJumpToAds}
-            />
-          )}
-        </main>
-      )}
-
-      <footer className="border-t border-slate-200 bg-white mt-10">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-8 pb-20 sm:py-8 space-y-6">
-          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-            <div>
-              <div className="inline-flex items-center gap-2 font-masthead text-lg font-bold text-[#0F274A]">
-                <CoffeeCupLogo className="w-7 h-7 shrink-0" />
-                <span>Coffeenadu News</span>
+        <footer className="border-t border-slate-200 dark:border-slate-800 bg-white dark:bg-[#0A1728] mt-10 transition-colors">
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-8 pb-24 md:py-8 space-y-6">
+            <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-6">
+              <div>
+                <div className="inline-flex items-center gap-2 font-masthead text-lg font-bold text-[#10243D] dark:text-white">
+                  <CoffeeCupLogo className="w-7 h-7 shrink-0" />
+                  <span>Coffeenadu News</span>
+                </div>
+                <p className="text-xs text-[#738093] dark:text-slate-400 mt-1 max-w-md leading-relaxed">
+                  Koppa Taluk, Chikkamagaluru District · Malnad Kannada News, Local Bus Timings, Community Programs &amp; Business Directory
+                </p>
+                <div className="mt-3 flex flex-wrap items-center gap-3 text-xs font-semibold text-[#176B4A] dark:text-[#D9A441]">
+                  <button
+                    type="button"
+                    onClick={() => setSiteInfoPage('about')}
+                    className="hover:underline cursor-pointer"
+                  >
+                    About Us
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSiteInfoPage('contact')}
+                    className="hover:underline cursor-pointer"
+                  >
+                    Contact
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSiteInfoPage('privacy')}
+                    className="hover:underline cursor-pointer"
+                  >
+                    Privacy Policy
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSiteInfoPage('terms')}
+                    className="hover:underline cursor-pointer"
+                  >
+                    Terms
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSiteInfoPage('advertise')}
+                    className="hover:underline cursor-pointer"
+                  >
+                    Advertise With Us
+                  </button>
+                </div>
               </div>
-              <p className="text-xs text-slate-500 mt-1">
-                Koppa Taluk, Chikkamagaluru District · English navigation, Kannada reporting
-              </p>
-            </div>
-            <div className="flex flex-wrap items-center gap-4 text-xs font-medium text-slate-600">
-              {NEWS_CATEGORIES.map((cat) => (
+
+              <div className="flex flex-wrap items-center gap-3.5 text-xs font-medium text-[#738093] dark:text-slate-300">
+                {NEWS_CATEGORIES.map((cat) => (
+                  <button
+                    key={cat}
+                    type="button"
+                    onClick={() => handleSelectCategory(cat)}
+                    className="hover:text-[#10243D] dark:hover:text-[#D9A441] transition-colors cursor-pointer whitespace-nowrap"
+                  >
+                    {cat}
+                  </button>
+                ))}
                 <button
-                  key={cat}
                   type="button"
-                  onClick={() => handleSelectCategory(cat)}
-                  className="hover:text-[#0F274A] transition-colors cursor-pointer whitespace-nowrap"
+                  onClick={handleJumpToAds}
+                  className="font-semibold text-amber-800 dark:text-[#D9A441] hover:underline cursor-pointer whitespace-nowrap"
                 >
-                  {cat}
+                  Local Ads
                 </button>
-              ))}
-              <button
-                type="button"
-                onClick={handleJumpToAds}
-                className="font-semibold text-amber-800 hover:underline cursor-pointer whitespace-nowrap"
-              >
-                Local Ads
-              </button>
-              <button
-                type="button"
-                onClick={handleJumpToBusTimings}
-                className="font-semibold text-[#0F274A] hover:underline cursor-pointer whitespace-nowrap"
-              >
-                Bus Timings
-              </button>
-              <button
-                type="button"
-                onClick={handleJumpToEvents}
-                className="font-semibold text-emerald-800 hover:underline cursor-pointer whitespace-nowrap"
-              >
-                Programs &amp; Events
-              </button>
-              <button
-                type="button"
-                onClick={handleJumpToChat}
-                className="font-semibold text-[#0F274A] hover:underline cursor-pointer whitespace-nowrap"
-              >
-                Message Admin
-              </button>
+                <button
+                  type="button"
+                  onClick={handleJumpToBusTimings}
+                  className="font-semibold text-[#10243D] dark:text-white hover:underline cursor-pointer whitespace-nowrap"
+                >
+                  Bus Timings
+                </button>
+                <button
+                  type="button"
+                  onClick={handleJumpToEvents}
+                  className="font-semibold text-[#176B4A] dark:text-emerald-400 hover:underline cursor-pointer whitespace-nowrap"
+                >
+                  Programs &amp; Events
+                </button>
+                <button
+                  type="button"
+                  onClick={handleJumpToChat}
+                  className="font-semibold text-[#10243D] dark:text-white hover:underline cursor-pointer whitespace-nowrap"
+                >
+                  Message Admin
+                </button>
+              </div>
+            </div>
+
+            <div className="pt-6 border-t border-slate-200 dark:border-slate-800 space-y-4">
+              <div className="text-center py-2">
+                <p className="text-base sm:text-lg md:text-xl font-bold tracking-tight text-[#10243D] dark:text-white">
+                  © 2026 CoffeeNadu News. All rights reserved.
+                </p>
+              </div>
+
+              <div className="pt-4 border-t border-slate-100 dark:border-slate-800 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 text-center sm:text-left text-[11px] sm:text-xs text-[#738093] dark:text-slate-400">
+                <p className="font-bold text-[#17263A] dark:text-slate-200">
+                  Developed by Dheeraj
+                </p>
+                <p className="leading-relaxed">
+                  Unauthorized copying, screenshotting, downloading, or redistribution of news content and photos is prohibited.
+                </p>
+              </div>
             </div>
           </div>
+        </footer>
 
-          <div className="pt-6 border-t border-slate-200 space-y-4">
-            <div className="text-center py-2">
-              <p className="text-base sm:text-lg md:text-xl font-bold tracking-tight text-[#0F274A]">
-                © 2026 CoffeeNadu News. All rights reserved.
-              </p>
-            </div>
+        {/* Modals & Drawers */}
+        <AdvancedSearchModal
+          isOpen={searchModalOpen}
+          onClose={() => setSearchModalOpen(false)}
+          articles={articles}
+          initialQuery={searchQuery}
+          initialCategory={activeCategory}
+          initialLocation={selectedLocation}
+          onSelectArticle={handleOpenArticle}
+        />
 
-            <div className="pt-4 border-t border-slate-100 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 text-center sm:text-left text-[11px] sm:text-xs text-slate-500">
-              <p className="font-bold text-slate-600">
-                Developed by Dheeraj
-              </p>
-              <p className="leading-relaxed">
-                Unauthorized copying, screenshotting, downloading, or redistribution of news content and photos is prohibited.
-              </p>
-            </div>
-          </div>
-        </div>
-      </footer>
+        <SavedAndHistoryDrawer
+          isOpen={libraryDrawerTab !== null}
+          initialTab={libraryDrawerTab || 'saved'}
+          onClose={() => setLibraryDrawerTab(null)}
+          bookmarks={bookmarks}
+          history={readingHistory}
+          articles={articles}
+          onRemoveBookmark={(id) => setBookmarks(removeBookmarkById(id))}
+          onClearHistory={() => {
+            clearReadingHistory();
+            setReadingHistory([]);
+          }}
+          onSelectArticle={handleOpenArticle}
+        />
 
-      {/* Optional Website Entry Advertisement Overlay */}
-      <WebsiteEntryAd
-        ads={activeAds}
-        settings={adSettings}
-        onOpenAd={handleOpenAd}
-        disabled={
-          adsActive ||
-          Boolean(selectedAdId) ||
-          Boolean(selectedAdPreviewToken) ||
-          chatActive
-        }
-        onActiveChange={setEntryOverlayActive}
-      />
+        <NotificationCenterDrawer
+          isOpen={notifDrawerOpen}
+          onClose={() => setNotifDrawerOpen(false)}
+          settings={notifSettings}
+          onUpdateSettings={(next) => {
+            setNotifSettings(next);
+            persistNotificationSettings(next);
+          }}
+          onRequestBrowserPermission={handleRequestBrowserPermission}
+          browserPermission={browserNotifPermission}
+          notifications={notificationFeed}
+          articles={articles}
+          onMarkAllRead={() => {
+            const nextFeed = notificationFeed.map((n) => ({ ...n, read: true }));
+            setNotificationFeed(nextFeed);
+            persistNotificationFeed(nextFeed);
+          }}
+          onSelectArticle={handleOpenArticle}
+        />
 
-      {/* Optional Main Homepage Popup Advertisement */}
-      <HomepagePopupAd
-        ads={activeAds}
-        settings={adSettings}
-        onOpenAd={handleOpenAd}
-        entryOverlayActive={entryOverlayActive}
-        disabled={
-          isSpecialRoute ||
-          Boolean(selectedArticleId) ||
-          Boolean(selectedAdId) ||
-          Boolean(selectedEventId)
-        }
-      />
+        <SiteInfoModal
+          page={siteInfoPage}
+          onClose={() => setSiteInfoPage(null)}
+          onOpenMessageAdmin={handleJumpToChat}
+          onOpenLocalAds={handleJumpToAds}
+        />
 
-      {/* Article Reading / Scroll Popup Advertisement */}
-      <FloatingScrollAd
-        ads={activeAds}
-        settings={adSettings}
-        onOpenAd={handleOpenAd}
-        articleId={selectedArticle ? selectedArticle.id : null}
-        disabled={adsActive || Boolean(selectedAdId) || chatActive || entryOverlayActive}
-      />
+        {/* Optional Website Entry Advertisement Overlay */}
+        <WebsiteEntryAd
+          ads={activeAds}
+          settings={adSettings}
+          onOpenAd={handleOpenAd}
+          disabled={
+            adsActive ||
+            Boolean(selectedAdId) ||
+            Boolean(selectedAdPreviewToken) ||
+            chatActive
+          }
+          onActiveChange={setEntryOverlayActive}
+        />
 
-      {/* Floating Message Admin Button at Bottom-Right Corner */}
-      {!chatActive && (
-        <button
-          type="button"
-          onClick={handleJumpToChat}
-          aria-label="Message Coffeenadu Admin"
-          className="fixed bottom-4 right-4 z-40 inline-flex items-center gap-2 px-4 py-2.5 text-xs sm:text-sm font-bold text-white bg-[#0F274A] hover:bg-[#173a6e] border border-amber-400/50 rounded-xl shadow-lg transition-transform hover:-translate-y-0.5 cursor-pointer min-h-[44px]"
-        >
-          <MessageSquare className="w-4 h-4 text-amber-300 shrink-0" aria-hidden="true" />
-          <span className="font-kannada whitespace-nowrap">Message · ಸಂದೇಶ</span>
-          {readerThread?.unreadByReader && (
-            <span className="ml-1 px-1.5 py-0.5 text-[10px] font-extrabold bg-amber-400 text-[#0F274A] rounded">
-              Reply
-            </span>
-          )}
-        </button>
-      )}
+        {/* Optional Main Homepage Popup Advertisement */}
+        <HomepagePopupAd
+          ads={activeAds}
+          settings={adSettings}
+          onOpenAd={handleOpenAd}
+          entryOverlayActive={entryOverlayActive}
+          disabled={
+            isSpecialRoute ||
+            Boolean(selectedArticleId) ||
+            Boolean(selectedAdId) ||
+            Boolean(selectedEventId)
+          }
+        />
+
+        {/* Article Reading / Scroll Popup Advertisement */}
+        <FloatingScrollAd
+          ads={activeAds}
+          settings={adSettings}
+          onOpenAd={handleOpenAd}
+          articleId={selectedArticle ? selectedArticle.id : null}
+          disabled={adsActive || Boolean(selectedAdId) || chatActive || entryOverlayActive}
+        />
+
+        {/* Fixed Bottom Mobile Navigation Bar */}
+        <BottomMobileNav
+          activeTab={activeMobileTab}
+          theme={publicTheme}
+          bookmarkCount={bookmarks.length}
+          unreadNotificationsCount={unreadNotificationsCount}
+          onGoHome={() => {
+            setActiveMobileTab('home');
+            handleResetHome();
+          }}
+          onGoLatest={() => {
+            setActiveMobileTab('latest');
+            if (isSpecialRoute || selectedArticleId || selectedAdId) {
+              navigateTo('/');
+              window.setTimeout(() => {
+                document.getElementById('latest-news-feed')?.scrollIntoView({ behavior: 'smooth' });
+              }, 120);
+            } else {
+              document.getElementById('latest-news-feed')?.scrollIntoView({ behavior: 'smooth' });
+            }
+          }}
+          onGoTrending={() => {
+            setActiveMobileTab('trending');
+            if (isSpecialRoute || selectedArticleId || selectedAdId) {
+              navigateTo('/');
+              window.setTimeout(() => {
+                document
+                  .getElementById('trending-news-mobile')
+                  ?.scrollIntoView({ behavior: 'smooth' });
+              }, 120);
+            } else {
+              document
+                .getElementById('trending-news-mobile')
+                ?.scrollIntoView({ behavior: 'smooth' });
+            }
+          }}
+          onOpenSearch={() => {
+            setActiveMobileTab('search');
+            setSearchModalOpen(true);
+          }}
+          onOpenSaved={() => setLibraryDrawerTab('saved')}
+          onOpenHistory={() => setLibraryDrawerTab('history')}
+          onOpenNotifications={() => setNotifDrawerOpen(true)}
+          onToggleTheme={() =>
+            setPublicTheme((prev) => (prev === 'dark' ? 'light' : 'dark'))
+          }
+          onNavigateSection={(section) => {
+            if (section === 'bus-timings') handleJumpToBusTimings();
+            else if (section === 'events') handleJumpToEvents();
+            else if (section === 'local-ads') handleJumpToAds();
+            else handleJumpToChat();
+          }}
+        />
+
+        {/* Floating Message Admin Button — elevated on mobile above BottomMobileNav */}
+        {!chatActive && (
+          <button
+            type="button"
+            onClick={handleJumpToChat}
+            aria-label="Message Coffeenadu Admin"
+            className="fixed bottom-20 md:bottom-4 right-4 z-30 inline-flex items-center gap-2 px-3.5 sm:px-4 py-2.5 text-xs sm:text-sm font-bold text-white bg-[#10243D] hover:bg-[#19385F] border border-[#D9A441]/60 rounded-xl shadow-lg transition-transform hover:-translate-y-0.5 cursor-pointer min-h-[44px]"
+          >
+            <MessageSquare className="w-4 h-4 text-[#D9A441] shrink-0" aria-hidden="true" />
+            <span className="font-kannada whitespace-nowrap">Message · ಸಂದೇಶ</span>
+            {readerThread?.unreadByReader && (
+              <span className="ml-1 px-1.5 py-0.5 text-[10px] font-extrabold bg-[#D9A441] text-[#10243D] rounded">
+                Reply
+              </span>
+            )}
+          </button>
+        )}
       </div>
     </PrivacyScreenGuard>
   );

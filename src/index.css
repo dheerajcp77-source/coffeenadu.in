@@ -8,6 +8,23 @@
   --font-kannada-serif: "Noto Serif Kannada", "Noto Sans Kannada", Georgia, serif;
 }
 
+:root {
+  --cn-navy: #10243D;
+  --cn-green: #176B4A;
+  --cn-gold: #D9A441;
+  --cn-bg: #F3F6F8;
+  --cn-card: #FFFFFF;
+  --cn-ink: #17263A;
+  --cn-muted: #738093;
+}
+
+.dark {
+  --cn-bg: #0B1626;
+  --cn-card: #112238;
+  --cn-ink: #F1F5F9;
+  --cn-muted: #94A3B8;
+}
+
 @layer base {
   html {
     font-family: var(--font-sans);
@@ -36,6 +53,38 @@
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
   }
+}
+
+.cn-reduced-motion *,
+.cn-reduced-motion *::before,
+.cn-reduced-motion *::after {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
+}
+
+@keyframes cn-ticker-scroll {
+  0% {
+    transform: translate3d(0, 0, 0);
+  }
+  100% {
+    transform: translate3d(-50%, 0, 0);
+  }
+}
+
+.cn-ticker-track {
+  display: flex;
+  width: max-content;
+  animation: cn-ticker-scroll 38s linear infinite;
+}
+
+.cn-ticker-container:hover .cn-ticker-track,
+.cn-ticker-container:focus-within .cn-ticker-track {
+  animation-play-state: paused;
+}
+
+.pb-safe {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
 }
 
 .news-protected,
@@ -84,16 +133,21 @@
 .article-rich-content h2 {
   font-size: 1.35em;
   font-weight: 800;
-  color: #0f172a;
+  color: #10243D;
   line-height: 1.4;
   margin-top: 0.75em;
   margin-bottom: 0.35em;
 }
 
+.dark .article-rich-content h2,
+.dark .article-rich-content h3 {
+  color: #F8FAFC;
+}
+
 .article-rich-content h3 {
   font-size: 1.15em;
   font-weight: 700;
-  color: #0f172a;
+  color: #10243D;
   line-height: 1.45;
   margin-top: 0.65em;
   margin-bottom: 0.3em;
@@ -116,13 +170,19 @@
 }
 
 .article-rich-content blockquote {
-  border-left: 4px solid #0f274a;
+  border-left: 4px solid #10243D;
   background-color: #f8fafc;
   padding: 0.65rem 1rem;
   margin: 0.75rem 0;
   border-radius: 0 0.375rem 0.375rem 0;
   color: #334155;
   font-style: italic;
+}
+
+.dark .article-rich-content blockquote {
+  border-left-color: #D9A441;
+  background-color: rgba(16, 36, 61, 0.75);
+  color: #E2E8F0;
 }
 
 .article-rich-content p {
@@ -159,12 +219,16 @@
 }
 
 .news-watermark-layer {
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='240' height='140' viewBox='0 0 240 140'%3E%3Ctext x='12' y='78' fill='%230F274A' fill-opacity='0.085' font-family='sans-serif' font-size='12' font-weight='700' letter-spacing='1.2' transform='rotate(-22 120 70)'%3ECOFFEENADU NEWS · READ ONLY%3C/text%3E%3C/svg%3E");
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='240' height='140' viewBox='0 0 240 140'%3E%3Ctext x='12' y='78' fill='%230F274A' fill-opacity='0.065' font-family='sans-serif' font-size='12' font-weight='700' letter-spacing='1.2' transform='rotate(-22 120 70)'%3ECOFFEENADU NEWS · READ ONLY%3C/text%3E%3C/svg%3E");
   background-repeat: repeat;
 }
 
+.dark .news-watermark-layer {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='240' height='140' viewBox='0 0 240 140'%3E%3Ctext x='12' y='78' fill='%23CBD5E1' fill-opacity='0.055' font-family='sans-serif' font-size='12' font-weight='700' letter-spacing='1.2' transform='rotate(-22 120 70)'%3ECOFFEENADU NEWS · READ ONLY%3C/text%3E%3C/svg%3E");
+}
+
 .news-watermark-light {
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='240' height='140' viewBox='0 0 240 140'%3E%3Ctext x='12' y='78' fill='%23FFFFFF' fill-opacity='0.11' font-family='sans-serif' font-size='12' font-weight='700' letter-spacing='1.2' transform='rotate(-22 120 70)'%3ECOFFEENADU NEWS · READ ONLY%3C/text%3E%3C/svg%3E");
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='240' height='140' viewBox='0 0 240 140'%3E%3Ctext x='12' y='78' fill='%23FFFFFF' fill-opacity='0.1' font-family='sans-serif' font-size='12' font-weight='700' letter-spacing='1.2' transform='rotate(-22 120 70)'%3ECOFFEENADU NEWS · READ ONLY%3C/text%3E%3C/svg%3E");
   background-repeat: repeat;
 }
 
@@ -188,4 +252,3 @@
     display: flex !important;
   }
 }
-

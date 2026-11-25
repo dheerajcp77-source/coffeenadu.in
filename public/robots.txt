@@ -1,0 +1,14 @@
+User-agent: *
+Allow: /
+Allow: /ads
+Allow: /events
+Allow: /bus-timings
+Allow: /chat
+Allow: /api/article-image/
+Allow: /api/event-image/
+Allow: /api/ad-image/
+Allow: /api/og-default-image
+Disallow: /admin
+Disallow: /api/
+
+Sitemap: https://coffeenadu.in/sitemap.xml

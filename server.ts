@@ -2835,20 +2835,14 @@ Rules:
     return customDomainProbeInFlight;
   }
 
-  async function resolveWorkingShareOrigin(req: Request): Promise<{
+  async function resolveWorkingShareOrigin(_req: Request): Promise<{
     deepLinkOrigin: string;
     customDomainSupportsDeepLinks: boolean;
   }> {
-    const requestOrigin = getRequestOrigin(req);
-    const host = (req.headers['x-forwarded-host'] || req.get('host') || '').toString().toLowerCase();
-    // If the request already arrived directly on coffeenadu.in, it definitely supports deep links
-    if (host.includes('coffeenadu.in')) {
-      return { deepLinkOrigin: PUBLIC_SHARE_DOMAIN, customDomainSupportsDeepLinks: true };
-    }
-    const supported = await doesCustomDomainPreserveDeepLinks();
+    // Always enforce the official https://coffeenadu.in identity for social previews and shared links
     return {
-      deepLinkOrigin: supported ? PUBLIC_SHARE_DOMAIN : requestOrigin,
-      customDomainSupportsDeepLinks: supported,
+      deepLinkOrigin: PUBLIC_SHARE_DOMAIN,
+      customDomainSupportsDeepLinks: true,
     };
   }
 
@@ -2860,6 +2854,162 @@ Rules:
       deepLinkOrigin: resolved.deepLinkOrigin,
       customDomainSupportsDeepLinks: resolved.customDomainSupportsDeepLinks,
     });
+  });
+
+  // Lightweight JSON storage for Reader Newsletter / Breaking Alerts & Article Feedback
+  const READER_ENGAGEMENT_FILE = path.join(DATA_DIR, 'reader-engagement.json');
+  interface StoredSubscriber {
+    contactType: 'email' | 'whatsapp';
+    contactValue: string;
+    frequency: 'breaking' | 'daily';
+    categories: string[];
+    subscribedAt: string;
+  }
+  interface StoredFeedbackCounts {
+    helpful: number;
+    informative: number;
+    correction: number;
+    lastUpdatedAt: string;
+  }
+  interface ReaderEngagementStore {
+    subscribers: StoredSubscriber[];
+    articleFeedback: Record<string, StoredFeedbackCounts>;
+  }
+
+  function loadReaderEngagement(): ReaderEngagementStore {
+    try {
+      if (fs.existsSync(READER_ENGAGEMENT_FILE)) {
+        const parsed = JSON.parse(fs.readFileSync(READER_ENGAGEMENT_FILE, 'utf8')) as Partial<ReaderEngagementStore>;
+        return {
+          subscribers: Array.isArray(parsed.subscribers) ? parsed.subscribers : [],
+          articleFeedback:
+            parsed.articleFeedback && typeof parsed.articleFeedback === 'object'
+              ? parsed.articleFeedback
+              : {},
+        };
+      }
+    } catch {
+      // Fallback to empty store
+    }
+    return { subscribers: [], articleFeedback: {} };
+  }
+
+  function saveReaderEngagement(store: ReaderEngagementStore): void {
+    try {
+      fs.mkdirSync(path.dirname(READER_ENGAGEMENT_FILE), { recursive: true });
+      fs.writeFileSync(READER_ENGAGEMENT_FILE, JSON.stringify(store, null, 2), 'utf8');
+    } catch {
+      // Non-fatal persistence error
+    }
+  }
+
+  app.post('/api/public/newsletter/subscribe', (req, res) => {
+    const contactType = req.body?.contactType === 'whatsapp' ? 'whatsapp' : 'email';
+    const rawContact = typeof req.body?.contactValue === 'string' ? req.body.contactValue.trim() : '';
+    const frequency = req.body?.frequency === 'breaking' ? 'breaking' : 'daily';
+    const consent = Boolean(req.body?.consent);
+    const categories = Array.isArray(req.body?.categories)
+      ? req.body.categories.filter((c: unknown): c is string => typeof c === 'string').slice(0, 8)
+      : [];
+
+    if (!consent) {
+      res.status(400).json({ error: 'Please confirm consent to receive Coffeenadu News alerts.' });
+      return;
+    }
+
+    let normalizedContact = rawContact;
+    if (contactType === 'email') {
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(rawContact) || rawContact.length > 160) {
+        res.status(400).json({ error: 'Please enter a valid email address.' });
+        return;
+      }
+      normalizedContact = rawContact.toLowerCase();
+    } else {
+      const digits = rawContact.replace(/\D/g, '');
+      const tenDigits = digits.length === 12 && digits.startsWith('91') ? digits.slice(2) : digits;
+      if (!/^[6-9]\d{9}$/.test(tenDigits)) {
+        res.status(400).json({ error: 'Please enter a valid 10-digit Indian WhatsApp mobile number.' });
+        return;
+      }
+      normalizedContact = tenDigits;
+    }
+
+    const store = loadReaderEngagement();
+    const existingIdx = store.subscribers.findIndex(
+      (s) => s.contactType === contactType && s.contactValue === normalizedContact
+    );
+    const entry: StoredSubscriber = {
+      contactType,
+      contactValue: normalizedContact,
+      frequency,
+      categories,
+      subscribedAt: new Date().toISOString(),
+    };
+    if (existingIdx >= 0) {
+      store.subscribers[existingIdx] = entry;
+    } else {
+      store.subscribers.push(entry);
+    }
+    saveReaderEngagement(store);
+    res.json({ ok: true, subscriber: entry });
+  });
+
+  app.post('/api/public/newsletter/unsubscribe', (req, res) => {
+    const contactType = req.body?.contactType === 'whatsapp' ? 'whatsapp' : 'email';
+    const rawContact = typeof req.body?.contactValue === 'string' ? req.body.contactValue.trim() : '';
+    const normalized =
+      contactType === 'email'
+        ? rawContact.toLowerCase()
+        : rawContact.replace(/\D/g, '').replace(/^91(?=\d{10}$)/, '');
+
+    const store = loadReaderEngagement();
+    store.subscribers = store.subscribers.filter(
+      (s) => !(s.contactType === contactType && s.contactValue === normalized)
+    );
+    saveReaderEngagement(store);
+    res.json({ ok: true });
+  });
+
+  app.get('/api/public/article-feedback/:id', (req, res) => {
+    const id = typeof req.params.id === 'string' ? req.params.id.trim() : '';
+    if (!/^[a-zA-Z0-9_-]{1,128}$/.test(id)) {
+      res.status(400).json({ error: 'Invalid article ID.' });
+      return;
+    }
+    const store = loadReaderEngagement();
+    const counts = store.articleFeedback[id] || {
+      helpful: 0,
+      informative: 0,
+      correction: 0,
+      lastUpdatedAt: '',
+    };
+    res.json({ ok: true, articleId: id, counts });
+  });
+
+  app.post('/api/public/article-feedback', (req, res) => {
+    const articleId = typeof req.body?.articleId === 'string' ? req.body.articleId.trim() : '';
+    const rawType = req.body?.type;
+    if (!/^[a-zA-Z0-9_-]{1,128}$/.test(articleId)) {
+      res.status(400).json({ error: 'Invalid article ID.' });
+      return;
+    }
+    if (rawType !== 'helpful' && rawType !== 'informative' && rawType !== 'correction') {
+      res.status(400).json({ error: 'Invalid feedback option.' });
+      return;
+    }
+    const feedbackType: 'helpful' | 'informative' | 'correction' = rawType;
+    const store = loadReaderEngagement();
+    const current = store.articleFeedback[articleId] || {
+      helpful: 0,
+      informative: 0,
+      correction: 0,
+      lastUpdatedAt: '',
+    };
+    current[feedbackType] += 1;
+    current.lastUpdatedAt = new Date().toISOString();
+    store.articleFeedback[articleId] = current;
+    saveReaderEngagement(store);
+    res.json({ ok: true, articleId, counts: current });
   });
 
   app.use('/api', (_req, res) => {
@@ -2904,7 +3054,7 @@ Rules:
     const safeImg = escapeHtmlAttr(opts.imageUrl);
     const safeUrl = escapeHtmlAttr(opts.pageUrl);
 
-    // Replace core tags and strip static canonical/og:url/og:image/twitter tags to avoid duplicates
+    // Replace core tags and strip static canonical/og:url/og:image/og:locale/og:site_name/twitter tags to avoid duplicates
     let result = html
       .replace(/<title>[\s\S]*?<\/title>/i, `<title>${safeTitle}</title>`)
       .replace(
@@ -2925,8 +3075,10 @@ Rules:
       )
       .replace(/<link\s+rel="canonical"\s+href="[^"]*"\s*\/?>\s*/gi, '')
       .replace(/<meta\s+property="og:url"\s+content="[^"]*"\s*\/?>\s*/gi, '')
+      .replace(/<meta\s+property="og:locale"\s+content="[^"]*"\s*\/?>\s*/gi, '')
+      .replace(/<meta\s+property="og:site_name"\s+content="[^"]*"\s*\/?>\s*/gi, '')
       .replace(/<meta\s+property="og:image(?::[a-z_]+)?"\s+content="[^"]*"\s*\/?>\s*/gi, '')
-      .replace(/<meta\s+name="twitter:(?:title|description|image)"\s+content="[^"]*"\s*\/?>\s*/gi, '');
+      .replace(/<meta\s+name="twitter:(?:card|title|description|image|image:alt|url)"\s+content="[^"]*"\s*\/?>\s*/gi, '');
 
     const jsonLd =
       opts.ogType === 'article'
@@ -2951,15 +3103,20 @@ Rules:
 
     const extraMetaTags = [
       `<link rel="canonical" href="${safeUrl}" />`,
+      `<meta property="og:site_name" content="Coffeenadu News" />`,
+      `<meta property="og:locale" content="kn_IN" />`,
       `<meta property="og:url" content="${safeUrl}" />`,
       `<meta property="og:image" content="${safeImg}" />`,
       `<meta property="og:image:secure_url" content="${safeImg}" />`,
       `<meta property="og:image:type" content="image/jpeg" />`,
       `<meta property="og:image:width" content="1200" />`,
       `<meta property="og:image:height" content="630" />`,
+      `<meta property="og:image:alt" content="${safeTitle}" />`,
+      `<meta name="twitter:card" content="summary_large_image" />`,
       `<meta name="twitter:title" content="${safeTitle}" />`,
       `<meta name="twitter:description" content="${safeDesc}" />`,
       `<meta name="twitter:image" content="${safeImg}" />`,
+      `<meta name="twitter:image:alt" content="${safeTitle}" />`,
       jsonLd,
       shareOriginScript,
     ]
@@ -3018,9 +3175,11 @@ Rules:
         : undefined;
 
     try {
-      // Keep og:image directly on the live HTTPS Express origin so WhatsApp always fetches HTTP 200 without redirect issues
-      const origin = getRequestOrigin(req);
+      const requestOrigin = getRequestOrigin(req);
+      const host = (req.headers['x-forwarded-host'] || req.get('host') || '').toString().toLowerCase();
+      const isLocalHost = host.includes('localhost') || host.includes('127.0.0.1');
       const { deepLinkOrigin } = await resolveWorkingShareOrigin(req);
+      const origin = isLocalHost ? requestOrigin : PUBLIC_SHARE_DOMAIN;
       let ogTitle = 'Coffeenadu News — Koppa Taluk Local Kannada News';
       let ogDescription =
         'Local Koppa Taluk news publishing portal featuring Kannada updates, bus timings, and programs.';
@@ -3145,8 +3304,20 @@ Rules:
       .send(JSON.stringify(statements, null, 2));
   });
 
-  // Serve PWA manifest and Service Worker with explicit MIME types and safe cache headers
+  // Serve robots.txt, PWA manifest and Service Worker with explicit MIME types and safe cache headers
   const publicDir = path.resolve(process.cwd(), 'public');
+  app.get('/robots.txt', (_req, res, next) => {
+    const candidate = fs.existsSync(path.join(distDir, 'robots.txt'))
+      ? path.join(distDir, 'robots.txt')
+      : path.join(publicDir, 'robots.txt');
+    if (!fs.existsSync(candidate)) {
+      next();
+      return;
+    }
+    res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+    res.setHeader('Cache-Control', 'public, max-age=3600');
+    res.sendFile(candidate);
+  });
   app.get('/manifest.webmanifest', (_req, res, next) => {
     const candidate = fs.existsSync(path.join(distDir, 'manifest.webmanifest'))
       ? path.join(distDir, 'manifest.webmanifest')

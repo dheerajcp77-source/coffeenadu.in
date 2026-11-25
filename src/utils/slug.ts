@@ -56,7 +56,6 @@ export function validateCustomEnglishSlugInput(raw: string): {
 }
 
 export const PUBLIC_SHARE_ORIGIN = 'https://coffeenadu.in';
-export const FALLBACK_DEEP_LINK_ORIGIN = 'https://coffeenad-news.ai.studio';
 
 declare global {
   interface Window {
@@ -66,12 +65,15 @@ declare global {
 
 /**
  * Returns the canonical public origin (`https://coffeenadu.in`) for article and event
- * deep links and Open Graph previews.
+ * deep links and Open Graph previews. Never leaks temporary preview origins in public share links.
  */
 export function getDeepLinkShareOrigin(): string {
   if (typeof window !== 'undefined') {
     const injected = window.__COFFEENADU_SHARE_ORIGIN__;
-    if (typeof injected === 'string' && /^https?:\/\//i.test(injected.trim())) {
+    if (
+      typeof injected === 'string' &&
+      /^https:\/\/(?:www\.)?coffeenadu\.in\/?$/i.test(injected.trim())
+    ) {
       return injected.trim().replace(/\/+$/, '');
     }
   }

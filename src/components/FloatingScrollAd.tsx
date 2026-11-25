@@ -141,12 +141,12 @@ export function FloatingScrollAd({
 
   const positionCls =
     position === 'bottom-right'
-      ? `bottom-16 left-3 right-3 sm:bottom-20 sm:right-4 sm:left-auto ${sizeWidthCls}`
+      ? `bottom-20 left-3 right-3 sm:bottom-20 sm:right-4 sm:left-auto ${sizeWidthCls}`
       : position === 'top-right'
       ? `top-20 left-3 right-3 sm:top-24 sm:right-4 sm:left-auto ${sizeWidthCls}`
       : position === 'bottom-center'
-      ? `bottom-16 left-3 right-3 sm:bottom-4 sm:left-1/2 sm:-translate-x-1/2 sm:right-auto ${sizeWidthCls}`
-      : `bottom-16 left-3 right-3 sm:bottom-4 sm:left-4 sm:right-auto ${sizeWidthCls}`;
+      ? `bottom-20 left-3 right-3 sm:bottom-4 sm:left-1/2 sm:-translate-x-1/2 sm:right-auto ${sizeWidthCls}`
+      : `bottom-20 left-3 right-3 sm:bottom-4 sm:left-4 sm:right-auto ${sizeWidthCls}`;
 
   const showManual = candidates.length > 1 && rotationMode !== 'automatic';
   const excerpt = stripRichTextToPlainText(selectedAd.description);
@@ -161,14 +161,14 @@ export function FloatingScrollAd({
           : 'translate-y-6 opacity-0 pointer-events-none'
       }`}
     >
-      <div className="relative rounded-xl border border-slate-200 bg-white/95 backdrop-blur-sm p-2.5 pr-9 shadow-lg">
+      <div className="relative rounded-xl border border-slate-200 dark:border-slate-700 bg-white/95 dark:bg-[#0F1E33]/95 backdrop-blur-sm p-2.5 pr-9 shadow-lg">
         {/* Visible Close (X) Button */}
         <button
           type="button"
           onClick={handleDismiss}
           aria-label="Close floating advertisement"
           title="Close advertisement"
-          className="absolute right-2 top-2 rounded-md p-1 text-slate-500 hover:bg-slate-100 hover:text-slate-900 transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0F274A]"
+          className="absolute right-2 top-2 rounded-md p-1 text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-900 dark:hover:text-white transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#10243D]"
         >
           <X className="w-3.5 h-3.5" aria-hidden="true" />
         </button>

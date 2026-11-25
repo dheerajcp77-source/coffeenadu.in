@@ -59,13 +59,13 @@ export function WhatsAppGroupBanner({ variant = 'card' }: WhatsAppGroupBannerPro
       <div
         onClick={(e) => e.stopPropagation()}
         onKeyDown={(e) => e.stopPropagation()}
-        className="mt-2 pt-2 border-t border-slate-100 flex flex-wrap items-center justify-between gap-2"
+        className="mt-2 pt-2 border-t border-slate-100 dark:border-slate-800 flex flex-wrap items-center justify-between gap-2"
       >
         <a
           href={COFFEENADU_WHATSAPP_GROUP_URL}
           target="_blank"
           rel="noopener noreferrer"
-          className="inline-flex flex-wrap items-center gap-1.5 text-[11px] sm:text-xs font-semibold text-emerald-800 hover:text-emerald-950 transition-colors group/wa"
+          className="inline-flex flex-wrap items-center gap-1.5 text-[11px] sm:text-xs font-semibold text-[#176B4A] dark:text-emerald-400 hover:text-emerald-950 dark:hover:text-emerald-300 transition-colors group/wa"
         >
           <span className="inline-flex items-center justify-center w-5 h-5 rounded bg-[#16A34A] text-white shrink-0">
             <WhatsAppIcon className="w-3 h-3" />
@@ -73,11 +73,11 @@ export function WhatsAppGroupBanner({ variant = 'card' }: WhatsAppGroupBannerPro
           <span className="group-hover/wa:underline">
             Join Coffeenadu News WhatsApp Group
           </span>
-          <span className="text-slate-400" aria-hidden="true">·</span>
-          <span className="font-kannada text-emerald-900 group-hover/wa:underline">
+          <span className="text-slate-400 dark:text-slate-600" aria-hidden="true">·</span>
+          <span className="font-kannada text-[#176B4A] dark:text-emerald-300 group-hover/wa:underline">
             ಕಾಫಿನಾಡು ನ್ಯೂಸ್ ವಾಟ್ಸಾಪ್ ಗುಂಪಿಗೆ ಸೇರಿ
           </span>
-          <ArrowUpRight className="w-3.5 h-3.5 shrink-0 text-emerald-700" aria-hidden="true" />
+          <ArrowUpRight className="w-3.5 h-3.5 shrink-0 text-[#176B4A] dark:text-emerald-400" aria-hidden="true" />
         </a>
       </div>
     );
@@ -86,22 +86,22 @@ export function WhatsAppGroupBanner({ variant = 'card' }: WhatsAppGroupBannerPro
   return (
     <section
       aria-label="Join Coffeenadu News WhatsApp Group"
-      className="bg-emerald-50/90 border border-emerald-200 rounded-xl p-4 sm:p-5 space-y-3"
+      className="bg-emerald-50/90 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800/70 rounded-xl p-4 sm:p-5 space-y-3"
     >
       <div className="flex items-start gap-3">
         <span className="inline-flex items-center justify-center w-10 h-10 rounded-lg bg-[#16A34A] text-white shrink-0 mt-0.5">
           <WhatsAppIcon className="w-5 h-5" />
         </span>
         <div className="space-y-1 min-w-0">
-          <h2 className="text-sm sm:text-base font-extrabold text-emerald-950 leading-snug">
+          <h2 className="text-sm sm:text-base font-extrabold text-emerald-950 dark:text-emerald-100 leading-snug">
             Join Coffeenadu News WhatsApp Group
           </h2>
-          <p className="font-kannada text-sm font-bold text-emerald-900 leading-snug">
+          <p className="font-kannada text-sm font-bold text-emerald-900 dark:text-emerald-300 leading-snug">
             ಕಾಫಿನಾಡು ನ್ಯೂಸ್ ವಾಟ್ಸಾಪ್ ಗುಂಪಿಗೆ ಸೇರಿ
           </p>
-          <p className="text-xs text-slate-700 leading-relaxed">
+          <p className="text-xs text-slate-700 dark:text-slate-300 leading-relaxed">
             Get instant Koppa Taluk &amp; Malnad news updates directly on WhatsApp.{' '}
-            <span className="font-kannada text-slate-800">
+            <span className="font-kannada text-slate-800 dark:text-slate-200">
               ಕೊಪ್ಪ ತಾಲೂಕು ಮತ್ತು ಮಲೆನಾಡಿನ ತಾಜಾ ಸುದ್ದಿ ಹಾಗೂ ಪ್ರಮುಖ ಮಾಹಿತಿಗಳನ್ನು ವಾಟ್ಸಾಪ್‌ನಲ್ಲಿ ತಕ್ಷಣ ಪಡೆಯಿರಿ.
             </span>
           </p>
@@ -112,7 +112,7 @@ export function WhatsAppGroupBanner({ variant = 'card' }: WhatsAppGroupBannerPro
         href={COFFEENADU_WHATSAPP_GROUP_URL}
         target="_blank"
         rel="noopener noreferrer"
-        className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 text-xs sm:text-sm font-bold text-white bg-[#16A34A] hover:bg-[#15803D] rounded-lg transition-colors min-h-[42px]"
+        className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 text-xs sm:text-sm font-bold text-white bg-[#176B4A] hover:bg-[#13593D] rounded-lg transition-colors min-h-[42px]"
       >
         <WhatsAppIcon className="w-4 h-4 shrink-0" />
         <span>Join WhatsApp Group</span>

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Check, Share2 } from 'lucide-react';
+import { Check, Copy, Share2 } from 'lucide-react';
 import { getKannadaLocationLabel } from '../constants/newsData';
 import type { NewsArticle } from '../types/news';
 import { stripRichTextToPlainText } from '../utils/richText';
@@ -36,6 +36,7 @@ export function ArticleShareBar({
 }: ArticleShareBarProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [sharedFeedback, setSharedFeedback] = useState<string>('');
+  const [copiedLink, setCopiedLink] = useState(false);
   const [showFallbackMenu, setShowFallbackMenu] = useState(false);
 
   useEffect(() => {
@@ -59,6 +60,20 @@ export function ArticleShareBar({
   const facebookHref = `https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(articleUrl)}&quote=${encodeURIComponent(
     `${plainTitle}\n\n${SHARE_PROMO_FOOTER}`
   )}`;
+  const xHref = `https://twitter.com/intent/tweet?text=${encodeURIComponent(
+    `${plainTitle} — Coffeenadu News`
+  )}&url=${encodeURIComponent(articleUrl)}`;
+
+  const handleCopyLink = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    try {
+      await navigator.clipboard.writeText(articleUrl);
+      setCopiedLink(true);
+      window.setTimeout(() => setCopiedLink(false), 2000);
+    } catch {
+      setShowFallbackMenu(true);
+    }
+  };
 
   const handleNativeShare = async (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -67,6 +82,7 @@ export function ArticleShareBar({
         await navigator.share({
           title: `${plainTitle} — Coffeenadu News`,
           text: fullShareText,
+          url: articleUrl,
         });
         setSharedFeedback('Shared');
         window.setTimeout(() => setSharedFeedback(''), 2000);
@@ -97,8 +113,8 @@ export function ArticleShareBar({
           aria-label="Share on WhatsApp"
           className={`inline-flex items-center gap-1 px-2.5 py-1.5 text-[11px] font-semibold rounded-md transition-colors whitespace-nowrap ${
             isDark
-              ? 'bg-emerald-500 text-white hover:bg-emerald-400'
-              : 'bg-emerald-50 text-emerald-800 border border-emerald-200 hover:bg-emerald-100'
+              ? 'bg-[#176B4A] text-white hover:bg-emerald-600'
+              : 'bg-emerald-50 dark:bg-emerald-950/50 text-[#176B4A] dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 hover:bg-emerald-100'
           }`}
         >
           <WhatsAppIcon className="w-3.5 h-3.5 shrink-0" />
@@ -113,7 +129,7 @@ export function ArticleShareBar({
           className={`inline-flex items-center gap-1 px-2.5 py-1.5 text-[11px] font-semibold rounded-md transition-colors cursor-pointer whitespace-nowrap ${
             isDark
               ? 'bg-white/15 text-white hover:bg-white/25'
-              : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+              : 'bg-slate-100 dark:bg-slate-800 text-[#17263A] dark:text-slate-200 hover:bg-slate-200 dark:hover:bg-slate-700'
           }`}
         >
           {sharedFeedback ? (
@@ -132,14 +148,14 @@ export function ArticleShareBar({
         {showFallbackMenu && (
           <div
             onClick={stopProp}
-            className="absolute right-0 bottom-full mb-1.5 z-30 bg-white border border-slate-200 rounded-lg shadow-lg p-1.5 flex flex-col min-w-[140px] text-xs text-slate-800"
+            className="absolute right-0 bottom-full mb-1.5 z-30 bg-white dark:bg-[#0F1E33] border border-slate-200 dark:border-slate-700 rounded-lg shadow-lg p-1.5 flex flex-col min-w-[155px] text-xs text-slate-800 dark:text-slate-100"
           >
             <a
               href={telegramHref}
               target="_blank"
               rel="noopener noreferrer"
               onClick={() => setShowFallbackMenu(false)}
-              className="px-2.5 py-1.5 rounded hover:bg-slate-100 font-medium text-left"
+              className="px-2.5 py-1.5 rounded hover:bg-slate-100 dark:hover:bg-slate-800 font-medium text-left"
             >
               Telegram
             </a>
@@ -148,10 +164,30 @@ export function ArticleShareBar({
               target="_blank"
               rel="noopener noreferrer"
               onClick={() => setShowFallbackMenu(false)}
-              className="px-2.5 py-1.5 rounded hover:bg-slate-100 font-medium text-left"
+              className="px-2.5 py-1.5 rounded hover:bg-slate-100 dark:hover:bg-slate-800 font-medium text-left"
             >
               Facebook
             </a>
+            <a
+              href={xHref}
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={() => setShowFallbackMenu(false)}
+              className="px-2.5 py-1.5 rounded hover:bg-slate-100 dark:hover:bg-slate-800 font-medium text-left"
+            >
+              X (Twitter)
+            </a>
+            <button
+              type="button"
+              onClick={(e) => {
+                void handleCopyLink(e);
+                setShowFallbackMenu(false);
+              }}
+              className="px-2.5 py-1.5 rounded hover:bg-slate-100 dark:hover:bg-slate-800 font-medium text-left flex items-center gap-1.5 cursor-pointer"
+            >
+              <Copy className="w-3.5 h-3.5" />
+              <span>{copiedLink ? 'Copied!' : 'Copy Link'}</span>
+            </button>
           </div>
         )}
       </div>
@@ -164,20 +200,65 @@ export function ArticleShareBar({
         href={whatsappHref}
         target="_blank"
         rel="noopener noreferrer"
-        className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-white bg-[#16A34A] hover:bg-[#15803D] rounded-md transition-colors min-h-[38px]"
+        className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-white bg-[#176B4A] hover:bg-[#13593D] rounded-lg transition-colors min-h-[40px]"
       >
         <WhatsAppIcon className="w-4 h-4 shrink-0" />
-        <span>Share on WhatsApp</span>
+        <span>WhatsApp</span>
+      </a>
+
+      <a
+        href={telegramHref}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="inline-flex items-center px-3 py-2 text-xs font-semibold text-sky-900 dark:text-sky-200 bg-sky-50 dark:bg-sky-950/50 border border-sky-200 dark:border-sky-800 hover:bg-sky-100 rounded-lg transition-colors min-h-[40px]"
+      >
+        Telegram
+      </a>
+
+      <a
+        href={facebookHref}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="inline-flex items-center px-3 py-2 text-xs font-semibold text-blue-900 dark:text-blue-200 bg-blue-50 dark:bg-blue-950/50 border border-blue-200 dark:border-blue-800 hover:bg-blue-100 rounded-lg transition-colors min-h-[40px]"
+      >
+        Facebook
+      </a>
+
+      <a
+        href={xHref}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="inline-flex items-center px-3 py-2 text-xs font-semibold text-slate-800 dark:text-slate-200 bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-lg transition-colors min-h-[40px]"
+      >
+        X
       </a>
 
       <button
         type="button"
+        onClick={(e) => void handleCopyLink(e)}
+        className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-[#17263A] dark:text-slate-200 bg-white dark:bg-[#13253E] border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 rounded-lg transition-colors cursor-pointer min-h-[40px]"
+      >
+        {copiedLink ? (
+          <>
+            <Check className="w-3.5 h-3.5 text-[#176B4A] dark:text-emerald-400" />
+            <span>Copied</span>
+          </>
+        ) : (
+          <>
+            <Copy className="w-3.5 h-3.5" />
+            <span>Copy Link</span>
+          </>
+        )}
+      </button>
+
+      <button
+        type="button"
         onClick={handleNativeShare}
-        className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-slate-800 bg-slate-100 hover:bg-slate-200 rounded-md transition-colors cursor-pointer min-h-[38px]"
+        className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-[#10243D] dark:text-[#10243D] bg-[#D9A441] hover:bg-[#E5B65C] rounded-lg transition-colors cursor-pointer min-h-[40px]"
       >
         {sharedFeedback ? (
           <>
-            <Check className="w-3.5 h-3.5 text-emerald-700" aria-hidden="true" />
+            <Check className="w-3.5 h-3.5" aria-hidden="true" />
             <span>{sharedFeedback}</span>
           </>
         ) : (
@@ -187,29 +268,6 @@ export function ArticleShareBar({
           </>
         )}
       </button>
-
-      {showFallbackMenu && (
-        <div className="flex items-center gap-1.5">
-          <a
-            href={telegramHref}
-            target="_blank"
-            rel="noopener noreferrer"
-            onClick={() => setShowFallbackMenu(false)}
-            className="px-3 py-2 text-xs font-semibold text-sky-900 bg-sky-50 border border-sky-200 hover:bg-sky-100 rounded-md transition-colors min-h-[38px] inline-flex items-center"
-          >
-            Telegram
-          </a>
-          <a
-            href={facebookHref}
-            target="_blank"
-            rel="noopener noreferrer"
-            onClick={() => setShowFallbackMenu(false)}
-            className="px-3 py-2 text-xs font-semibold text-blue-900 bg-blue-50 border border-blue-200 hover:bg-blue-100 rounded-md transition-colors min-h-[38px] inline-flex items-center"
-          >
-            Facebook
-          </a>
-        </div>
-      )}
     </div>
   );
 }

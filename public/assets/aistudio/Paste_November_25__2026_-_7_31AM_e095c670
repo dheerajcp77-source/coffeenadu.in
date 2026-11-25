@@ -1,0 +1,1095 @@
+# PROJECT: COFFEENADU NEWS – FRONTEND 2.0
+## Complete Professional Digital News Portal Upgrade
+
+You are working on my existing live news website, **Coffeenadu News**.
+
+Your task is to upgrade the entire existing frontend into a premium, professional, modern, visually attractive and highly responsive regional digital news platform.
+
+This is a FRONTEND 2.0 UPGRADE, NOT a new website development project.
+
+The objective is to make Coffeenadu News look and perform like a leading professional digital newspaper while retaining every existing feature, database connection, administrator function, advertisement system and publishing workflow.
+
+---
+
+# PART 1 – MOST IMPORTANT PROJECT PROTECTION RULES
+
+Before changing any code, thoroughly inspect the existing project and understand its architecture.
+
+### Existing technology and integrations
+
+The project currently uses:
+
+- React + Vite frontend.
+- Node.js and Express.js backend.
+- Existing `server.ts` backend implementation.
+- Google Sheets for news and related data.
+- Google Apps Script integrations.
+- Google Drive for news images and media.
+- Existing Firebase configuration and integrations.
+- Cloudflare Pages for frontend hosting.
+- Existing Cloudflare Pages Functions and API proxy.
+- GitHub synchronization with Google AI Studio.
+- Existing Admin 2.0 and advertisement management functionality.
+
+Treat the actual repository and configuration as the source of truth. Do not assume that an integration works differently from its current implementation.
+
+### STRICT RULES
+
+1. Do not create a new project or replace the existing application.
+2. Do not delete or rename existing working files unnecessarily.
+3. Do not change the backend architecture.
+4. Do not replace Google Sheets, Google Drive or Apps Script.
+5. Do not modify administrator credentials or authentication.
+6. Do not damage Admin 2.0.
+7. Do not remove or replace existing advertisement management.
+8. Do not modify Firebase configuration unnecessarily.
+9. Do not break existing APIs, routes, database structures or data formats.
+10. Do not change existing news publishing or editing workflows.
+11. Do not remove existing news, images, categories, places or market information.
+12. Do not introduce mock data in place of actual production data.
+13. Do not expose API keys, passwords, tokens or secrets in frontend code.
+14. Do not remove existing Cloudflare Pages Functions or API proxy functionality.
+15. Do not change deployment configuration unless absolutely necessary and explicitly justified.
+
+Preserve existing integrations, including:
+
+- `/api/*` forwarding.
+- Existing sitemap functionality.
+- Existing `functions/api/[[path]].ts` if present.
+- Existing `functions/sitemap.xml.ts` if present.
+- Existing `src/services/admin2Client.ts`.
+- Existing `src/services/sheetsStorageClient.ts`.
+- All other working integrations discovered during inspection.
+
+If any existing feature needs modification, preserve backward compatibility.
+
+**Never sacrifice existing functionality for visual improvements.**
+
+---
+
+# PART 2 – DESIGN SYSTEM: PREMIUM EDITORIAL
+
+Create a consistent visual identity throughout the website.
+
+### Brand identity
+
+Brand: COFFEENADU NEWS
+
+Design direction: Premium Editorial Digital Newspaper.
+
+Primary colour:
+Deep Navy – #10243D
+
+Secondary colour:
+Forest Green – #176B4A
+
+Accent colour:
+Warm Gold – #D9A441
+
+Main light background:
+#F3F6F8
+
+Card background:
+#FFFFFF
+
+Main text:
+#17263A
+
+Muted text:
+#738093
+
+Dark theme:
+Deep charcoal/navy backgrounds with readable light text and accessible contrast.
+
+### Design requirements
+
+- Premium editorial appearance.
+- Professional news typography.
+- Beautiful Kannada typography.
+- Consistent spacing.
+- Elegant rounded cards.
+- Subtle shadows.
+- Attractive image presentations.
+- Professional hover and interaction effects.
+- Smooth but lightweight transitions.
+- Consistent icons.
+- Carefully designed buttons.
+- Clear visual hierarchy.
+
+Use an appropriate Kannada-supporting font, such as Noto Sans Kannada, with reliable fallbacks.
+
+Do not make every section colourful. Maintain a clean newspaper-style appearance.
+
+Use the existing Coffeenadu News logo and branding wherever available.
+
+Do not replace the real logo with a generated logo.
+
+---
+
+# PART 3 – COMPLETE HOMEPAGE REDESIGN
+
+Reorganize the entire homepage using the following structure.
+
+## SECTION 1: PREMIUM STICKY HEADER
+
+Create a professional responsive header.
+
+Left side:
+- Existing Coffeenadu News logo.
+- Coffeenadu News brand name.
+- Small text: Developed and Managed by Dheeraj.
+
+Right side:
+- Bus Timings.
+- Events.
+- Search.
+- Theme toggle where appropriate.
+
+Requirements:
+
+- Compact mobile header.
+- Professional desktop header.
+- Sticky behaviour when scrolling.
+- Proper spacing.
+- No excessive header height.
+- No overlapping elements.
+
+Preserve existing Bus Timings and Events navigation and their functionality.
+
+## SECTION 2: BREAKING NEWS STRIP
+
+Create a premium breaking-news strip beneath the header.
+
+Requirements:
+
+- Display only actual published breaking news.
+- Automatically scroll headlines horizontally.
+- Each headline must open its corresponding article.
+- Provide appropriate breaking-news styling.
+- Allow admin-controlled visibility if supported.
+- Do not display fake breaking news.
+- Avoid excessive animation.
+
+## SECTION 3: LOCATION AND WEATHER HERO
+
+Redesign the existing location and weather section.
+
+Include:
+
+- Selected location name.
+- Kannada location name.
+- Current weather.
+- Temperature.
+- Weather condition.
+- Search field.
+- Attractive Western Ghats / Malnad-inspired background treatment.
+
+Preserve the existing weather data source and location functionality.
+
+Do not introduce a new weather API unnecessarily.
+
+Use an elegant background image with a subtle overlay so the text remains readable.
+
+The hero must be responsive and compact on mobile.
+
+## SECTION 4: CATEGORY NAVIGATION
+
+Create a modern category navigation bar.
+
+Preserve all existing categories.
+
+Examples:
+
+- All News.
+- Local.
+- Malnad.
+- Agriculture.
+- Health.
+- Politics.
+- Education.
+- Crime.
+- Sports.
+
+Requirements:
+
+- Horizontal swipe navigation on mobile.
+- Professional navigation on desktop.
+- Active category highlighting.
+- Smooth category switching.
+- Real category filtering.
+- No duplicate categories.
+
+Do not hardcode categories if they already come from the existing database or configuration.
+
+## SECTION 5: PREMIUM FEATURED NEWS SLIDER
+
+Completely redesign the existing lead-story slider.
+
+This should become one of the most attractive sections of the website.
+
+Design:
+
+- Large professional news image.
+- Elegant dark image overlay.
+- Featured badge.
+- Category and location.
+- Large Kannada headline.
+- Short summary.
+- Published date.
+- Reading time.
+- Read More button.
+- WhatsApp sharing.
+- Share button.
+- Slider navigation.
+- Progress indicator.
+
+Requirements:
+
+1. Use actual published featured articles.
+2. Respect existing featured-news/admin selection settings.
+3. Support multiple featured articles.
+4. Automatically rotate slides with configurable timing.
+5. Allow manual navigation.
+6. Pause automatic movement when appropriate.
+7. Support touch swiping.
+8. Handle missing images.
+9. Do not distort original photographs.
+10. Make the headline readable over every image.
+
+On mobile, create a compact but visually impressive slider.
+
+On desktop, use a larger editorial presentation.
+
+Do not create a second independent featured-news management system.
+
+## SECTION 6: LATEST NEWS – TIMELINE 2.0
+
+Redesign the existing Koppa Latest Updates section.
+
+Create a professional chronological news experience.
+
+Include:
+
+- Section heading.
+- All.
+- Today.
+- Yesterday.
+- This Week.
+- Date separators.
+- Number of stories per date.
+- News thumbnails.
+- Category labels.
+- Location labels.
+- Kannada headlines.
+- Short descriptions.
+- Published date and time.
+- Reading time.
+- WhatsApp sharing.
+- General sharing.
+- Read More.
+
+Create modern news cards with a consistent layout.
+
+Improve the existing timeline design while retaining its chronological organization.
+
+### Loading and pagination
+
+- Implement Load More functionality.
+- Preserve existing pagination if available.
+- Load additional articles without reloading the entire page.
+- Add skeleton loading.
+- Prevent duplicate articles.
+- Show a proper empty state.
+- Handle API failures gracefully.
+
+Do not load every article simultaneously.
+
+## SECTION 7: TRENDING NEWS
+
+Create a new Trending News section.
+
+Display actual popular articles using available view counts or other existing engagement data.
+
+Features:
+
+- Trending badge.
+- Ranking numbers.
+- News thumbnail.
+- Headline.
+- Location.
+- Published date.
+- Article link.
+
+Provide a compact horizontal mobile layout and professional desktop layout.
+
+Do not invent popularity numbers.
+
+If reliable view-count data is unavailable, use a clearly defined fallback based on recent published articles and label the section appropriately.
+
+Do not add unnecessary database modifications.
+
+## SECTION 8: ADVERTISEMENT PLACEMENTS
+
+Integrate the existing Advertisement Management system into the new frontend.
+
+Support all advertisement placements configured by the existing admin system, including:
+
+- Homepage popup.
+- Reading popup.
+- Homepage banner.
+- Between-news advertisements.
+- Featured advertisements.
+- End-of-article advertisements.
+- Article inline advertisements.
+- Desktop sidebar advertisements.
+- Sponsored content.
+
+IMPORTANT:
+
+The existing Admin 2.0 must remain the control centre.
+
+The frontend must read the existing advertisement settings and respect:
+
+- Enabled/disabled status.
+- Placement.
+- Scheduling.
+- Start and end dates.
+- Priority.
+- Display order.
+- Targeting.
+- Rotation.
+- Existing campaign settings.
+
+If the existing backend supports multiple advertisements for one placement, rotate them according to the existing settings.
+
+### User experience protection
+
+- Popups must be dismissible.
+- Apply sensible frequency limits.
+- Do not show repeated intrusive popups.
+- Never cover article text or navigation.
+- Do not display empty advertisement containers.
+- Clearly label advertisements.
+- Do not make advertisements look like independent editorial news.
+
+Do not create a new advertisement backend or duplicate admin settings.
+
+## SECTION 9: WHATSAPP COMMUNITY
+
+Redesign the existing WhatsApp community section.
+
+Include:
+
+- WhatsApp icon.
+- Professional heading.
+- Short Kannada and English description.
+- Attractive green join button.
+- Existing WhatsApp group link.
+
+Use the actual existing configured link.
+
+Do not invent a new WhatsApp URL.
+
+Make this section visually attractive without making it excessively large.
+
+## SECTION 10: PLACES – ಸ್ಥಳಗಳು
+
+Preserve the existing location directory.
+
+Examples include:
+
+- Koppa.
+- Jayapura.
+- Hariharapura.
+- Basarikatte.
+- Kudregundi.
+- Megur.
+- Narve.
+- Sringeri.
+- N.R. Pura.
+- Chikkamagaluru.
+
+Create:
+
+- Modern location chips.
+- Active selection state.
+- Smooth filtering.
+- Kannada and English names.
+- Mobile-friendly wrapping.
+- Desktop-friendly grid.
+
+Selecting a location must filter or navigate to the appropriate actual location-specific news.
+
+Preserve the existing location data source.
+
+## SECTION 11: KOPPA QUICK BRIEFS
+
+Redesign the Quick Briefs section.
+
+Display:
+
+- Short headline.
+- Category.
+- Location.
+- Brief summary.
+- Read More link when applicable.
+
+Use compact editorial cards.
+
+Keep the content easy to scan.
+
+Preserve existing Quick Brief data and management functionality.
+
+## SECTION 12: LOCAL MARKET RATES
+
+Preserve and professionally redesign the market-rate section.
+
+Include:
+
+- Crop name.
+- Market name.
+- Current rate.
+- Previous rate, if available.
+- Difference.
+- Date of update.
+- Price unit.
+
+Support existing crops such as:
+
+- Arabica Parchment.
+- Robusta Cherry.
+- Arecanut.
+- Black Pepper.
+
+Use appropriate positive and negative indicators.
+
+Do not invent or calculate unavailable market prices.
+
+Maintain the existing data source and update mechanism.
+
+## SECTION 13: OTHER EXISTING SERVICES
+
+Preserve and improve:
+
+- Bus Timings.
+- Local Events.
+- Weather.
+- Location services.
+- News categories.
+- Existing search and navigation.
+- Other existing homepage widgets.
+
+Do not remove any existing useful section just because it is not explicitly mentioned above.
+
+## SECTION 14: PREMIUM FOOTER
+
+Create a professional footer containing:
+
+- Coffeenadu News logo.
+- Short brand description.
+- About Us.
+- Contact Us.
+- Privacy Policy.
+- Terms and Conditions.
+- Advertise With Us.
+- Social media links where configured.
+- Copyright information.
+
+Include:
+
+**Developed and Managed by Dheeraj**
+
+Make this attribution clearly visible, elegant and professionally positioned.
+
+Do not make it excessively small or hide it.
+
+Preserve all existing footer links and policies.
+
+---
+
+# PART 4 – INDIVIDUAL ARTICLE PAGE 2.0
+
+Completely redesign the individual article reading experience.
+
+This is one of the highest-priority parts of the upgrade.
+
+### Article header
+
+Display:
+
+- Category.
+- Location.
+- Main Kannada headline.
+- Short summary.
+- Author if available.
+- Published date.
+- Updated date if available.
+- Reading time.
+
+### Article image
+
+- Large responsive featured image.
+- Correct image aspect ratio.
+- High-quality presentation.
+- Proper cropping.
+- Fallback for missing images.
+
+### Article content
+
+Create an elegant reading experience.
+
+Requirements:
+
+- Comfortable Kannada font size.
+- Appropriate line height.
+- Paragraph spacing.
+- Proper heading hierarchy.
+- Lists and quotations where supported.
+- Inline images.
+- Embedded media if already supported.
+- Responsive content width.
+
+Avoid excessive decorations that distract readers.
+
+### Reading features
+
+Implement:
+
+- Reading progress indicator.
+- WhatsApp sharing.
+- Native mobile share.
+- Copy article link.
+- Facebook sharing if supported.
+- Related articles.
+- Previous and next articles.
+- More news from the same location.
+- Trending news recommendations.
+
+### Article advertisements
+
+Support the existing advertisement placements:
+
+- Before article content where configured.
+- Between selected content sections where configured.
+- Reading popup where configured.
+- End-of-article advertisements.
+- Related-news advertising.
+
+Never damage the article content or insert advertisements into unsupported content structures.
+
+### Article SEO
+
+Preserve and improve:
+
+- Dynamic page title.
+- Meta description.
+- Canonical URL.
+- Open Graph metadata.
+- Social preview images.
+- NewsArticle structured data where applicable.
+- Existing sitemap integration.
+
+Do not break existing article URLs.
+
+---
+
+# PART 5 – MOBILE EXPERIENCE 2.0
+
+Mobile is a major priority because a significant portion of Coffeenadu News visitors use smartphones.
+
+Create a mobile-first responsive experience.
+
+### Bottom mobile navigation
+
+Introduce a fixed bottom navigation bar.
+
+Suggested items:
+
+1. Home.
+2. Latest News.
+3. Trending.
+4. Search.
+5. Menu.
+
+Requirements:
+
+- Attractive icons.
+- Short readable labels.
+- Active navigation state.
+- Smooth navigation.
+- Proper safe-area handling.
+- Comfortable touch targets.
+- No overlap with floating buttons or article content.
+
+If the screen is displaying an article, the navigation must remain usable without obstructing reading.
+
+### Responsive requirements
+
+Test:
+
+- Small Android phones.
+- Large Android phones.
+- iPhones.
+- Tablets.
+- Desktop browsers.
+
+Ensure:
+
+- No horizontal overflow.
+- No overlapping buttons.
+- No cut-off headlines.
+- Proper image scaling.
+- Proper Kannada font rendering.
+- Correct card widths.
+- Consistent spacing.
+
+---
+
+# PART 6 – DARK MODE
+
+Add a complete optional dark mode.
+
+Requirements:
+
+- Light theme.
+- Dark theme.
+- Theme toggle.
+- Persist the visitor's preference.
+- Respect device theme preference on first visit.
+- Proper text contrast.
+- Proper card backgrounds.
+- Proper borders and shadows.
+- Correct image presentation.
+- Proper header and footer colours.
+- Advertisement compatibility.
+
+Dark mode must apply consistently to the entire website, not only the header.
+
+Do not use pure black everywhere.
+
+Use a comfortable dark navy and charcoal colour system.
+
+---
+
+# PART 7 – ADVANCED SEARCH
+
+Create a professional search experience.
+
+Search should support:
+
+- Kannada headlines.
+- English headlines.
+- Article descriptions.
+- Locations.
+- Categories.
+- Keywords.
+
+Add optional filters:
+
+- Date.
+- Category.
+- Location.
+
+Requirements:
+
+- Search suggestions where practical.
+- Search result thumbnails.
+- Highlight matching terms where appropriate.
+- Loading indicator.
+- Empty-result message.
+- Clear filters button.
+- Responsive search interface.
+
+Use existing article data and backend APIs.
+
+Do not create fake search results.
+
+Do not expose private administrative data through public search.
+
+---
+
+# PART 8 – BREAKING NEWS NOTIFICATIONS
+
+Implement optional browser notifications.
+
+Requirements:
+
+- Ask the visitor for permission before enabling notifications.
+- Never force notifications.
+- Notify only about genuine breaking-news items.
+- Avoid repeated notifications for the same article.
+- Respect the visitor's notification preference.
+- Provide an easy way to disable notifications.
+- Handle unsupported browsers.
+- Do not expose private API credentials.
+
+First inspect the existing backend and deployment capabilities.
+
+If background push notifications require additional infrastructure, implement only the supported frontend portion and report the missing backend requirements rather than introducing an unapproved new service.
+
+Do not modify existing authentication or secrets.
+
+---
+
+# PART 9 – DESKTOP EXPERIENCE 2.0
+
+Do not simply stretch the mobile layout to desktop.
+
+Build a proper editorial desktop layout.
+
+Requirements:
+
+- Professional wide header.
+- Attractive featured-news section.
+- Two- or three-column news grid where appropriate.
+- Dedicated trending-news sidebar.
+- Desktop advertisement placements.
+- Professional article reading column.
+- Related-news sidebar.
+- Proper footer.
+- Responsive navigation.
+
+Use the available screen space intelligently.
+
+Maintain a consistent visual identity across desktop and mobile.
+
+---
+
+# PART 10 – PERFORMANCE AND TECHNICAL QUALITY
+
+Improve the existing frontend without changing its core architecture.
+
+### Performance
+
+- Lazy-load below-the-fold images.
+- Use responsive image sizes where supported.
+- Prevent unnecessary component re-rendering.
+- Optimize large assets.
+- Avoid unnecessary dependencies.
+- Avoid excessive animation.
+- Implement loading placeholders.
+- Use appropriate caching.
+- Avoid duplicate API calls.
+- Keep the website lightweight.
+
+### SEO
+
+- Preserve existing URLs.
+- Preserve existing sitemap.
+- Dynamic metadata.
+- Canonical URLs.
+- Article structured data.
+- Proper image metadata.
+- Social sharing previews.
+- Correct page headings.
+
+### Accessibility
+
+- Keyboard navigation.
+- Accessible buttons.
+- Proper colour contrast.
+- Descriptive image alt text.
+- Screen-reader-friendly labels.
+- Visible focus states.
+
+### Error handling
+
+Handle:
+
+- API failures.
+- Missing images.
+- Empty news lists.
+- Invalid article IDs.
+- Missing article data.
+- Slow connections.
+- Network interruptions.
+- Advertisement loading failures.
+
+The website must never display broken layouts or blank sections when optional content is unavailable.
+
+---
+
+# PART 11 – IMPLEMENTATION PHASES
+
+IMPORTANT: Implement the upgrade in the following phases.
+
+Do not attempt to change the entire website in one uncontrolled operation.
+
+## PHASE 0 – PROJECT AUDIT AND SAFETY
+
+Before modifying code:
+
+1. Inspect the complete repository.
+2. Identify the main React entry point.
+3. Identify the existing homepage components.
+4. Identify article page components.
+5. Identify header and footer components.
+6. Identify routing.
+7. Identify API services.
+8. Identify Admin 2.0 integrations.
+9. Identify advertisement integrations.
+10. Identify Google Sheets and Drive services.
+11. Identify Firebase integrations.
+12. Inspect Cloudflare Pages Functions.
+13. Inspect existing CSS and design system.
+14. Identify unused or duplicated components.
+15. Identify existing bugs and dependencies.
+
+Create a clear implementation plan.
+
+Identify all files that will be modified and explain why.
+
+Do not make destructive changes during the audit.
+
+After completing the audit, report:
+
+- Existing architecture.
+- Existing functionality.
+- Important files.
+- Components to reuse.
+- Components to improve.
+- Potential compatibility risks.
+- Proposed implementation sequence.
+
+Wait for approval before proceeding to Phase 1.
+
+## PHASE 1 – DESIGN FOUNDATION
+
+Implement:
+
+- Design tokens.
+- Premium colour system.
+- Typography.
+- Kannada font support.
+- Responsive layout foundation.
+- Shared buttons.
+- Cards.
+- Badges.
+- Icons.
+- Header.
+- Footer.
+- Theme infrastructure.
+
+Verify that existing routes and functionality continue to work.
+
+Do not rebuild the homepage yet.
+
+## PHASE 2 – HOMEPAGE 2.0
+
+Implement the complete redesigned homepage.
+
+Follow the exact section structure in Parts 3 and 4.
+
+Connect each section to existing data sources.
+
+Preserve existing interactions and links.
+
+Test the homepage on mobile and desktop.
+
+## PHASE 3 – ARTICLE PAGE 2.0
+
+Implement:
+
+- Article layout.
+- Reading typography.
+- Featured images.
+- Sharing.
+- Reading progress.
+- Related news.
+- SEO metadata.
+- Existing article advertisements.
+
+Test actual published articles.
+
+Verify that old article URLs continue to work.
+
+## PHASE 4 – ADVANCED FEATURES
+
+Implement:
+
+- Dark mode.
+- Trending news.
+- Advanced search.
+- Breaking news notifications.
+- Bottom mobile navigation.
+
+Integrate with existing APIs and data.
+
+Do not introduce unnecessary new backend infrastructure.
+
+## PHASE 5 – ADVERTISEMENT AND ADMIN INTEGRATION
+
+Verify complete compatibility with Admin 2.0.
+
+Test all existing advertisement placements.
+
+Verify that:
+
+- Admin activation and deactivation work.
+- Scheduling works.
+- Advertisement placement works.
+- Rotation works where supported.
+- Popup dismissal works.
+- Frequency limits work where configured.
+- End-of-article advertisements display correctly.
+- Empty placements disappear.
+
+Do not modify the existing admin architecture unless essential.
+
+If an integration requires backend changes, explain the requirement and obtain approval first.
+
+## PHASE 6 – FINAL TESTING AND DEPLOYMENT READINESS
+
+Test the complete website.
+
+### Functionality testing
+
+- Homepage loading.
+- Article opening.
+- Category filtering.
+- Location filtering.
+- News search.
+- Trending news.
+- Dark mode.
+- Notification permissions.
+- WhatsApp sharing.
+- Social sharing.
+- Bus Timings.
+- Events.
+- Weather.
+- Market Rates.
+- Quick Briefs.
+- Advertisement placements.
+- Admin publishing.
+- Image loading.
+- Load More.
+- Footer navigation.
+
+### Responsive testing
+
+Test mobile, tablet and desktop.
+
+### Integration testing
+
+Verify:
+
+- React application builds successfully.
+- API requests work.
+- Google Sheets data loads.
+- Google Drive images load.
+- Apps Script integrations remain operational.
+- Firebase integrations remain operational.
+- Admin login still works.
+- Admin publishing still works.
+- Cloudflare API proxy still works.
+- Sitemap still works.
+- GitHub synchronization is not affected.
+
+### Production protection
+
+Before declaring the upgrade complete:
+
+1. Run the production build.
+2. Fix build errors.
+3. Check browser console errors.
+4. Check network errors.
+5. Check broken images.
+6. Check missing API responses.
+7. Check mobile overflow.
+8. Check existing article URLs.
+9. Check administrator workflows.
+10. Confirm deployment configuration is intact.
+
+Do not claim successful testing unless the relevant tests were actually performed.
+
+---
+
+# PART 12 – DEVELOPMENT WORKFLOW AND CHANGE CONTROL
+
+Follow these rules throughout implementation.
+
+### Work incrementally
+
+- Work on one phase at a time.
+- Reuse existing components where possible.
+- Keep modifications focused.
+- Avoid unnecessary file replacements.
+- Avoid duplicating existing functionality.
+- Maintain consistent code quality.
+
+### Before each phase
+
+Explain:
+
+- What will be implemented.
+- Which files will be affected.
+- Which existing components will be reused.
+- Any integration risks.
+
+### After each phase
+
+Report:
+
+- Completed changes.
+- Files modified.
+- Features implemented.
+- Existing features verified.
+- Build and testing results.
+- Remaining issues.
+
+Stop after each phase and wait for my approval before continuing.
+
+### GitHub and Cloudflare safety
+
+Do not automatically delete, reset, overwrite or force-push the repository.
+
+Do not change the production branch.
+
+Do not alter Cloudflare deployment settings unnecessarily.
+
+Keep the existing Google AI Studio ↔ GitHub ↔ Cloudflare workflow intact.
+
+Do not deploy incomplete or untested changes to production.
+
+Preserve the current live website until the new frontend is verified.
+
+---
+
+# PART 13 – FINAL ACCEPTANCE CRITERIA
+
+The upgrade is complete only when all the following are satisfied:
+
+1. Coffeenadu News has a premium editorial design.
+2. The complete homepage is redesigned.
+3. Individual article pages are redesigned.
+4. Mobile and desktop experiences are professional.
+5. Existing features continue to work.
+6. Existing news data remains intact.
+7. Admin 2.0 remains operational.
+8. Existing advertisement management remains operational.
+9. Dark mode works.
+10. Trending news works.
+11. Advanced search works.
+12. Breaking-news notifications work where supported.
+13. Bottom mobile navigation works.
+14. Google integrations remain intact.
+15. Cloudflare routing and sitemap remain intact.
+16. SEO and performance are improved.
+17. Production build succeeds.
+18. No critical console or application errors remain.
+
+**FINAL INSTRUCTION:**
+
+Treat Coffeenadu News as an established production news platform, not a beginner project.
+
+Prioritize reliability, professional visual design, Kannada readability, user engagement, speed and maintainability.
+
+Do not remove existing functionality to achieve a cleaner appearance.
+
+Do not fabricate data or claim that an integration works without testing it.
+
+Begin with PHASE 0 – PROJECT AUDIT AND SAFETY ONLY.
+
+Do not start implementing Phase 1 until I review and approve the audit report.
+
+The ultimate goal is to make Coffeenadu News a premium, trusted and attractive regional digital news destination for readers across Koppa, Malnad and surrounding Karnataka regions.

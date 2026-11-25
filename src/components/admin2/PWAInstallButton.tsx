@@ -125,7 +125,7 @@ export function PWAInstallButton({ variant = 'header' }: PWAInstallButtonProps) 
                     Chrome on Android
                   </p>
                   <p className="mt-1 leading-relaxed">
-                    Open <strong>https://coffeenad-news.ai.studio/admin</strong> in Chrome, tap the{' '}
+                    Open <strong>https://coffeenadu.in/admin</strong> in Chrome, tap the{' '}
                     <strong>⋮</strong> menu, then tap <strong>Install app</strong> or{' '}
                     <strong>Add to Home screen</strong>.
                   </p>

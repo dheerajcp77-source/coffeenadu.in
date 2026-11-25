@@ -13,7 +13,7 @@ interface FeaturedLeadCarouselProps {
   onOpenArticle: (article: NewsArticle) => void;
 }
 
-const AUTO_SLIDE_INTERVAL_MS = 3000;
+const AUTO_SLIDE_INTERVAL_MS = 4000;
 
 export function FeaturedLeadCarousel({
   leadArticles,
@@ -69,7 +69,6 @@ export function FeaturedLeadCarousel({
     [total]
   );
 
-  // Automatically slide to next featured lead story one-by-one to the left
   useEffect(() => {
     if (total <= 1 || isPaused) return;
     const timer = window.setInterval(() => {
@@ -159,7 +158,7 @@ export function FeaturedLeadCarousel({
       }}
     >
       <span
-        className="absolute -left-6 sm:-left-7 top-6 w-3 h-3 rounded-full border-2 border-amber-400 bg-white z-10"
+        className="hidden sm:block absolute -left-7 top-6 w-3 h-3 rounded-full border-2 border-[#D9A441] bg-white dark:bg-[#0B1626] z-10"
         aria-hidden="true"
       />
 
@@ -167,9 +166,8 @@ export function FeaturedLeadCarousel({
         role="region"
         aria-roledescription="carousel"
         aria-label="Featured Lead News"
-        className="rounded-2xl overflow-hidden border border-slate-200 shadow-sm bg-slate-950"
+        className="rounded-2xl overflow-hidden border border-slate-200 dark:border-slate-800 shadow-sm bg-[#0B1626]"
       >
-        {/* Horizontal Smooth-Sliding Track */}
         <div
           ref={trackRef}
           onScroll={handleTrackScroll}
@@ -199,37 +197,42 @@ export function FeaturedLeadCarousel({
               }}
               role="button"
               tabIndex={0}
-              className="group relative w-full shrink-0 snap-start snap-always cursor-pointer flex flex-col bg-slate-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-amber-400"
+              className="group relative w-full shrink-0 snap-start snap-always cursor-pointer flex flex-col bg-[#0B1626] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#D9A441]"
             >
               {/* Adaptive Full-Fit Photo Stage: fits square, wide, or portrait photos 100% uncut */}
-              <div className="relative w-full bg-slate-950 border-b border-slate-800/80 overflow-hidden">
+              <div className="relative w-full bg-[#091220] border-b border-slate-800/80 overflow-hidden">
                 <NewsImage
                   src={resolveArticleImage(leadArticle) || koppaLandscapeImg}
                   alt={stripRichTextToPlainText(leadArticle.titleKannada)}
                   fitMode="natural"
                   maxHeightClass="max-h-[340px] sm:max-h-[420px]"
                   watermarkApplied={Boolean(leadArticle.watermarkApplied && leadArticle.imageUrl)}
-                  className="bg-slate-950"
+                  className="bg-[#091220]"
                 />
               </div>
 
-              {/* Dark Editorial Content Strip */}
-              <div className="relative flex-1 flex flex-col justify-between p-4 sm:p-5 bg-slate-950 news-watermark-light">
-                {/* Top row */}
-                <div className="flex items-center justify-between gap-3 text-xs">
-                  <span className="font-semibold text-amber-300 tracking-wide font-kannada">
-                    Featured · {getKannadaLocationLabel(leadArticle.location)}
-                  </span>
-                  <span className="inline-flex items-center gap-1 text-slate-200 tabular-nums">
-                    <Clock className="w-3.5 h-3.5" aria-hidden="true" />
+              {/* Deep Navy Editorial Content Strip */}
+              <div className="relative flex-1 flex flex-col justify-between p-4 sm:p-6 bg-gradient-to-b from-[#10243D] to-[#0B1626] news-watermark-light">
+                <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+                  <div className="flex items-center gap-2">
+                    <span className="inline-flex items-center rounded bg-[#D9A441] px-2 py-0.5 text-[10px] font-extrabold uppercase tracking-wider text-[#10243D]">
+                      Featured
+                    </span>
+                    <span className="font-semibold text-amber-200 tracking-wide font-kannada">
+                      {getKannadaLocationLabel(leadArticle.location)}
+                    </span>
+                  </div>
+                  <span className="inline-flex items-center gap-1.5 text-slate-200 tabular-nums">
+                    <Clock className="w-3.5 h-3.5 text-[#D9A441]" aria-hidden="true" />
                     <span>{leadArticle.publishedDate}</span>
+                    <span>·</span>
+                    <span>{leadArticle.readTimeMinutes}m read</span>
                   </span>
                 </div>
 
-                {/* Center Kannada Headline & Summary */}
                 <div className="my-3.5 max-w-2xl space-y-2">
                   <h2
-                    className="article-rich-content article-rich-inline-compact font-kannada text-xl sm:text-2xl lg:text-[26px] font-bold text-white leading-snug text-balance"
+                    className="article-rich-content article-rich-inline-compact font-kannada text-xl sm:text-2xl lg:text-[27px] font-bold text-white leading-snug text-balance"
                     dangerouslySetInnerHTML={{ __html: sanitizeRichTextHtml(leadArticle.titleKannada) }}
                   />
                   <div
@@ -238,17 +241,16 @@ export function FeaturedLeadCarousel({
                   />
                 </div>
 
-                {/* Bottom row */}
                 <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
                   <div className="flex flex-wrap items-center gap-2">
-                    <span className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-bold text-slate-950 bg-white group-hover:bg-amber-300 rounded-lg transition-colors">
+                    <span className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-bold text-[#10243D] bg-[#D9A441] group-hover:bg-[#E5B65C] rounded-lg transition-colors">
                       <span>Read More</span>
                       <ArrowRight className="w-3.5 h-3.5" aria-hidden="true" />
                     </span>
                     <ArticleShareBar article={leadArticle} compact variant="dark" />
                   </div>
 
-                  <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-white">
+                  <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-200">
                     {getCategoryShortIcon(leadArticle.category)}
                     <span>{leadArticle.category}</span>
                   </span>
@@ -258,19 +260,17 @@ export function FeaturedLeadCarousel({
           ))}
         </div>
 
-        {/* Minimal Seek Bar & Swipe Buttons Only */}
         {total > 1 && (
-          <div className="bg-slate-950 border-t border-slate-800 px-3 sm:px-4 py-2.5 flex items-center gap-3">
+          <div className="bg-[#081220] border-t border-slate-800 px-3 sm:px-4 py-2.5 flex items-center gap-3">
             <button
               type="button"
               onClick={() => scrollToSlide(activeIndex - 1)}
               aria-label="Previous featured story"
-              className="p-2 rounded-lg bg-slate-800 text-slate-100 hover:bg-slate-700 hover:text-white transition-colors cursor-pointer shrink-0"
+              className="p-2 rounded-lg bg-slate-800/90 text-slate-100 hover:bg-slate-700 hover:text-white transition-colors cursor-pointer shrink-0"
             >
               <ChevronLeft className="w-4 h-4" aria-hidden="true" />
             </button>
 
-            {/* Interactive Seek Bar */}
             <div
               className="flex-1 flex items-center gap-1.5"
               role="tablist"
@@ -284,11 +284,11 @@ export function FeaturedLeadCarousel({
                     type="button"
                     role="tab"
                     aria-selected={isActive}
-                    aria-label={`Slide ${idx + 1}: ${item.titleKannada}`}
+                    aria-label={`Slide ${idx + 1}: ${stripRichTextToPlainText(item.titleKannada)}`}
                     onClick={() => scrollToSlide(idx)}
                     className={`h-2 flex-1 rounded-full transition-colors cursor-pointer ${
                       isActive
-                        ? 'bg-amber-400'
+                        ? 'bg-[#D9A441]'
                         : 'bg-slate-700 hover:bg-slate-500'
                     }`}
                   />
@@ -300,7 +300,7 @@ export function FeaturedLeadCarousel({
               type="button"
               onClick={() => scrollToSlide(activeIndex + 1)}
               aria-label="Next featured story"
-              className="p-2 rounded-lg bg-slate-800 text-slate-100 hover:bg-slate-700 hover:text-white transition-colors cursor-pointer shrink-0"
+              className="p-2 rounded-lg bg-slate-800/90 text-slate-100 hover:bg-slate-700 hover:text-white transition-colors cursor-pointer shrink-0"
             >
               <ChevronRight className="w-4 h-4" aria-hidden="true" />
             </button>
