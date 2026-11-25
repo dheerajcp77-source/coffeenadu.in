@@ -38,7 +38,7 @@ const APPS_SCRIPT_TIMEOUT_MS = 18_000;
 const EDGE_READ_CACHE_TTL_SECONDS = 90;
 const BUS_CACHE_TTL_SECONDS = 21_600; // 6 hours
 const REMEMBERED_COOKIE_NAME = 'cn_admin2_rem';
-const GEMINI_EDITORIAL_MODEL = 'gemini-2.5-flash';
+const GEMINI_EDITORIAL_MODEL = 'gemini-4-hydrogen';
 
 // Legacy dead origins that must never receive blind proxy traffic when unhealthy/unset
 const DEPRECATED_BACKEND_HOSTS = new Set(['coffeenad-news.ai.studio']);
@@ -757,15 +757,26 @@ export async function fetchAllPublishedNewsDirect(
 }
 
 async function invalidateEdgeReadCaches(newsId?: string): Promise<void> {
+  const prevEpoch = cfReadCacheEpoch;
   cfReadCacheEpoch += 1;
   const cache = getDefaultEdgeCache();
   if (!cache) return;
   try {
-    const keys = [
+    const epochsToClear = new Set<number>([1, prevEpoch, cfReadCacheEpoch]);
+    const keys: string[] = [];
+    for (const ep of epochsToClear) {
+      keys.push(
+        `https://cf-edge-cache.coffeenadu.invalid/apps-script-news?epoch=${ep}&page=1&limit=15`,
+        `https://cf-edge-cache.coffeenadu.invalid/apps-script-news?epoch=${ep}&page=1&limit=50`,
+        `https://cf-edge-cache.coffeenadu.invalid/apps-script-news?epoch=${ep}&page=2&limit=15`,
+        `https://cf-edge-cache.coffeenadu.invalid/apps-script-news?epoch=${ep}&page=2&limit=50`
+      );
+    }
+    keys.push(
       'https://cf-edge-cache.coffeenadu.invalid/apps-script-news?page=1&limit=15',
       'https://cf-edge-cache.coffeenadu.invalid/apps-script-news?page=1&limit=50',
-      'https://cf-edge-cache.coffeenadu.invalid/apps-script-events?page=1&limit=20',
-    ];
+      'https://cf-edge-cache.coffeenadu.invalid/apps-script-events?page=1&limit=20'
+    );
     if (newsId) {
       keys.push(`https://cf-edge-cache.coffeenadu.invalid/apps-script-news-id/${encodeURIComponent(newsId)}`);
     }
@@ -854,7 +865,7 @@ interface CfSessionPayload {
   exp: number;
 }
 
-async function signCfToken(payload: CfSessionPayload, env: PagesEnv | undefined): Promise<string> {
+export async function signCfToken(payload: CfSessionPayload, env: PagesEnv | undefined): Promise<string> {
   const encoded = base64UrlEncodeString(JSON.stringify(payload));
   const key = await getHmacKey(env, 'sign');
   const sigBuffer = await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(encoded));
@@ -1228,6 +1239,266 @@ async function handleBusTimingsDirect(request: Request): Promise<Response> {
   }
 }
 
+interface CfBusPlaceAlias {
+  key: string;
+  labelEn: string;
+  labelKn: string;
+  aliases: string[];
+}
+
+const CF_BUS_PLACE_ALIASES: CfBusPlaceAlias[] = [
+  { key: 'koppa', labelEn: 'Koppa', labelKn: 'ಕೊಪ್ಪ', aliases: ['koppa', 'ಕೊಪ್ಪ'] },
+  { key: 'shivamogga', labelEn: 'Shivamogga', labelKn: 'ಶಿವಮೊಗ್ಗ', aliases: ['shivamogga', 'shimoga', 'shivamoga', 'ಶಿವಮೊಗ್ಗ'] },
+  { key: 'bengaluru', labelEn: 'Bengaluru', labelKn: 'ಬೆಂಗಳೂರು', aliases: ['bengaluru', 'bangalore', 'blr', 'ಬೆಂಗಳೂರು'] },
+  { key: 'mangaluru', labelEn: 'Mangaluru', labelKn: 'ಮಂಗಳೂರು', aliases: ['mangaluru', 'mangalore', 'mlr', 'ಮಂಗಳೂರು'] },
+  { key: 'chikkamagaluru', labelEn: 'Chikkamagaluru', labelKn: 'ಚಿಕ್ಕಮಗಳೂರು', aliases: ['chikkamagaluru', 'chikmagalur', 'chikamagaluru', 'ಚಿಕ್ಕಮಗಳೂರು'] },
+  { key: 'sringeri', labelEn: 'Sringeri', labelKn: 'ಶೃಂಗೇರಿ', aliases: ['sringeri', 'shringeri', 'ಶೃಂಗೇರಿ'] },
+  { key: 'thirthahalli', labelEn: 'Thirthahalli', labelKn: 'ತೀರ್ಥಹಳ್ಳಿ', aliases: ['thirthahalli', 'therthahalli', 'tirthahalli', 'ತೀರ್ಥಹಳ್ಳಿ'] },
+  { key: 'balehonnur', labelEn: 'Balehonnur', labelKn: 'ಬಾಳೆಹೊನ್ನೂರು', aliases: ['balehonnuru', 'balehonnur', 'ಬಾಳೆಹೊನ್ನೂರು'] },
+  { key: 'nrpura', labelEn: 'N.R. Pura', labelKn: 'ಎನ್.ಆರ್ ಪುರ', aliases: ['n.r. pura', 'n.r pura', 'nr pura', 'nrpura', 'narasimharajapura', 'ಎನ್.ಆರ್ ಪುರ', 'ನರಸಿಂಹರಾಜಪುರ'] },
+  { key: 'jayapura', labelEn: 'Jayapura', labelKn: 'ಜಯಪುರ', aliases: ['jayapura', 'ಜಯಪುರ'] },
+  { key: 'horanadu', labelEn: 'Horanadu', labelKn: 'ಹೊರನಾಡು', aliases: ['horanadu', 'ಹೊರನಾಡು'] },
+  { key: 'kalasa', labelEn: 'Kalasa', labelKn: 'ಕಳಸ', aliases: ['kalasa', 'ಕಳಸ'] },
+  { key: 'agumbe', labelEn: 'Agumbe', labelKn: 'ಆಗುಂಬೆ', aliases: ['agumbe', 'ಆಗುಂಬೆ'] },
+  { key: 'udupi', labelEn: 'Udupi', labelKn: 'ಉಡುಪಿ', aliases: ['udupi', 'ಉಡುಪಿ'] },
+  { key: 'hariharapura', labelEn: 'Hariharapura', labelKn: 'ಹರಿಹರಪುರ', aliases: ['hariharapura', 'ಹರಿಹರಪುರ'] },
+  { key: 'karkala', labelEn: 'Karkala', labelKn: 'ಕಾರ್ಕಳ', aliases: ['karkala', 'ಕಾರ್ಕಳ'] },
+  { key: 'tarikere', labelEn: 'Tarikere', labelKn: 'ತರೀಕೆರೆ', aliases: ['tarikere', 'ತರೀಕೆರೆ'] },
+  { key: 'birur', labelEn: 'Birur', labelKn: 'ಬೀರೂರು', aliases: ['birur', 'ಬೀರೂರು'] },
+  { key: 'bhadravathi', labelEn: 'Bhadravathi', labelKn: 'ಭದ್ರಾವತಿ', aliases: ['bhadravathi', 'bhadravati', 'ಭದ್ರಾವತಿ'] },
+  { key: 'sagara', labelEn: 'Sagara', labelKn: 'ಸಾಗರ', aliases: ['sagara', 'sagar', 'ಸಾಗರ'] },
+  { key: 'mysuru', labelEn: 'Mysuru', labelKn: 'ಮೈಸೂರು', aliases: ['mysuru', 'mysore', 'ಮೈಸೂರು'] },
+  { key: 'dharmasthala', labelEn: 'Dharmasthala', labelKn: 'ಧರ್ಮಸ್ಥಳ', aliases: ['dharmasthala', 'ಧರ್ಮಸ್ಥಳ'] },
+  { key: 'basarikatte', labelEn: 'Basarikatte', labelKn: 'ಬಸರಿಕಟ್ಟೆ', aliases: ['basarikatte', 'basrikatte', 'ಬಸರಿಕಟ್ಟೆ'] },
+  { key: 'aldur', labelEn: 'Aldur', labelKn: 'ಆಲ್ದೂರು', aliases: ['aldur', 'ಆಲ್ದೂರು'] },
+  { key: 'hebri', labelEn: 'Hebri', labelKn: 'ಹೆಬ್ರಿ', aliases: ['hebri', 'ಹೆಬ್ರಿ'] },
+  { key: 'kadur', labelEn: 'Kadur', labelKn: 'ಕಡೂರು', aliases: ['kadur', 'ಕಡೂರು'] },
+];
+
+function resolveCfPlaceAlias(raw: string): CfBusPlaceAlias | null {
+  const lower = raw.toLowerCase().replace(/\s+/g, ' ').trim();
+  if (!lower) return null;
+  for (const entry of CF_BUS_PLACE_ALIASES) {
+    if (entry.aliases.some((a) => lower.includes(a.toLowerCase()))) {
+      return entry;
+    }
+  }
+  return null;
+}
+
+function getCfTimeBucket(time24: string | undefined, formatted: string): 'morning' | 'afternoon' | 'evening' {
+  let hour24 = 0;
+  if (time24 && /^\d{1,2}:\d{2}/.test(time24)) {
+    hour24 = Number(time24.split(':')[0]);
+  } else {
+    const isPm = formatted.endsWith('PM');
+    const hourPart = Number(formatted.split(':')[0]);
+    hour24 = isPm ? (hourPart === 12 ? 12 : hourPart + 12) : hourPart === 12 ? 0 : hourPart;
+  }
+  if (hour24 >= 4 && hour24 < 12) return 'morning';
+  if (hour24 >= 12 && hour24 < 17) return 'afternoon';
+  return 'evening';
+}
+
+async function handleBusAgentDirect(request: Request): Promise<Response> {
+  const body = await readJsonBody(request);
+  let directOrigin = typeof body.origin === 'string' ? body.origin.trim() : '';
+  let directDestination = typeof body.destination === 'string' ? body.destination.trim() : '';
+  const timePref =
+    body.timePreference === 'morning' ||
+    body.timePreference === 'afternoon' ||
+    body.timePreference === 'evening'
+      ? body.timePreference
+      : 'all';
+
+  const messageObjects: Array<{ role?: string; text?: string }> = Array.isArray(body.messages)
+    ? (body.messages as Array<{ role?: string; text?: string }>)
+    : typeof body.message === 'string' && body.message.trim()
+    ? [{ role: 'user', text: body.message.trim() }]
+    : [];
+
+  if ((!directOrigin || !directDestination) && messageObjects.length > 0) {
+    for (const msg of messageObjects) {
+      if (!msg || typeof msg !== 'object' || msg.role !== 'user') continue;
+      const txt = String(msg.text || '').trim();
+      if (!txt) continue;
+      const sepMatch = txt.match(/(.+?)(?:\s+to\s+|\s*->\s*|\s*→\s*|ದಿಂದ\s*|ಯಿಂದ\s*|ನಿಂದ\s+)(.+)/i);
+      if (sepMatch) {
+        const leftRaw = sepMatch[1].replace(/\bfrom\b/gi, '').trim();
+        const rightRaw = sepMatch[2].trim();
+        const leftAlias = resolveCfPlaceAlias(leftRaw);
+        const rightAlias = resolveCfPlaceAlias(rightRaw);
+        if (leftAlias || leftRaw) {
+          directOrigin = leftAlias ? leftAlias.labelEn : leftRaw;
+        }
+        const isGenericFiller = /^(ಬಸ್|ಬೇಕು|ಯಾವಾಗ|ವೇಳಾಪಟ್ಟಿ|ಸಮಯ|bus|buses|timing|timings|schedule|please|\s)+$/i.test(
+          rightRaw
+        );
+        if (rightAlias) {
+          directDestination = rightAlias.labelEn;
+        } else if (rightRaw && !isGenericFiller) {
+          directDestination = rightRaw;
+        }
+      } else {
+        const hit = resolveCfPlaceAlias(txt);
+        if (hit) {
+          if (!directOrigin) directOrigin = hit.labelEn;
+          else if (!directDestination && hit.labelEn.toLowerCase() !== directOrigin.toLowerCase()) {
+            directDestination = hit.labelEn;
+          }
+        }
+      }
+    }
+  }
+
+  if (!directOrigin && !directDestination) {
+    return jsonResponse({
+      status: 'needs_both',
+      reply:
+        'Please enter 1. From Where and 2. To Where (e.g., Koppa to Shivamogga).\nದಯವಿಟ್ಟು ೧. ಎಲ್ಲಿಂದ ಮತ್ತು ೨. ಎಲ್ಲಿಗೆ ಹೋಗಬೇಕೆಂದು ನಮೂದಿಸಿ (ಉದಾ: ಕೊಪ್ಪದಿಂದ ಶಿವಮೊಗ್ಗ).',
+      timePreference: timePref,
+      matchedRoutes: [],
+    });
+  }
+  if (directOrigin && !directDestination) {
+    const origEntry = resolveCfPlaceAlias(directOrigin);
+    const label = origEntry ? `${origEntry.labelEn} (${origEntry.labelKn})` : directOrigin;
+    return jsonResponse({
+      status: 'needs_destination',
+      origin: origEntry?.labelEn || directOrigin,
+      timePreference: timePref,
+      reply: `2. To Where? Where would you like to go from ${label}?\n೨. ಎಲ್ಲಿಗೆ? ನೀವು ${origEntry?.labelKn || directOrigin} ನಿಂದ ಎಲ್ಲಿಗೆ ಪ್ರಯಾಣಿಸಲು ಬಯಸುತ್ತೀರಿ?`,
+      matchedRoutes: [],
+    });
+  }
+  if (!directOrigin && directDestination) {
+    const destEntry = resolveCfPlaceAlias(directDestination);
+    const label = destEntry ? `${destEntry.labelEn} (${destEntry.labelKn})` : directDestination;
+    return jsonResponse({
+      status: 'needs_origin',
+      destination: destEntry?.labelEn || directDestination,
+      timePreference: timePref,
+      reply: `1. From Where? Where are you departing from to reach ${label}?\n೧. ಎಲ್ಲಿಂದ? ನೀವು ${destEntry?.labelKn || directDestination} ತಲುಪಲು ಎಲ್ಲಿಂದ ಹೊರಡುತ್ತಿದ್ದೀರಿ?`,
+      matchedRoutes: [],
+    });
+  }
+
+  const origAlias = resolveCfPlaceAlias(directOrigin);
+  const destAlias = resolveCfPlaceAlias(directDestination);
+  const origTerms = origAlias ? origAlias.aliases.map((a) => a.toLowerCase()) : [directOrigin.toLowerCase()];
+  const destTerms = destAlias ? destAlias.aliases.map((a) => a.toLowerCase()) : [directDestination.toLowerCase()];
+  const originLabel = origAlias ? `${origAlias.labelEn} (${origAlias.labelKn})` : directOrigin;
+  const destLabel = destAlias ? `${destAlias.labelEn} (${destAlias.labelKn})` : directDestination;
+
+  try {
+    const placesResp = await fetch('https://hudkoo.com/api/bus/main-places', {
+      signal: typeof AbortSignal?.timeout === 'function' ? AbortSignal.timeout(8000) : undefined,
+    });
+    if (!placesResp.ok) {
+      return jsonErrorResponse(502, 'Bus timings directory is temporarily unavailable.');
+    }
+    const rawPlaces = ((await placesResp.json()) as RawHudkooPlace[]).filter(
+      (p) => p.is_active !== false
+    );
+    const matchingPlaces = rawPlaces.filter((p) => {
+      const hay = `${p.title_en} ${p.title_kn}`.toLowerCase();
+      return origTerms.some((t) => hay.includes(t));
+    });
+    const candidatePlaces = matchingPlaces.length > 0 ? matchingPlaces : rawPlaces.slice(0, 6);
+
+    const matchedRoutes: Array<{
+      placeNameEn: string;
+      placeNameKn: string;
+      routeId: number;
+      routeTitle: string;
+      routeSubtitle?: string;
+      fromPlaceLabel: string;
+      matchType: 'direct' | 'via';
+      timings: Array<{
+        timingId: number;
+        departureTime: string;
+        departureTime24: string;
+        busName: string;
+        remarks: string;
+        fromPlaceEn: string;
+        fromPlaceKn: string;
+      }>;
+    }> = [];
+
+    for (const place of candidatePlaces) {
+      const activeRoutes = (place.routes || []).filter((r) => r.is_active !== false);
+      for (const route of activeRoutes) {
+        const routeText = `${place.title_en} ${place.title_kn} ${route.route_name} ${route.description}`.toLowerCase();
+        if (!destTerms.some((t) => routeText.includes(t))) continue;
+        try {
+          const detailResp = await fetch(
+            `https://hudkoo.com/api/bus/routes/${route.route_id}/details`,
+            {
+              signal: typeof AbortSignal?.timeout === 'function' ? AbortSignal.timeout(8000) : undefined,
+            }
+          );
+          if (!detailResp.ok) continue;
+          const detailJson = (await detailResp.json()) as { timings?: RawHudkooTiming[] };
+          const timings = (detailJson.timings || [])
+            .filter((t) => t.is_active !== false)
+            .sort((a, b) => a.departure_time.localeCompare(b.departure_time))
+            .map((t) => ({
+              timingId: t.timing_id,
+              departureTime: formatDepartureTime(t.departure_time),
+              departureTime24: t.departure_time.slice(0, 5),
+              busName: (t.bus_name || '').trim(),
+              remarks: (t.remarks || '').trim(),
+              fromPlaceEn: (t.from_place_name_en || '').trim() || place.title_en.trim(),
+              fromPlaceKn: (t.from_place_name_kn || '').trim() || place.title_kn.trim(),
+            }))
+            .filter((t) => {
+              if (timePref !== 'all' && getCfTimeBucket(t.departureTime24, t.departureTime) !== timePref) {
+                return false;
+              }
+              return origTerms.some((term) => `${t.fromPlaceEn} ${t.fromPlaceKn}`.toLowerCase().includes(term));
+            });
+
+          if (timings.length > 0) {
+            matchedRoutes.push({
+              placeNameEn: place.title_en.trim(),
+              placeNameKn: place.title_kn.trim(),
+              routeId: route.route_id,
+              routeTitle: route.route_name.trim() || route.description.trim(),
+              routeSubtitle: route.description.trim() || undefined,
+              fromPlaceLabel: `Departs from ${place.title_en.trim()} → ${destAlias?.labelEn || directDestination}`,
+              matchType: 'direct',
+              timings,
+            });
+          }
+        } catch {
+          // Continue checking other routes
+        }
+      }
+    }
+
+    const totalBuses = matchedRoutes.reduce((sum, r) => sum + r.timings.length, 0);
+    const reply =
+      totalBuses > 0
+        ? `Found ${totalBuses} direct bus${totalBuses === 1 ? '' : 'es'} from ${originLabel} to ${destLabel} across ${matchedRoutes.length} route${matchedRoutes.length === 1 ? '' : 's'}.\n${originLabel} ನಿಂದ ${destLabel} ಗೆ ${totalBuses} ನೇರ ಬಸ್‌ಗಳು ಲಭ್ಯವಿವೆ.`
+        : `No direct bus route from ${originLabel} to ${destLabel} was found in the current schedule.\n${originLabel} ನಿಂದ ${destLabel} ಗೆ ಪ್ರಸ್ತುತ ವೇಳಾಪಟ್ಟಿಯಲ್ಲಿ ನೇರ ಬಸ್ ಮಾರ್ಗ ಕಂಡುಬಂದಿಲ್ಲ.`;
+
+    return jsonResponse({
+      status: 'ready',
+      reply,
+      origin: originLabel,
+      destination: destLabel,
+      timePreference: timePref,
+      matchedRoutes,
+      suggestedHubs: totalBuses === 0 ? ['Koppa', 'Jayapura', 'Balehonnur', 'Sringeri'] : [],
+    });
+  } catch (err) {
+    return jsonErrorResponse(
+      502,
+      err instanceof Error ? err.message : 'Unable to load bus schedules right now.'
+    );
+  }
+}
+
 // ============================================================================
 // GOOGLE DRIVE & OG IMAGE STREAMING (CF WORKER DIRECT)
 // ============================================================================
@@ -1407,19 +1678,35 @@ function getDefaultAdPlatformSettings() {
 function getDefaultWebsiteSettings(publicOrigin: string) {
   return {
     siteName: 'Coffeenadu News',
-    tagline: 'Koppa Taluk Local Kannada News',
-    developerCreditTop: '(Developed by Dheeraj)',
-    developerCreditBottom: '(Developed & Managed by Dheeraj)',
+    siteTagline: 'Koppa Taluk Local Kannada News Portal',
     canonicalBaseUrl: publicOrigin,
+    defaultLanguage: 'Kannada' as const,
+    whatsappNumber: '+919448000000',
+    whatsappGroupUrl: '',
     defaultSeoTitle: 'Coffeenadu News — Koppa Taluk Local Kannada News',
     defaultMetaDescription:
       'Local Koppa Taluk news publishing portal featuring English navigation and fast-loading Kannada news updates across categories.',
-    leadStoryDefaultHours: 24,
-    sheetsCacheTtlMinutes: CACHE_TTL_MINUTES,
-    readerChatEnabled: true,
-    maintenanceMode: false,
+    ga4MeasurementId: '',
+    searchConsoleSiteUrl: publicOrigin,
+    watermarkLogoEnabled: true,
+    watermarkMiddleTextEnabled: true,
+    watermarkMiddleText: 'COFFEENADU NEWS',
+    breakingTickerNotice: '',
     updatedAt: new Date().toISOString(),
     updatedBy: 'system',
+  };
+}
+
+function getDefaultNotificationPreferences() {
+  return {
+    publishingSuccess: true,
+    publishingFailure: true,
+    imageProcessing: true,
+    backupAlerts: true,
+    storageWarnings: true,
+    automationErrors: true,
+    adminSecurityActivity: true,
+    readerMessages: true,
   };
 }
 
@@ -1432,7 +1719,7 @@ function stripMarkup(raw: unknown): string {
     .trim();
 }
 
-function buildAnalyticsFromNews(news: SheetsNewsItem[], days = 14) {
+function buildAnalyticsFromNews(news: SheetsNewsItem[], days = 14, publicOrigin = CANONICAL_PUBLIC_ORIGIN) {
   const safeDays = Math.min(90, Math.max(7, Number(days) || 14));
   const dailySeries: Array<{
     date: string;
@@ -1453,7 +1740,6 @@ function buildAnalyticsFromNews(news: SheetsNewsItem[], days = 14) {
 
   let totalSheetArticleViews = 0;
   const catCounts = new Map<string, { articles: number; views: number }>();
-  const locCounts = new Map<string, { articles: number; views: number }>();
 
   const topArticles = news
     .map((item) => {
@@ -1466,10 +1752,6 @@ function buildAnalyticsFromNews(news: SheetsNewsItem[], days = 14) {
       catCounts.set(cat, c);
 
       const loc = item.location || 'ಕೊಪ್ಪ';
-      const l = locCounts.get(loc) || { articles: 0, views: 0 };
-      l.articles += 1;
-      l.views += views;
-      locCounts.set(loc, l);
 
       return {
         id: item.newsId,
@@ -1482,31 +1764,36 @@ function buildAnalyticsFromNews(news: SheetsNewsItem[], days = 14) {
     })
     .sort((a, b) => b.views - a.views);
 
+  const categoryPerformance = Array.from(catCounts.entries())
+    .map(([category, v]) => ({
+      category,
+      articles: v.articles,
+      views: v.views,
+    }))
+    .sort((a, b) => b.views - a.views);
+
   return {
-    days: safeDays,
+    rangeDays: safeDays,
+    dailySeries,
     totals: {
       pageViews: 0,
       uniqueVisitors: 0,
       articleReads: totalSheetArticleViews,
-      totalPublishedArticles: news.length,
       totalSheetArticleViews,
+      totalPublishedArticles: news.length,
     },
-    dailySeries,
-    categoryBreakdown: Array.from(catCounts.entries()).map(([category, v]) => ({
-      category,
-      articles: v.articles,
-      views: v.views,
-    })),
-    locationBreakdown: Array.from(locCounts.entries()).map(([location, v]) => ({
-      location,
-      articles: v.articles,
-      views: v.views,
-    })),
+    trafficSources: [] as Array<{ source: string; count: number; pct: number }>,
+    deviceBreakdown: [] as Array<{ device: string; count: number; pct: number }>,
+    categoryPerformance,
     topArticles: topArticles.slice(0, 12),
     recentlyViewedArticles: topArticles.slice(0, 8).map((a) => ({
       ...a,
       viewedAt: new Date().toISOString(),
     })),
+    ga4Connected: false,
+    ga4MeasurementId: '',
+    searchConsoleConnected: true,
+    searchConsoleSiteUrl: publicOrigin,
   };
 }
 
@@ -1555,9 +1842,13 @@ export async function handleApiDirectOnCloudflare(
     });
   }
 
-  // 2. Public Bus Timings & Drive/Entity Images
+  // 2. Public Bus Timings, Bus AI Agent & Drive/Entity Images
   if (pathname === '/api/bus-timings' && method === 'GET') {
     return handleBusTimingsDirect(request);
+  }
+
+  if (pathname === '/api/bus-agent' && method === 'POST') {
+    return handleBusAgentDirect(request);
   }
 
   if (pathname === '/api/og-default-image' && (method === 'GET' || method === 'HEAD')) {
@@ -1574,6 +1865,11 @@ export async function handleApiDirectOnCloudflare(
   if (eventImgMatch && (method === 'GET' || method === 'HEAD')) {
     const eventId = decodeURIComponent(eventImgMatch[1]).trim();
     return handleEntityOgImage('event', eventId, request, env);
+  }
+
+  const adImgMatch = pathname.match(/^\/api\/ad-image\/([^/]+)$/);
+  if (adImgMatch && (method === 'GET' || method === 'HEAD')) {
+    return handleEntityOgImage('default', '', request, env);
   }
 
   const driveMatch = pathname.match(/^\/api\/media\/drive\/([^/]+)$/);
@@ -1800,8 +2096,10 @@ export async function handleApiDirectOnCloudflare(
   if (pathname === '/api/ads' && method === 'GET') {
     return jsonResponse({
       ok: true,
+      ads: [],
       items: [],
       settings: getDefaultAdPlatformSettings(),
+      todayYmd: new Date().toISOString().slice(0, 10),
       total: 0,
     });
   }
@@ -1815,15 +2113,32 @@ export async function handleApiDirectOnCloudflare(
     return jsonErrorResponse(404, 'Advertisement not found.');
   }
 
-  if (pathname.startsWith('/api/public/article-feedback/') && method === 'GET') {
+  const feedbackGetMatch = pathname.match(/^\/api\/public\/article-feedback\/([^/]+)$/);
+  if (feedbackGetMatch && method === 'GET') {
+    const articleId = decodeURIComponent(feedbackGetMatch[1]).trim();
     return jsonResponse({
       ok: true,
-      counts: { helpful: 0, informative: 0, correction: 0 },
+      articleId,
+      counts: { helpful: 0, informative: 0, correction: 0, lastUpdatedAt: '' },
     });
   }
+  if (pathname === '/api/public/article-feedback' && method === 'POST') {
+    const body = await readJsonBody(request);
+    const articleId = typeof body.articleId === 'string' ? body.articleId.trim() : '';
+    const feedbackType =
+      body.type === 'helpful' || body.type === 'informative' || body.type === 'correction'
+        ? body.type
+        : 'helpful';
+    const counts = {
+      helpful: feedbackType === 'helpful' ? 1 : 0,
+      informative: feedbackType === 'informative' ? 1 : 0,
+      correction: feedbackType === 'correction' ? 1 : 0,
+      lastUpdatedAt: new Date().toISOString(),
+    };
+    return jsonResponse({ ok: true, articleId, counts });
+  }
   if (
-    (pathname === '/api/public/article-feedback' ||
-      pathname === '/api/public/newsletter/subscribe' ||
+    (pathname === '/api/public/newsletter/subscribe' ||
       pathname === '/api/public/newsletter/unsubscribe') &&
     method === 'POST'
   ) {
@@ -2733,7 +3048,7 @@ export async function handleApiDirectOnCloudflare(
       try {
         const days = Number(url.searchParams.get('days')) || 14;
         const news = appsScriptCfg.configured ? await fetchAllPublishedNewsDirect(env, false) : [];
-        return jsonResponse({ ok: true, ...buildAnalyticsFromNews(news, days) });
+        return jsonResponse({ ok: true, ...buildAnalyticsFromNews(news, days, publicOrigin) });
       } catch (err) {
         return jsonErrorResponse(
           502,
@@ -2812,16 +3127,29 @@ export async function handleApiDirectOnCloudflare(
             thumbUrl: a.imageThumbUrl || a.imageUrl || '',
             driveFileId: a.imageDriveId || '',
             fileName: `${a.newsId}.jpg`,
-            folder: a.category || 'News Photos',
+            folder: a.category || 'General News',
             mimeType: 'image/jpeg',
             watermarkApplied: Boolean(a.watermarkApplied),
             middleOverlayApplied: Boolean(a.watermarkApplied),
             uploadedAt: a.publishedDate || '',
+            usageArticles: [
+              {
+                articleId: a.newsId,
+                title: stripMarkup(a.title) || a.newsId,
+                role: 'main' as const,
+              },
+            ],
+            processingHistory: [
+              'Stored in Google Drive & indexed via Google Sheets',
+              a.watermarkApplied
+                ? 'CoffeeNadu circular logo + watermark applied'
+                : 'Original media record',
+            ],
           }));
         return jsonResponse({
           ok: true,
           assets,
-          folders: ['All Photos', 'News Photos'],
+          folders: ['General News', 'Lead Stories', 'Extra Photos', 'Programs & Events'],
           duplicateHashes: [],
           driveCache: { fileCount: assets.length, totalBytes: 0 },
         });
@@ -2835,12 +3163,7 @@ export async function handleApiDirectOnCloudflare(
         ok: true,
         notifications: [],
         unreadCount: 0,
-        preferences: {
-          breakingPublishAlerts: true,
-          backupAlerts: true,
-          quotaWarnings: true,
-          securityAlerts: true,
-        },
+        preferences: getDefaultNotificationPreferences(),
       });
     }
 
@@ -2850,7 +3173,30 @@ export async function handleApiDirectOnCloudflare(
 
     if (pathname === '/api/admin2/notifications/preferences' && method === 'PUT') {
       const body = await readJsonBody(request);
-      return jsonResponse({ ok: true, preferences: body });
+      const defaults = getDefaultNotificationPreferences();
+      return jsonResponse({
+        ok: true,
+        preferences: {
+          publishingSuccess:
+            body.publishingSuccess !== undefined ? Boolean(body.publishingSuccess) : defaults.publishingSuccess,
+          publishingFailure:
+            body.publishingFailure !== undefined ? Boolean(body.publishingFailure) : defaults.publishingFailure,
+          imageProcessing:
+            body.imageProcessing !== undefined ? Boolean(body.imageProcessing) : defaults.imageProcessing,
+          backupAlerts:
+            body.backupAlerts !== undefined ? Boolean(body.backupAlerts) : defaults.backupAlerts,
+          storageWarnings:
+            body.storageWarnings !== undefined ? Boolean(body.storageWarnings) : defaults.storageWarnings,
+          automationErrors:
+            body.automationErrors !== undefined ? Boolean(body.automationErrors) : defaults.automationErrors,
+          adminSecurityActivity:
+            body.adminSecurityActivity !== undefined
+              ? Boolean(body.adminSecurityActivity)
+              : defaults.adminSecurityActivity,
+          readerMessages:
+            body.readerMessages !== undefined ? Boolean(body.readerMessages) : defaults.readerMessages,
+        },
+      });
     }
 
     if (pathname === '/api/admin2/automations' && method === 'GET') {
@@ -2868,24 +3214,32 @@ export async function handleApiDirectOnCloudflare(
           permissions: [...ROLE_DEFAULT_PERMISSIONS.super_admin],
           status: 'active',
           protectedSuperAdmin: true,
+          hasPassword: false,
           createdAt: new Date().toISOString(),
+          createdBy: 'system',
+          lastLoginAt: email === admin.email ? new Date().toISOString() : undefined,
+          activeSessionCount: email === admin.email ? 1 : 0,
         })),
       });
     }
 
     if (pathname === '/api/admin2/security/overview' && method === 'GET') {
+      const nowIso = new Date().toISOString();
       return jsonResponse({
         ok: true,
         sessions: [
           {
             id: admin.sessionId,
+            accountId: admin.id,
             email: admin.email,
             fullName: admin.fullName,
             role: admin.role,
-            authProvider: 'firebase',
-            createdAt: new Date().toISOString(),
+            createdAt: nowIso,
+            lastSeenAt: nowIso,
             expiresAt: new Date(Date.now() + 12 * 60 * 60 * 1000).toISOString(),
-            current: true,
+            ip: request.headers.get('cf-connecting-ip') || 'edge',
+            userAgent: request.headers.get('user-agent') || 'Cloudflare Edge',
+            isCurrent: true,
           },
         ],
         auditLogs: [],
@@ -2901,12 +3255,37 @@ export async function handleApiDirectOnCloudflare(
       });
     }
 
+    if (pathname === '/api/admin2/settings' && method === 'PUT') {
+      const body = await readJsonBody(request);
+      const defaults = getDefaultWebsiteSettings(publicOrigin);
+      return jsonResponse({
+        ok: true,
+        settings: {
+          ...defaults,
+          ...body,
+          updatedAt: new Date().toISOString(),
+          updatedBy: admin.email,
+        },
+      });
+    }
+
     if (pathname === '/api/admin2/ads' && method === 'GET') {
       return jsonResponse({
         ok: true,
+        ads: [],
         items: [],
-        settings: getDefaultAdPlatformSettings(),
+        stats: {
+          total: 0,
+          active: 0,
+          inactive: 0,
+          scheduled: 0,
+          expired: 0,
+          draft: 0,
+          pendingApproval: 0,
+        },
         nextAdNumber: 'AD001',
+        todayYmd: new Date().toISOString().slice(0, 10),
+        settings: getDefaultAdPlatformSettings(),
       });
     }
 
@@ -2918,21 +3297,31 @@ export async function handleApiDirectOnCloudflare(
     }
 
     if (pathname === '/api/admin2/ads/analytics' && method === 'GET') {
+      const rawRange = url.searchParams.get('range') || 'weekly';
+      const range =
+        rawRange === 'daily' || rawRange === 'weekly' || rawRange === 'monthly' || rawRange === 'all'
+          ? rawRange
+          : 'weekly';
       return jsonResponse({
         ok: true,
-        range: (url.searchParams.get('range') || '7d') as string,
+        range,
         totals: {
           impressions: 0,
+          uniqueVisitors: 0,
           clicks: 0,
-          ctr: 0,
-          activeAds: 0,
-          totalAds: 0,
-          ctaBreakdown: {},
-          deviceBreakdown: { desktop: 0, mobile: 0 },
-          placementBreakdown: {},
+          ctrPct: 0,
+          whatsappClicks: 0,
+          phoneClicks: 0,
+          websiteClicks: 0,
+          directionsClicks: 0,
+          shareClicks: 0,
+          desktopImpressions: 0,
+          mobileImpressions: 0,
         },
-        topAds: [],
-        dailySeries: [],
+        byPlacement: {},
+        series: [],
+        perAd: [],
+        bestPerformingAd: null,
       });
     }
 
@@ -2945,6 +3334,8 @@ export async function handleApiDirectOnCloudflare(
 
     if (pathname === '/api/admin2/ai/assist' && method === 'POST') {
       const apiKey = (env?.GEMINI_API_KEY || '').trim();
+      const disclaimer =
+        'AI-generated draft strictly grounded in your supplied source notes. Remains a draft until reviewed and approved by an authorized editor.';
       if (!apiKey) {
         return jsonErrorResponse(
           503,
@@ -2953,12 +3344,21 @@ export async function handleApiDirectOnCloudflare(
       }
       const body = await readJsonBody(request);
       const sourceMaterial = String(body.sourceMaterial || '').trim();
-      const tool = String(body.tool || 'headline').trim();
-      if (!sourceMaterial) {
-        return jsonErrorResponse(400, 'Source material is required.');
+      const tool = String(body.tool || 'draft_kannada').trim();
+      if (!sourceMaterial || sourceMaterial.length < 10) {
+        return jsonErrorResponse(400, 'Please select an AI tool and provide source material (at least 10 characters).');
       }
       try {
-        const prompt = `You are a senior Kannada newsroom editor at CoffeeNadu News (Koppa Taluk). Task: ${tool}. Respond clearly in Kannada (with JSON keys "headline", "summary", "body", "suggestions" if useful).\n\nSource:\n${sourceMaterial.slice(0, 6000)}`;
+        const prompt = [
+          'You are the senior editorial desk assistant for CoffeeNadu News (Koppa Taluk, Chikkamagaluru, Karnataka).',
+          'STRICT JOURNALISM RULES: Use ONLY facts explicitly in the supplied source material. Never invent quotes, names, or numbers.',
+          `Task Tool: ${tool}`,
+          'Return valid JSON with applicable keys from: {"headline":"...","summary":"...","paragraphs":["..."],"options":["..."],"seoTitle":"...","metaDescription":"...","captionKn":"...","captionEn":"...","altText":"...","verificationFindings":[{"claim":"...","status":"supported","note":"..."}]}.',
+          '',
+          'Source Material:',
+          sourceMaterial.slice(0, 10000),
+        ].join('\n');
+
         const gemResp = await fetch(
           `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_EDITORIAL_MODEL}:generateContent?key=${encodeURIComponent(apiKey)}`,
           {
@@ -2966,6 +3366,9 @@ export async function handleApiDirectOnCloudflare(
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               contents: [{ parts: [{ text: prompt }] }],
+              generationConfig: {
+                responseMimeType: 'application/json',
+              },
             }),
           }
         );
@@ -2975,13 +3378,52 @@ export async function handleApiDirectOnCloudflare(
         const gemJson = (await gemResp.json()) as {
           candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
         };
-        const text =
+        const rawText =
           gemJson.candidates?.[0]?.content?.parts?.map((p) => p.text || '').join('\n').trim() || '';
+
+        let structured: Record<string, unknown> | undefined;
+        try {
+          structured = JSON.parse(rawText) as Record<string, unknown>;
+        } catch {
+          structured = undefined;
+        }
+
+        let outputText = rawText;
+        if (structured) {
+          const parts: string[] = [];
+          if (typeof structured.headline === 'string' && structured.headline) parts.push(structured.headline);
+          if (typeof structured.summary === 'string' && structured.summary) parts.push(structured.summary);
+          if (Array.isArray(structured.paragraphs) && structured.paragraphs.length > 0) {
+            parts.push(structured.paragraphs.map((p) => String(p)).join('\n\n'));
+          }
+          if (typeof structured.seoTitle === 'string' && structured.seoTitle) {
+            parts.push(`SEO Title: ${structured.seoTitle}`);
+          }
+          if (typeof structured.metaDescription === 'string' && structured.metaDescription) {
+            parts.push(`Meta Description: ${structured.metaDescription}`);
+          }
+          if (typeof structured.captionKn === 'string' && structured.captionKn) {
+            parts.push(`Kannada Caption: ${structured.captionKn}`);
+          }
+          if (typeof structured.captionEn === 'string' && structured.captionEn) {
+            parts.push(`English Caption: ${structured.captionEn}`);
+          }
+          if (typeof structured.altText === 'string' && structured.altText) {
+            parts.push(`Image Alt Text: ${structured.altText}`);
+          }
+          if (Array.isArray(structured.options) && structured.options.length > 0) {
+            parts.push(structured.options.map((o, i) => `${i + 1}. ${String(o)}`).join('\n'));
+          }
+          if (parts.length > 0) outputText = parts.join('\n\n');
+        }
+
         return jsonResponse({
           ok: true,
           tool,
           model: GEMINI_EDITORIAL_MODEL,
-          outputText: text,
+          outputText,
+          structured,
+          disclaimer,
         });
       } catch (err) {
         return jsonErrorResponse(502, err instanceof Error ? err.message : 'AI assist failed.');

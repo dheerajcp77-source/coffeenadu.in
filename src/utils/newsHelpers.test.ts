@@ -167,3 +167,158 @@ test('buildKannadaArticleShareText preserves Kannada headline, summary, official
   assert.ok(!text.includes('.run.app'));
 });
 
+test('dedupeInFlight shares a single concurrent promise for identical keys', async () => {
+  const { dedupeInFlight } = await import('../services/firestoreOptimizer');
+  let callCount = 0;
+  const factory = async () => {
+    callCount += 1;
+    await new Promise((r) => setTimeout(r, 15));
+    return { ok: true, count: callCount };
+  };
+  const [r1, r2, r3] = await Promise.all([
+    dedupeInFlight('test:status', factory),
+    dedupeInFlight('test:status', factory),
+    dedupeInFlight('test:status', factory),
+  ]);
+  assert.equal(callCount, 1);
+  assert.deepEqual(r1, { ok: true, count: 1 });
+  assert.deepEqual(r2, { ok: true, count: 1 });
+  assert.deepEqual(r3, { ok: true, count: 1 });
+});
+
+test('Cloudflare standalone API handler returns valid Admin2 and public contracts', async () => {
+  const { handleApiDirectOnCloudflare, signCfToken } = await import('../../functions/_cfBackend');
+  const env = {
+    ADMIN2_SESSION_SECRET: 'test-secret-key-for-cf-unit-tests',
+  };
+
+  // 1. Public article feedback GET & POST contract
+  const fbGetRes = await handleApiDirectOnCloudflare({
+    request: new Request('https://coffeenadu.in/api/public/article-feedback/art-101', { method: 'GET' }),
+    env,
+  });
+  assert.equal(fbGetRes.status, 200);
+  const fbGetJson = (await fbGetRes.json()) as {
+    ok: boolean;
+    articleId: string;
+    counts: { helpful: number; informative: number; correction: number; lastUpdatedAt: string };
+  };
+  assert.equal(fbGetJson.ok, true);
+  assert.equal(fbGetJson.articleId, 'art-101');
+  assert.equal(typeof fbGetJson.counts.helpful, 'number');
+
+  // 2. Public bus-agent conversational slot filling contract
+  const busRes = await handleApiDirectOnCloudflare({
+    request: new Request('https://coffeenadu.in/api/bus-agent', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ message: 'ಕೊಪ್ಪದಿಂದ ಬಸ್ ಬೇಕು' }),
+    }),
+    env,
+  });
+  assert.equal(busRes.status, 200);
+  const busJson = (await busRes.json()) as {
+    status: string;
+    origin?: string;
+    matchedRoutes: unknown[];
+  };
+  assert.equal(busJson.status, 'needs_destination');
+  assert.equal(busJson.origin, 'Koppa');
+  assert.ok(Array.isArray(busJson.matchedRoutes));
+
+  // 3. Mint signed cn2cf.* admin token and test Admin2 settings, notifications, admins, ads, analytics, security
+  const token = await signCfToken(
+    {
+      id: 'owner-shwethashwethak85',
+      email: 'shwethashwethak85@gmail.com',
+      fullName: 'Shwetha K',
+      role: 'super_admin',
+      permissions: ['settings.manage', 'admins.manage', 'ads.manage', 'analytics.view', 'security.view'],
+      protectedSuperAdmin: true,
+      authProvider: 'firebase',
+      sid: 'cf-test-session',
+      exp: Date.now() + 3600_000,
+    },
+    env
+  );
+
+  const authHeaders = {
+    Authorization: `Bearer ${token}`,
+    'content-type': 'application/json',
+  };
+
+  const settingsRes = await handleApiDirectOnCloudflare({
+    request: new Request('https://coffeenadu.in/api/admin2/settings', {
+      method: 'PUT',
+      headers: authHeaders,
+      body: JSON.stringify({ siteName: 'CoffeeNadu News' }),
+    }),
+    env,
+  });
+  assert.equal(settingsRes.status, 200);
+  const settingsJson = (await settingsRes.json()) as {
+    ok: boolean;
+    settings: {
+      siteName: string;
+      canonicalBaseUrl: string;
+      watermarkLogoEnabled: boolean;
+    };
+  };
+  assert.equal(settingsJson.ok, true);
+  assert.equal(settingsJson.settings.siteName, 'CoffeeNadu News');
+  assert.equal(settingsJson.settings.canonicalBaseUrl, 'https://coffeenadu.in');
+  assert.equal(typeof settingsJson.settings.watermarkLogoEnabled, 'boolean');
+
+  const notifRes = await handleApiDirectOnCloudflare({
+    request: new Request('https://coffeenadu.in/api/admin2/notifications', {
+      method: 'GET',
+      headers: authHeaders,
+    }),
+    env,
+  });
+  assert.equal(notifRes.status, 200);
+  const notifJson = (await notifRes.json()) as {
+    ok: boolean;
+    preferences: { publishingSuccess: boolean; storageWarnings: boolean };
+  };
+  assert.equal(notifJson.ok, true);
+  assert.equal(typeof notifJson.preferences.publishingSuccess, 'boolean');
+  assert.equal(typeof notifJson.preferences.storageWarnings, 'boolean');
+
+  const adminsRes = await handleApiDirectOnCloudflare({
+    request: new Request('https://coffeenadu.in/api/admin2/admins', {
+      method: 'GET',
+      headers: authHeaders,
+    }),
+    env,
+  });
+  assert.equal(adminsRes.status, 200);
+  const adminsJson = (await adminsRes.json()) as {
+    ok: boolean;
+    accounts: Array<{ hasPassword: boolean; activeSessionCount: number }>;
+  };
+  assert.equal(adminsJson.ok, true);
+  assert.equal(typeof adminsJson.accounts[0].hasPassword, 'boolean');
+  assert.equal(typeof adminsJson.accounts[0].activeSessionCount, 'number');
+
+  const adsAnalyticsRes = await handleApiDirectOnCloudflare({
+    request: new Request('https://coffeenadu.in/api/admin2/ads/analytics', {
+      method: 'GET',
+      headers: authHeaders,
+    }),
+    env,
+  });
+  assert.equal(adsAnalyticsRes.status, 200);
+  const adsAnalyticsJson = (await adsAnalyticsRes.json()) as {
+    ok: boolean;
+    totals: { ctrPct: number };
+    series: unknown[];
+    perAd: unknown[];
+  };
+  assert.equal(adsAnalyticsJson.ok, true);
+  assert.equal(typeof adsAnalyticsJson.totals.ctrPct, 'number');
+  assert.ok(Array.isArray(adsAnalyticsJson.series));
+  assert.ok(Array.isArray(adsAnalyticsJson.perAd));
+});
+
+

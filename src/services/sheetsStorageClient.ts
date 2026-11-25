@@ -3,6 +3,7 @@ import type { ExtraNewsPhoto, ImageKey, NewsArticle, NewsCategory, ProgramEvent 
 import { unpackBodyAndExtraPhotos } from '../utils/extraPhotos';
 import { resolveEffectiveLeadState } from '../utils/featuredLead';
 import { getAdmin2MemoryToken } from './admin2Client';
+import { dedupeInFlight } from './firestoreOptimizer';
 
 export interface StorageStatusResponse {
   mode: 'google_sheets' | 'firebase_fallback';
@@ -153,22 +154,27 @@ export async function getStorageBackendStatus(forceRefresh = false): Promise<Sto
   if (!forceRefresh && cachedStatus && Date.now() < cachedStatus.expiresAt) {
     return cachedStatus.value;
   }
-  try {
-    const resp = await fetch('/api/storage/status', {
-      headers: { Accept: 'application/json' },
-    });
-    const contentType = (resp.headers.get('content-type') || '').toLowerCase();
-    if (resp.ok && contentType.includes('application/json')) {
-      const data = (await resp.json()) as StorageStatusResponse;
-      if (data && (data.mode === 'google_sheets' || data.mode === 'firebase_fallback')) {
-        cachedStatus = { value: data, expiresAt: Date.now() + 2 * 60 * 1000 };
-        return data;
-      }
+  return dedupeInFlight(`storage:status:${Boolean(forceRefresh)}`, async () => {
+    if (!forceRefresh && cachedStatus && Date.now() < cachedStatus.expiresAt) {
+      return cachedStatus.value;
     }
-  } catch {
-    // Fallback cleanly
-  }
-  return { mode: 'firebase_fallback', configured: false, cacheTtlMinutes: 7 };
+    try {
+      const resp = await fetch('/api/storage/status', {
+        headers: { Accept: 'application/json' },
+      });
+      const contentType = (resp.headers.get('content-type') || '').toLowerCase();
+      if (resp.ok && contentType.includes('application/json')) {
+        const data = (await resp.json()) as StorageStatusResponse;
+        if (data && (data.mode === 'google_sheets' || data.mode === 'firebase_fallback')) {
+          cachedStatus = { value: data, expiresAt: Date.now() + 2 * 60 * 1000 };
+          return data;
+        }
+      }
+    } catch {
+      // Fallback cleanly
+    }
+    return { mode: 'firebase_fallback', configured: false, cacheTtlMinutes: 7 };
+  });
 }
 
 export async function isSheetsStorageActive(): Promise<boolean> {
