@@ -45,15 +45,14 @@ export function ArticleShareBar({
   }, [showFallbackMenu]);
 
   const plainTitle = stripRichTextToPlainText(article.titleKannada);
-  const plainSummary = stripRichTextToPlainText(article.summaryKannada);
   const articleUrl = buildArticleUrl(article.id);
   const fullShareText = buildShareText(article);
   const whatsappHref = `https://wa.me/?text=${encodeURIComponent(fullShareText)}`;
   const telegramHref = `https://t.me/share/url?url=${encodeURIComponent(articleUrl)}&text=${encodeURIComponent(
-    `${plainTitle}${plainSummary ? `\n\n${plainSummary}` : ''}\n\nCoffeenadu News (${getKannadaLocationLabel(article.location)})\n\n${SHARE_PROMO_FOOTER}`
+    `*${plainTitle}*\n\nCoffeenadu News (${getKannadaLocationLabel(article.location)})\n\n${SHARE_PROMO_FOOTER}`
   )}`;
   const facebookHref = `https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(articleUrl)}&quote=${encodeURIComponent(
-    `${plainTitle}${plainSummary ? `\n\n${plainSummary}` : ''}\n\n${SHARE_PROMO_FOOTER}`
+    `*${plainTitle}*\n\n${SHARE_PROMO_FOOTER}`
   )}`;
   const xHref = `https://twitter.com/intent/tweet?text=${encodeURIComponent(
     `${plainTitle} — Coffeenadu News`

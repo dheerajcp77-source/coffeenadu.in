@@ -181,16 +181,25 @@ export function resolvePublicOrigin(env: PagesEnv | undefined): string {
   return resolveTrustedOrigin(env?.PUBLIC_SITE_URL, CANONICAL_PUBLIC_ORIGIN).origin;
 }
 
+let cfRuntimeAppsScriptUrl = '';
+let cfRuntimeAppsScriptSecret = '';
+
+function isValidAppsScriptExecUrl(url: string): boolean {
+  return /^https:\/\/script\.google\.com\/macros\/s\/[^/]+\/exec/i.test(url.trim());
+}
+
 export function getAppsScriptConfig(env: PagesEnv | undefined): {
   webAppUrl: string;
   apiSecret: string;
   configured: boolean;
 } {
-  const webAppUrl = (env?.APPS_SCRIPT_WEBAPP_URL || '').trim();
-  const apiSecret = (env?.APPS_SCRIPT_API_SECRET || '').trim();
+  const envUrl = (env?.APPS_SCRIPT_WEBAPP_URL || '').trim();
+  const envSecret = (env?.APPS_SCRIPT_API_SECRET || '').trim();
+  const webAppUrl = isValidAppsScriptExecUrl(envUrl) ? envUrl : cfRuntimeAppsScriptUrl;
+  const apiSecret = envSecret.length >= 12 ? envSecret : cfRuntimeAppsScriptSecret;
   const configured = Boolean(
     webAppUrl &&
-      /^https:\/\/script\.google\.com\/macros\/s\/[^/]+\/exec/i.test(webAppUrl) &&
+      isValidAppsScriptExecUrl(webAppUrl) &&
       apiSecret.length >= 12
   );
   return { webAppUrl, apiSecret, configured };
@@ -1646,21 +1655,21 @@ async function handleEntityOgImage(
 }
 
 // ============================================================================
-// DEFAULT AD SETTINGS (FALLBACK WHEN NODE BACKEND_ORIGIN IS NOT CONNECTED)
+// STANDALONE CLOUDFLARE LOCAL ADS STORE & DEFAULT SETTINGS
 // ============================================================================
 
 function getDefaultAdPlatformSettings() {
   return {
-    rotationMode: 'both',
+    rotationMode: 'both' as const,
     rotationSpeedSeconds: 5,
     maxAdsPerPlacement: 6,
-    rotationOrder: 'priority',
+    rotationOrder: 'priority' as const,
     avoidRepeatInSession: true,
     defaultShareMessage:
       '*{adTitle}*\nAdvertiser ID: {adNumber}\n\n{adDescription}\n\nContact: {contactInfo}\nLocation: {location}\n\nView full advertisement:\n{adUrl}\n\n— CoffeeNadu News Local Ads',
-    customCategories: [],
+    customCategories: [] as string[],
     approvalWorkflowEnabled: false,
-    defaultDisplayFrequency: 'once_per_session',
+    defaultDisplayFrequency: 'once_per_session' as const,
     defaultMaxImpressionsPerVisitor: 0,
     globalPlacementsEnabled: {
       articlePopup: true,
@@ -1672,6 +1681,177 @@ function getDefaultAdPlatformSettings() {
     },
     updatedAt: new Date().toISOString(),
     updatedBy: 'system',
+  };
+}
+
+interface CfStoredAdRecord {
+  id: string;
+  adNumber: string;
+  title: string;
+  advertiserName: string;
+  businessType: string;
+  category: string;
+  description: string;
+  tagline: string;
+  imageUrl: string;
+  imagePath: string;
+  additionalImages: string[];
+  aspectRatioPreset: string;
+  contactPhone: string;
+  whatsappNumber: string;
+  whatsappPrefilledMessage: string;
+  websiteUrl: string;
+  googleMapsLocation: string;
+  address: string;
+  email: string;
+  ctaButtonText: string;
+  ctaActionType: string;
+  placements: {
+    articlePopup: boolean;
+    endOfArticle: boolean;
+    homepagePopup: boolean;
+    websiteEntry: boolean;
+    homepageSection: boolean;
+    articleInline: boolean;
+  };
+  targetCategories: string[];
+  targetLocations: string[];
+  targetArticleIds: string[];
+  targetDevice: string;
+  startDate: string;
+  endDate: string;
+  status: string;
+  approvalStatus: string;
+  priority: string;
+  priorityOrder: number;
+  featuredSponsor: boolean;
+  displayFrequency: string;
+  maxImpressionsPerVisitor: number;
+  popupDelaySeconds: number;
+  popupAutoCloseSeconds: number;
+  allowSkipImmediately: boolean;
+  sponsoredBadgeText: string;
+  paymentStatus: string;
+  priceAmount: number;
+  paymentNotes: string;
+  impressions: number;
+  uniqueImpressions: number;
+  clicks: number;
+  whatsappClicks: number;
+  phoneClicks: number;
+  websiteClicks: number;
+  directionsClicks: number;
+  shareClicks: number;
+  desktopImpressions: number;
+  mobileImpressions: number;
+  placementStats: Record<string, { impressions: number; clicks: number }>;
+  createdAt: string;
+  updatedAt: string;
+  createdBy: string;
+}
+
+let cfAdsList: CfStoredAdRecord[] = [];
+let cfAdSettings = getDefaultAdPlatformSettings();
+let cfAdsHydrated = false;
+
+const CF_ADS_CACHE_KEY = 'https://cf-edge-cache.coffeenadu.invalid/local-ads-store-v1';
+
+async function ensureCfAdsStoreHydrated(): Promise<void> {
+  if (cfAdsHydrated) return;
+  cfAdsHydrated = true;
+  const cache = getDefaultEdgeCache();
+  if (!cache) return;
+  try {
+    const hit = await cache.match(CF_ADS_CACHE_KEY);
+    if (hit) {
+      const parsed = (await hit.json()) as {
+        ads?: CfStoredAdRecord[];
+        settings?: ReturnType<typeof getDefaultAdPlatformSettings>;
+      };
+      if (Array.isArray(parsed?.ads)) {
+        cfAdsList = parsed.ads;
+      }
+      if (parsed?.settings && typeof parsed.settings === 'object') {
+        cfAdSettings = {
+          ...getDefaultAdPlatformSettings(),
+          ...parsed.settings,
+          globalPlacementsEnabled: {
+            ...getDefaultAdPlatformSettings().globalPlacementsEnabled,
+            ...(parsed.settings.globalPlacementsEnabled || {}),
+          },
+        };
+      }
+    }
+  } catch {
+    // Non-fatal
+  }
+}
+
+async function persistCfAdsStore(): Promise<void> {
+  const cache = getDefaultEdgeCache();
+  if (!cache) return;
+  try {
+    await cache.put(
+      CF_ADS_CACHE_KEY,
+      new Response(JSON.stringify({ ads: cfAdsList, settings: cfAdSettings }), {
+        headers: {
+          'content-type': 'application/json',
+          'cache-control': 'public, max-age=2592000',
+        },
+      })
+    );
+  } catch {
+    // Non-fatal
+  }
+}
+
+function computeCfNextAdNumber(): string {
+  let maxNum = 0;
+  for (const ad of cfAdsList) {
+    const m = String(ad.adNumber || '').match(/AD0*(\d+)/i);
+    if (m) {
+      const n = Number(m[1]);
+      if (n > maxNum) maxNum = n;
+    }
+  }
+  return `AD${String(maxNum + 1).padStart(3, '0')}`;
+}
+
+function computeCfEffectiveStatus(ad: CfStoredAdRecord, todayYmd: string): string {
+  if (ad.status === 'draft' || ad.status === 'inactive') return ad.status;
+  if (ad.endDate && ad.endDate < todayYmd) return 'expired';
+  if (ad.startDate && ad.startDate > todayYmd) return 'scheduled';
+  return 'active';
+}
+
+function buildCfAdminAdsPayload() {
+  const todayYmd = new Date().toISOString().slice(0, 10);
+  const enriched = cfAdsList.map((ad) => {
+    const effectiveStatus = computeCfEffectiveStatus(ad, todayYmd);
+    const ctrPct = ad.impressions > 0 ? Math.round((ad.clicks / ad.impressions) * 1000) / 10 : 0;
+    return {
+      ...ad,
+      effectiveStatus,
+      ctrPct,
+    };
+  });
+  const stats = {
+    total: enriched.length,
+    active: enriched.filter((a) => a.effectiveStatus === 'active').length,
+    inactive: enriched.filter((a) => a.effectiveStatus === 'inactive').length,
+    scheduled: enriched.filter((a) => a.effectiveStatus === 'scheduled').length,
+    expired: enriched.filter((a) => a.effectiveStatus === 'expired').length,
+    draft: enriched.filter((a) => a.effectiveStatus === 'draft').length,
+    pendingApproval: enriched.filter((a) => a.approvalStatus === 'pending').length,
+  };
+  return {
+    ok: true,
+    ads: enriched,
+    items: enriched,
+    stats,
+    nextAdNumber: computeCfNextAdNumber(),
+    todayYmd,
+    settings: cfAdSettings,
   };
 }
 
@@ -1818,7 +1998,7 @@ export async function handleApiDirectOnCloudflare(
   const pathname = url.pathname.replace(/\/+$/, '') || '/';
   const method = request.method.toUpperCase();
   const publicOrigin = resolvePublicOrigin(env);
-  const appsScriptCfg = getAppsScriptConfig(env);
+  let appsScriptCfg = getAppsScriptConfig(env);
 
   // 1. Health & Public Storage Status
   if (pathname === '/api/health' && method === 'GET') {
@@ -2092,25 +2272,66 @@ export async function handleApiDirectOnCloudflare(
     }
   }
 
-  // 5. Public Local Ads Safe Fallback (prevents 404 HTML breaking homepage when Express is absent)
+  // 5. Public Local Ads Safe Standalone Endpoints
   if (pathname === '/api/ads' && method === 'GET') {
+    await ensureCfAdsStoreHydrated();
+    const todayYmd = new Date().toISOString().slice(0, 10);
+    const activeAds = cfAdsList
+      .map((ad) => ({
+        ...ad,
+        effectiveStatus: computeCfEffectiveStatus(ad, todayYmd),
+        ctrPct: ad.impressions > 0 ? Math.round((ad.clicks / ad.impressions) * 1000) / 10 : 0,
+      }))
+      .filter((ad) => ad.effectiveStatus === 'active' && ad.approvalStatus === 'approved');
     return jsonResponse({
       ok: true,
-      ads: [],
-      items: [],
-      settings: getDefaultAdPlatformSettings(),
-      todayYmd: new Date().toISOString().slice(0, 10),
-      total: 0,
+      ads: activeAds,
+      items: activeAds,
+      settings: cfAdSettings,
+      todayYmd,
+      total: activeAds.length,
     });
   }
 
   const adTrackMatch = pathname.match(/^\/api\/ads\/([^/]+)\/track$/);
   if (adTrackMatch && method === 'POST') {
-    return jsonResponse({ ok: true, tracked: false });
+    await ensureCfAdsStoreHydrated();
+    const idOrNum = decodeURIComponent(adTrackMatch[1]).trim();
+    const body = await readJsonBody(request);
+    const ad = cfAdsList.find(
+      (a) => a.id === idOrNum || a.adNumber.toLowerCase() === idOrNum.toLowerCase()
+    );
+    if (ad) {
+      if (body.eventType === 'impression') {
+        ad.impressions = (ad.impressions || 0) + 1;
+        ad.uniqueImpressions = (ad.uniqueImpressions || 0) + 1;
+      } else {
+        ad.clicks = (ad.clicks || 0) + 1;
+      }
+      await persistCfAdsStore();
+    }
+    return jsonResponse({ ok: true, tracked: Boolean(ad) });
   }
 
   if (pathname.startsWith('/api/ads/') && method === 'GET') {
-    return jsonErrorResponse(404, 'Advertisement not found.');
+    await ensureCfAdsStoreHydrated();
+    const idOrNum = decodeURIComponent(pathname.slice('/api/ads/'.length)).trim();
+    const todayYmd = new Date().toISOString().slice(0, 10);
+    const ad = cfAdsList.find(
+      (a) => a.id === idOrNum || a.adNumber.toLowerCase() === idOrNum.toLowerCase()
+    );
+    if (!ad) {
+      return jsonErrorResponse(404, 'Advertisement not found.');
+    }
+    return jsonResponse({
+      ok: true,
+      ad: {
+        ...ad,
+        effectiveStatus: computeCfEffectiveStatus(ad, todayYmd),
+        ctrPct: ad.impressions > 0 ? Math.round((ad.clicks / ad.impressions) * 1000) / 10 : 0,
+      },
+      settings: cfAdSettings,
+    });
   }
 
   const feedbackGetMatch = pathname.match(/^\/api\/public\/article-feedback\/([^/]+)$/);
@@ -2331,6 +2552,16 @@ export async function handleApiDirectOnCloudflare(
     }
     const admin = authResult.admin;
 
+    // Allow verified admin requests to supply X-Apps-Script-Url and X-Apps-Script-Secret headers
+    const hdrAppsScriptUrl = (request.headers.get('x-apps-script-url') || '').trim();
+    const hdrAppsScriptSecret = (request.headers.get('x-apps-script-secret') || '').trim();
+    if (isValidAppsScriptExecUrl(hdrAppsScriptUrl) && hdrAppsScriptSecret.length >= 12) {
+      cfRuntimeAppsScriptUrl = hdrAppsScriptUrl;
+      cfRuntimeAppsScriptSecret = hdrAppsScriptSecret;
+    }
+    const activeAppsScriptCfg = getAppsScriptConfig(env);
+    appsScriptCfg = activeAppsScriptCfg;
+
     if (pathname === '/api/admin2/auth/me' && method === 'GET') {
       return jsonResponse({ ok: true, user: admin });
     }
@@ -2360,13 +2591,13 @@ export async function handleApiDirectOnCloudflare(
         lastFlushAt: null as string | null,
       };
 
-      if (!appsScriptCfg.configured) {
+      if (!activeAppsScriptCfg.configured) {
         return jsonResponse({
           ok: true,
           configured: false,
           status: 'not_configured',
           message:
-            'Add APPS_SCRIPT_WEBAPP_URL and APPS_SCRIPT_API_SECRET in Cloudflare Pages -> Settings -> Environment variables (or set BACKEND_ORIGIN to your live Node server).',
+            'Paste your Apps Script Web App URL and API Secret below (or add APPS_SCRIPT_WEBAPP_URL and APPS_SCRIPT_API_SECRET in Cloudflare Pages Environment Variables) to activate Google Sheets & Drive backups.',
           quota: baseQuota,
         });
       }
@@ -2389,6 +2620,77 @@ export async function handleApiDirectOnCloudflare(
         });
       } catch (err) {
         const msg = err instanceof Error ? err.message : 'Unable to reach Apps Script Web App.';
+        return jsonResponse(
+          {
+            ok: false,
+            configured: true,
+            status: 'error',
+            error: msg,
+            quota: {
+              ...baseQuota,
+              lastError: msg,
+            },
+          },
+          502
+        );
+      }
+    }
+
+    if (pathname === '/api/storage/admin/configure' && method === 'POST') {
+      const body = await readJsonBody(request);
+      const webAppUrl = typeof body.webAppUrl === 'string' ? body.webAppUrl.trim() : '';
+      const apiSecret = typeof body.apiSecret === 'string' ? body.apiSecret.trim() : '';
+
+      if (!isValidAppsScriptExecUrl(webAppUrl)) {
+        return jsonErrorResponse(
+          400,
+          'Valid Apps Script Web App URL (https://script.google.com/macros/s/.../exec) is required.'
+        );
+      }
+      if (apiSecret.length < 12) {
+        return jsonErrorResponse(400, 'Apps Script API Secret must be at least 12 characters.');
+      }
+
+      cfRuntimeAppsScriptUrl = webAppUrl;
+      cfRuntimeAppsScriptSecret = apiSecret;
+      await invalidateEdgeReadCaches();
+
+      const baseQuota = {
+        dayKey: new Date().toISOString().slice(0, 10),
+        appsScriptCallsToday: 1,
+        cacheHitsToday: 0,
+        cacheMissesToday: 0,
+        batchedViewFlushesToday: 0,
+        totalViewsAggregatedToday: 0,
+        driveProxyFetchesToday: 0,
+        driveProxyCacheHitsToday: 0,
+        pendingViewsCount: 0,
+        cachedDriveImagesCount: 0,
+        cacheHitRatePct: 100,
+        dailyFreeLimitCalls: 20000,
+        lastAppsScriptSuccessAt: new Date().toISOString(),
+        lastError: null as string | null,
+        lastFlushAt: null as string | null,
+      };
+
+      try {
+        const stats = await callAppsScriptPost<Record<string, unknown>>(
+          env,
+          'getAdminStats',
+          {},
+          admin.email
+        );
+        return jsonResponse({
+          ...stats,
+          ok: stats?.ok !== false,
+          configured: true,
+          quota: baseQuota,
+        });
+      } catch (err) {
+        const msg =
+          err instanceof Error
+            ? err.message
+            : 'Unable to reach Apps Script Web App with supplied credentials.';
         return jsonResponse(
           {
             ok: false,
@@ -3270,66 +3572,355 @@ export async function handleApiDirectOnCloudflare(
     }
 
     if (pathname === '/api/admin2/ads' && method === 'GET') {
+      await ensureCfAdsStoreHydrated();
+      return jsonResponse(buildCfAdminAdsPayload());
+    }
+
+    if (pathname === '/api/admin2/ads' && method === 'POST') {
+      await ensureCfAdsStoreHydrated();
+      const body = await readJsonBody(request);
+      const todayYmd = new Date().toISOString().slice(0, 10);
+      const nowIso = new Date().toISOString();
+      const adNumber = computeCfNextAdNumber();
+      const rawPlacements =
+        body.placements && typeof body.placements === 'object'
+          ? (body.placements as Record<string, unknown>)
+          : {};
+      const newAd: CfStoredAdRecord = {
+        id: `cf-ad-${crypto.randomUUID()}`,
+        adNumber,
+        title: String(body.title || 'Untitled Advertisement').trim(),
+        advertiserName: String(body.advertiserName || '').trim(),
+        businessType: String(body.businessType || '').trim(),
+        category: String(body.category || 'Local Business').trim(),
+        description: String(body.description || '').trim(),
+        tagline: String(body.tagline || '').trim(),
+        imageUrl: String(body.imageUrl || '').trim(),
+        imagePath: String(body.imagePath || '').trim(),
+        additionalImages: Array.isArray(body.additionalImages)
+          ? body.additionalImages.map(String)
+          : [],
+        aspectRatioPreset: String(body.aspectRatioPreset || 'banner_16_9'),
+        contactPhone: String(body.contactPhone || '').trim(),
+        whatsappNumber: String(body.whatsappNumber || '').trim(),
+        whatsappPrefilledMessage: String(body.whatsappPrefilledMessage || '').trim(),
+        websiteUrl: String(body.websiteUrl || '').trim(),
+        googleMapsLocation: String(body.googleMapsLocation || '').trim(),
+        address: String(body.address || '').trim(),
+        email: String(body.email || '').trim(),
+        ctaButtonText: String(body.ctaButtonText || 'Contact on WhatsApp').trim(),
+        ctaActionType: String(body.ctaActionType || 'whatsapp').trim(),
+        placements: {
+          articlePopup: Boolean(rawPlacements.articlePopup),
+          endOfArticle: rawPlacements.endOfArticle !== false,
+          homepagePopup: Boolean(rawPlacements.homepagePopup),
+          websiteEntry: Boolean(rawPlacements.websiteEntry),
+          homepageSection: rawPlacements.homepageSection !== false,
+          articleInline: Boolean(rawPlacements.articleInline),
+        },
+        targetCategories: Array.isArray(body.targetCategories)
+          ? body.targetCategories.map(String)
+          : [],
+        targetLocations: Array.isArray(body.targetLocations)
+          ? body.targetLocations.map(String)
+          : [],
+        targetArticleIds: Array.isArray(body.targetArticleIds)
+          ? body.targetArticleIds.map(String)
+          : [],
+        targetDevice: String(body.targetDevice || 'all'),
+        startDate: String(body.startDate || todayYmd),
+        endDate: String(body.endDate || '2027-12-31'),
+        status: String(body.status || 'active'),
+        approvalStatus: String(body.approvalStatus || 'approved'),
+        priority: String(body.priority || 'normal'),
+        priorityOrder: Number(body.priorityOrder) || 10,
+        featuredSponsor: Boolean(body.featuredSponsor),
+        displayFrequency: String(body.displayFrequency || 'once_per_session'),
+        maxImpressionsPerVisitor: Number(body.maxImpressionsPerVisitor) || 0,
+        popupDelaySeconds: Number(body.popupDelaySeconds) || 2,
+        popupAutoCloseSeconds: Number(body.popupAutoCloseSeconds) || 0,
+        allowSkipImmediately: body.allowSkipImmediately !== false,
+        sponsoredBadgeText: String(body.sponsoredBadgeText || 'Sponsored · ಸ್ಥಳೀಯ ಜಾಹೀರಾತು'),
+        paymentStatus: String(body.paymentStatus || 'paid'),
+        priceAmount: Number(body.priceAmount) || 0,
+        paymentNotes: String(body.paymentNotes || ''),
+        impressions: 0,
+        uniqueImpressions: 0,
+        clicks: 0,
+        whatsappClicks: 0,
+        phoneClicks: 0,
+        websiteClicks: 0,
+        directionsClicks: 0,
+        shareClicks: 0,
+        desktopImpressions: 0,
+        mobileImpressions: 0,
+        placementStats: {},
+        createdAt: nowIso,
+        updatedAt: nowIso,
+        createdBy: admin.email,
+      };
+      cfAdsList.unshift(newAd);
+      await persistCfAdsStore();
       return jsonResponse({
         ok: true,
-        ads: [],
-        items: [],
-        stats: {
-          total: 0,
-          active: 0,
-          inactive: 0,
-          scheduled: 0,
-          expired: 0,
-          draft: 0,
-          pendingApproval: 0,
+        ad: {
+          ...newAd,
+          effectiveStatus: computeCfEffectiveStatus(newAd, todayYmd),
+          ctrPct: 0,
         },
-        nextAdNumber: 'AD001',
-        todayYmd: new Date().toISOString().slice(0, 10),
-        settings: getDefaultAdPlatformSettings(),
       });
     }
 
     if (pathname === '/api/admin2/ads/settings' && method === 'GET') {
+      await ensureCfAdsStoreHydrated();
       return jsonResponse({
         ok: true,
-        settings: getDefaultAdPlatformSettings(),
+        settings: cfAdSettings,
+      });
+    }
+
+    if (pathname === '/api/admin2/ads/settings' && method === 'PUT') {
+      await ensureCfAdsStoreHydrated();
+      const body = await readJsonBody(request);
+      const rawGlobal =
+        body.globalPlacementsEnabled && typeof body.globalPlacementsEnabled === 'object'
+          ? (body.globalPlacementsEnabled as Record<string, unknown>)
+          : {};
+      cfAdSettings = {
+        ...cfAdSettings,
+        ...body,
+        customCategories: Array.isArray(body.customCategories)
+          ? body.customCategories.map(String)
+          : cfAdSettings.customCategories,
+        globalPlacementsEnabled: {
+          ...cfAdSettings.globalPlacementsEnabled,
+          ...(Object.keys(rawGlobal).length > 0
+            ? {
+                articlePopup: Boolean(rawGlobal.articlePopup),
+                endOfArticle: Boolean(rawGlobal.endOfArticle),
+                homepagePopup: Boolean(rawGlobal.homepagePopup),
+                websiteEntry: Boolean(rawGlobal.websiteEntry),
+                homepageSection: Boolean(rawGlobal.homepageSection),
+                articleInline: Boolean(rawGlobal.articleInline),
+              }
+            : {}),
+        },
+        updatedAt: new Date().toISOString(),
+        updatedBy: admin.email,
+      };
+      await persistCfAdsStore();
+      return jsonResponse({
+        ok: true,
+        settings: cfAdSettings,
+      });
+    }
+
+    if (pathname === '/api/admin2/ads/upload-image' && method === 'POST') {
+      const body = await readJsonBody(request);
+      const dataUrl = typeof body.dataUrl === 'string' ? body.dataUrl.trim() : '';
+      if (!dataUrl.startsWith('data:image/')) {
+        return jsonErrorResponse(400, 'Valid image dataUrl is required.');
+      }
+      return jsonResponse({
+        ok: true,
+        imageUrl: dataUrl,
+        imagePath: `inline-${Date.now()}`,
       });
     }
 
     if (pathname === '/api/admin2/ads/analytics' && method === 'GET') {
+      await ensureCfAdsStoreHydrated();
       const rawRange = url.searchParams.get('range') || 'weekly';
       const range =
         rawRange === 'daily' || rawRange === 'weekly' || rawRange === 'monthly' || rawRange === 'all'
           ? rawRange
           : 'weekly';
+      const todayYmd = new Date().toISOString().slice(0, 10);
+      const perAd = cfAdsList.map((ad) => ({
+        id: ad.id,
+        adNumber: ad.adNumber,
+        title: ad.title,
+        advertiserName: ad.advertiserName,
+        category: ad.category,
+        effectiveStatus: computeCfEffectiveStatus(ad, todayYmd),
+        impressions: ad.impressions || 0,
+        uniqueImpressions: ad.uniqueImpressions || 0,
+        clicks: ad.clicks || 0,
+        ctrPct: ad.impressions > 0 ? Math.round((ad.clicks / ad.impressions) * 1000) / 10 : 0,
+        whatsappClicks: ad.whatsappClicks || 0,
+        phoneClicks: ad.phoneClicks || 0,
+        websiteClicks: ad.websiteClicks || 0,
+        directionsClicks: ad.directionsClicks || 0,
+        shareClicks: ad.shareClicks || 0,
+        desktopImpressions: ad.desktopImpressions || 0,
+        mobileImpressions: ad.mobileImpressions || 0,
+      }));
+      const totalImpressions = perAd.reduce((acc, a) => acc + a.impressions, 0);
+      const totalClicks = perAd.reduce((acc, a) => acc + a.clicks, 0);
       return jsonResponse({
         ok: true,
         range,
         totals: {
-          impressions: 0,
-          uniqueVisitors: 0,
-          clicks: 0,
-          ctrPct: 0,
-          whatsappClicks: 0,
-          phoneClicks: 0,
-          websiteClicks: 0,
-          directionsClicks: 0,
-          shareClicks: 0,
-          desktopImpressions: 0,
-          mobileImpressions: 0,
+          impressions: totalImpressions,
+          uniqueVisitors: perAd.reduce((acc, a) => acc + a.uniqueImpressions, 0),
+          clicks: totalClicks,
+          ctrPct:
+            totalImpressions > 0 ? Math.round((totalClicks / totalImpressions) * 1000) / 10 : 0,
+          whatsappClicks: perAd.reduce((acc, a) => acc + a.whatsappClicks, 0),
+          phoneClicks: perAd.reduce((acc, a) => acc + a.phoneClicks, 0),
+          websiteClicks: perAd.reduce((acc, a) => acc + a.websiteClicks, 0),
+          directionsClicks: perAd.reduce((acc, a) => acc + a.directionsClicks, 0),
+          shareClicks: perAd.reduce((acc, a) => acc + a.shareClicks, 0),
+          desktopImpressions: perAd.reduce((acc, a) => acc + a.desktopImpressions, 0),
+          mobileImpressions: perAd.reduce((acc, a) => acc + a.mobileImpressions, 0),
         },
         byPlacement: {},
         series: [],
-        perAd: [],
-        bestPerformingAd: null,
+        perAd,
+        bestPerformingAd: perAd[0] || null,
       });
     }
 
-    if (pathname.startsWith('/api/admin2/ads')) {
-      return jsonErrorResponse(
-        503,
-        'Local Advertisements storage requires your BACKEND_ORIGIN Node server URL in Cloudflare Pages Environment Variables.'
-      );
+    const adActionMatch = pathname.match(
+      /^\/api\/admin2\/ads\/([^/]+)(?:\/(duplicate|status|placements|approval))?$/
+    );
+    if (adActionMatch) {
+      await ensureCfAdsStoreHydrated();
+      const targetId = decodeURIComponent(adActionMatch[1]).trim();
+      const subAction = adActionMatch[2] || '';
+      const todayYmd = new Date().toISOString().slice(0, 10);
+      const idx = cfAdsList.findIndex((a) => a.id === targetId || a.adNumber === targetId);
+      if (idx === -1) {
+        return jsonErrorResponse(404, 'Advertisement not found.');
+      }
+
+      if (!subAction && method === 'DELETE') {
+        cfAdsList.splice(idx, 1);
+        await persistCfAdsStore();
+        return jsonResponse({ ok: true });
+      }
+
+      if (!subAction && method === 'PUT') {
+        const body = await readJsonBody(request);
+        const existing = cfAdsList[idx];
+        const updated: CfStoredAdRecord = {
+          ...existing,
+          ...body,
+          id: existing.id,
+          adNumber: existing.adNumber,
+          placements:
+            body.placements && typeof body.placements === 'object'
+              ? { ...existing.placements, ...(body.placements as Record<string, boolean>) }
+              : existing.placements,
+          updatedAt: new Date().toISOString(),
+        };
+        cfAdsList[idx] = updated;
+        await persistCfAdsStore();
+        return jsonResponse({
+          ok: true,
+          ad: {
+            ...updated,
+            effectiveStatus: computeCfEffectiveStatus(updated, todayYmd),
+            ctrPct:
+              updated.impressions > 0
+                ? Math.round((updated.clicks / updated.impressions) * 1000) / 10
+                : 0,
+          },
+        });
+      }
+
+      if (subAction === 'duplicate' && method === 'POST') {
+        const src = cfAdsList[idx];
+        const nowIso = new Date().toISOString();
+        const dup: CfStoredAdRecord = {
+          ...src,
+          id: `cf-ad-${crypto.randomUUID()}`,
+          adNumber: computeCfNextAdNumber(),
+          title: `${src.title} (Copy)`,
+          status: 'draft',
+          impressions: 0,
+          uniqueImpressions: 0,
+          clicks: 0,
+          createdAt: nowIso,
+          updatedAt: nowIso,
+        };
+        cfAdsList.unshift(dup);
+        await persistCfAdsStore();
+        return jsonResponse({
+          ok: true,
+          ad: {
+            ...dup,
+            effectiveStatus: computeCfEffectiveStatus(dup, todayYmd),
+            ctrPct: 0,
+          },
+        });
+      }
+
+      if (subAction === 'status' && method === 'PATCH') {
+        const body = await readJsonBody(request);
+        if (typeof body.status === 'string') {
+          cfAdsList[idx].status = body.status;
+          cfAdsList[idx].updatedAt = new Date().toISOString();
+          await persistCfAdsStore();
+        }
+        const updated = cfAdsList[idx];
+        return jsonResponse({
+          ok: true,
+          ad: {
+            ...updated,
+            effectiveStatus: computeCfEffectiveStatus(updated, todayYmd),
+            ctrPct:
+              updated.impressions > 0
+                ? Math.round((updated.clicks / updated.impressions) * 1000) / 10
+                : 0,
+          },
+        });
+      }
+
+      if (subAction === 'placements' && method === 'PATCH') {
+        const body = await readJsonBody(request);
+        if (body.placements && typeof body.placements === 'object') {
+          cfAdsList[idx].placements = {
+            ...cfAdsList[idx].placements,
+            ...(body.placements as Record<string, boolean>),
+          };
+          cfAdsList[idx].updatedAt = new Date().toISOString();
+          await persistCfAdsStore();
+        }
+        const updated = cfAdsList[idx];
+        return jsonResponse({
+          ok: true,
+          ad: {
+            ...updated,
+            effectiveStatus: computeCfEffectiveStatus(updated, todayYmd),
+            ctrPct:
+              updated.impressions > 0
+                ? Math.round((updated.clicks / updated.impressions) * 1000) / 10
+                : 0,
+          },
+        });
+      }
+
+      if (subAction === 'approval' && method === 'PATCH') {
+        const body = await readJsonBody(request);
+        if (typeof body.approvalStatus === 'string') {
+          cfAdsList[idx].approvalStatus = body.approvalStatus;
+          cfAdsList[idx].updatedAt = new Date().toISOString();
+          await persistCfAdsStore();
+        }
+        const updated = cfAdsList[idx];
+        return jsonResponse({
+          ok: true,
+          ad: {
+            ...updated,
+            effectiveStatus: computeCfEffectiveStatus(updated, todayYmd),
+            ctrPct:
+              updated.impressions > 0
+                ? Math.round((updated.clicks / updated.impressions) * 1000) / 10
+                : 0,
+          },
+        });
+      }
     }
 
     if (pathname === '/api/admin2/ai/assist' && method === 'POST') {

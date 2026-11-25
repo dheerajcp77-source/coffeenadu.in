@@ -231,12 +231,50 @@ export function mapSheetsItemToEvent(item: RawSheetsEventItem): ProgramEvent {
   };
 }
 
+const APPS_SCRIPT_URL_STORAGE_KEY = 'cn_admin_apps_script_url_v1';
+const APPS_SCRIPT_SECRET_STORAGE_KEY = 'cn_admin_apps_script_secret_v1';
+
+export function getSavedAppsScriptCredentials(): { webAppUrl: string; apiSecret: string } {
+  if (typeof window === 'undefined') return { webAppUrl: '', apiSecret: '' };
+  try {
+    return {
+      webAppUrl: (window.localStorage.getItem(APPS_SCRIPT_URL_STORAGE_KEY) || '').trim(),
+      apiSecret: (window.localStorage.getItem(APPS_SCRIPT_SECRET_STORAGE_KEY) || '').trim(),
+    };
+  } catch {
+    return { webAppUrl: '', apiSecret: '' };
+  }
+}
+
+export function setSavedAppsScriptCredentials(webAppUrl: string, apiSecret: string): void {
+  if (typeof window === 'undefined') return;
+  try {
+    const cleanUrl = webAppUrl.trim();
+    const cleanSecret = apiSecret.trim();
+    if (cleanUrl) window.localStorage.setItem(APPS_SCRIPT_URL_STORAGE_KEY, cleanUrl);
+    else window.localStorage.removeItem(APPS_SCRIPT_URL_STORAGE_KEY);
+    if (cleanSecret) window.localStorage.setItem(APPS_SCRIPT_SECRET_STORAGE_KEY, cleanSecret);
+    else window.localStorage.removeItem(APPS_SCRIPT_SECRET_STORAGE_KEY);
+    cachedStatus = null;
+  } catch {
+    // Ignore storage errors
+  }
+}
+
 async function getAdminAuthHeaders(): Promise<Record<string, string>> {
+  const saved = getSavedAppsScriptCredentials();
+  const extra: Record<string, string> = {};
+  if (saved.webAppUrl && saved.apiSecret) {
+    extra['X-Apps-Script-Url'] = saved.webAppUrl;
+    extra['X-Apps-Script-Secret'] = saved.apiSecret;
+  }
+
   const admin2Token = getAdmin2MemoryToken();
   if (admin2Token) {
     return {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${admin2Token}`,
+      ...extra,
     };
   }
   const user = auth.currentUser;
@@ -247,7 +285,28 @@ async function getAdminAuthHeaders(): Promise<Record<string, string>> {
   return {
     'Content-Type': 'application/json',
     Authorization: `Bearer ${token}`,
+    ...extra,
   };
+}
+
+export async function saveAppsScriptConfigViaServer(input: {
+  webAppUrl: string;
+  apiSecret: string;
+}): Promise<AdminStorageHealthResponse> {
+  setSavedAppsScriptCredentials(input.webAppUrl, input.apiSecret);
+  const headers = await getAdminAuthHeaders();
+  const resp = await fetch('/api/storage/admin/configure', {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({
+      webAppUrl: input.webAppUrl.trim(),
+      apiSecret: input.apiSecret.trim(),
+    }),
+  });
+  return readJsonSafe<AdminStorageHealthResponse>(
+    resp,
+    'Unable to save and verify Google Apps Script connection.'
+  );
 }
 
 export async function fetchNewsPageFromSheets(options: {

@@ -250,9 +250,42 @@ export function Admin2AdsSection({
     setError('');
     try {
       const res = await fetchAdminAds();
-      setAds(res.ads);
-      setStats(res.stats);
-      if (res.settings) setSettings(res.settings);
+      const rawAds = Array.isArray(res.ads)
+        ? res.ads
+        : Array.isArray((res as unknown as { items?: Advertisement[] }).items)
+        ? (res as unknown as { items: Advertisement[] }).items
+        : [];
+      setAds(rawAds);
+
+      const defaultStats: AdvertisementStats = {
+        total: rawAds.length,
+        active: 0,
+        inactive: 0,
+        scheduled: 0,
+        expired: 0,
+        draft: 0,
+        pendingApproval: 0,
+      };
+      setStats(
+        res.stats && typeof res.stats === 'object'
+          ? { ...defaultStats, ...res.stats }
+          : defaultStats
+      );
+
+      if (res.settings && typeof res.settings === 'object') {
+        const defaultSettings = createDefaultAdPlatformSettings();
+        setSettings({
+          ...defaultSettings,
+          ...res.settings,
+          customCategories: Array.isArray(res.settings.customCategories)
+            ? res.settings.customCategories
+            : defaultSettings.customCategories,
+          globalPlacementsEnabled: {
+            ...defaultSettings.globalPlacementsEnabled,
+            ...(res.settings.globalPlacementsEnabled || {}),
+          },
+        });
+      }
       if (res.todayYmd) setTodayYmd(res.todayYmd);
       if (res.nextAdNumber) {
         setNextAdNumber(res.nextAdNumber);
@@ -273,7 +306,29 @@ export function Admin2AdsSection({
     setLoadingAnalytics(true);
     try {
       const data = await fetchAdminAdAnalytics(analyticsRange, analyticsAdId || undefined);
-      setAnalyticsData(data);
+      const safeTotals = {
+        impressions: Number(data?.totals?.impressions) || 0,
+        uniqueVisitors: Number(data?.totals?.uniqueVisitors) || 0,
+        clicks: Number(data?.totals?.clicks) || 0,
+        ctrPct: Number(data?.totals?.ctrPct) || 0,
+        whatsappClicks: Number(data?.totals?.whatsappClicks) || 0,
+        phoneClicks: Number(data?.totals?.phoneClicks) || 0,
+        websiteClicks: Number(data?.totals?.websiteClicks) || 0,
+        directionsClicks: Number(data?.totals?.directionsClicks) || 0,
+        shareClicks: Number(data?.totals?.shareClicks) || 0,
+        desktopImpressions: Number(data?.totals?.desktopImpressions) || 0,
+        mobileImpressions: Number(data?.totals?.mobileImpressions) || 0,
+      };
+      setAnalyticsData({
+        ok: true,
+        range: data?.range || analyticsRange,
+        totals: safeTotals,
+        byPlacement:
+          data?.byPlacement && typeof data.byPlacement === 'object' ? data.byPlacement : {},
+        series: Array.isArray(data?.series) ? data.series : [],
+        perAd: Array.isArray(data?.perAd) ? data.perAd : [],
+        bestPerformingAd: data?.bestPerformingAd || null,
+      });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unable to load advertisement analytics.');
     } finally {
@@ -288,8 +343,8 @@ export function Admin2AdsSection({
   }, [subTab, loadAnalytics]);
 
   const allCategories = useMemo(
-    () => mergeAdCategories(settings.customCategories),
-    [settings.customCategories]
+    () => mergeAdCategories(Array.isArray(settings?.customCategories) ? settings.customCategories : []),
+    [settings?.customCategories]
   );
 
   const filteredAds = useMemo(() => {

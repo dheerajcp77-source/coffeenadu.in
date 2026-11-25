@@ -273,15 +273,19 @@ export function buildKannadaArticleShareText(
   articleUrl: string,
   locationLabel?: string
 ): string {
-  const plainTitle = stripRichTextToPlainText(article.titleKannada);
-  const plainSummary = truncateShareSummary(stripRichTextToPlainText(article.summaryKannada), 220);
+  const plainTitle = stripRichTextToPlainText(article.titleKannada)
+    .replace(/^\*+|\*+$/g, '')
+    .trim();
   const place = (locationLabel || article.location || 'ಕೊಪ್ಪ').trim();
 
-  const lines: string[] = [plainTitle];
-  if (plainSummary && plainSummary !== plainTitle) {
-    lines.push('', plainSummary);
-  }
-  lines.push('', `📍 ${place} · Coffeenadu News`, articleUrl, '', SHARE_PROMO_FOOTER);
+  const lines: string[] = [
+    `*${plainTitle}*`,
+    '',
+    `📍 ${place} · Coffeenadu News`,
+    articleUrl,
+    '',
+    SHARE_PROMO_FOOTER,
+  ];
   return lines.join('\n');
 }
 

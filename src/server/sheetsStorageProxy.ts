@@ -165,12 +165,21 @@ function resolveCacheDirs(baseDataDir: string) {
   }
 }
 
+let runtimeAppsScriptUrl = '';
+let runtimeAppsScriptSecret = '';
+
+function isValidAppsScriptExecUrl(url: string): boolean {
+  return /^https:\/\/script\.google\.com\/macros\/s\/[^/]+\/exec/i.test(url.trim());
+}
+
 function getAppsScriptConfig() {
-  const webAppUrl = (process.env.APPS_SCRIPT_WEBAPP_URL || '').trim();
-  const apiSecret = (process.env.APPS_SCRIPT_API_SECRET || '').trim();
+  const envUrl = (process.env.APPS_SCRIPT_WEBAPP_URL || '').trim();
+  const envSecret = (process.env.APPS_SCRIPT_API_SECRET || '').trim();
+  const webAppUrl = isValidAppsScriptExecUrl(envUrl) ? envUrl : runtimeAppsScriptUrl;
+  const apiSecret = envSecret.length >= 12 ? envSecret : runtimeAppsScriptSecret;
   const configured = Boolean(
     webAppUrl &&
-      /^https:\/\/script\.google\.com\/macros\/s\/[^/]+\/exec/i.test(webAppUrl) &&
+      isValidAppsScriptExecUrl(webAppUrl) &&
       apiSecret.length >= 12
   );
   return { webAppUrl, apiSecret, configured };
@@ -1315,7 +1324,15 @@ export class SheetsStorageManager {
 
   public mountRoutes(app: Express): void {
     const verifyAdmin = (req: AdminRequest, res: Response, next: NextFunction) => {
-      void this.verifyAdminToken(req, res, next);
+      void this.verifyAdminToken(req, res, () => {
+        const hdrUrl = (req.header('x-apps-script-url') || '').trim();
+        const hdrSecret = (req.header('x-apps-script-secret') || '').trim();
+        if (isValidAppsScriptExecUrl(hdrUrl) && hdrSecret.length >= 12) {
+          runtimeAppsScriptUrl = hdrUrl;
+          runtimeAppsScriptSecret = hdrSecret;
+        }
+        next();
+      });
     };
 
     // 1. Public storage backend mode & health status (no secrets exposed)
@@ -1659,6 +1676,69 @@ export class SheetsStorageManager {
           configured: true,
           status: 'error',
           error: err instanceof Error ? err.message : 'Unable to reach Apps Script Web App.',
+          quota: baseQuota,
+        });
+      }
+    });
+
+    app.post('/api/storage/admin/configure', verifyAdmin, async (req: AdminRequest, res) => {
+      const body = req.body && typeof req.body === 'object' ? req.body : {};
+      const webAppUrl = typeof body.webAppUrl === 'string' ? body.webAppUrl.trim() : '';
+      const apiSecret = typeof body.apiSecret === 'string' ? body.apiSecret.trim() : '';
+
+      if (!isValidAppsScriptExecUrl(webAppUrl)) {
+        res.status(400).json({
+          ok: false,
+          error: 'Valid Apps Script Web App URL (https://script.google.com/macros/s/.../exec) is required.',
+        });
+        return;
+      }
+      if (apiSecret.length < 12) {
+        res.status(400).json({
+          ok: false,
+          error: 'Apps Script API Secret must be at least 12 characters.',
+        });
+        return;
+      }
+
+      runtimeAppsScriptUrl = webAppUrl;
+      runtimeAppsScriptSecret = apiSecret;
+      this.invalidateReadCaches();
+
+      this.rollDayIfNeeded();
+      const baseQuota = {
+        ...this.telemetry,
+        pendingViewsCount: this.getPendingViewsCount(),
+        cachedDriveImagesCount: this.getCachedDriveFileCount(),
+        cacheHitRatePct:
+          this.telemetry.cacheHitsToday + this.telemetry.cacheMissesToday > 0
+            ? Math.round(
+                (this.telemetry.cacheHitsToday /
+                  (this.telemetry.cacheHitsToday + this.telemetry.cacheMissesToday)) *
+                  100
+              )
+            : 100,
+        dailyFreeLimitCalls: 20000,
+      };
+
+      try {
+        const stats = await this.callAppsScriptPost<Record<string, unknown>>(
+          'getAdminStats',
+          {},
+          req.verifiedAdmin?.email
+        );
+        res.json({
+          ...stats,
+          ok: true,
+          configured: true,
+          quota: baseQuota,
+        });
+      } catch (err) {
+        res.status(502).json({
+          ok: false,
+          configured: true,
+          status: 'error',
+          error: err instanceof Error ? err.message : 'Unable to reach Apps Script Web App with supplied credentials.',
           quota: baseQuota,
         });
       }

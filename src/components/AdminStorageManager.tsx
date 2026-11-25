@@ -43,8 +43,10 @@ import {
   fetchAvailableBackupsViaServer,
   fetchStorageAdminHealth,
   flushPendingViewsViaServer,
+  getSavedAppsScriptCredentials,
   previewBackupViaServer,
   restoreBackupViaServer,
+  saveAppsScriptConfigViaServer,
   triggerBackupNowViaServer,
   type AdminStorageHealthResponse,
   type BackupListItem,
@@ -126,11 +128,19 @@ export function AdminStorageManager({
   const pauseRequestedRef = useRef(false);
   const jsonFileInputRef = useRef<HTMLInputElement | null>(null);
 
-  // Apps Script code copy helper
+  // Apps Script code copy & runtime connection helper
   const [copiedCode, setCopiedCode] = useState(false);
   const [loadingCode, setLoadingCode] = useState(false);
+  const [showConfigForm, setShowConfigForm] = useState(false);
+  const [appsScriptUrlInput, setAppsScriptUrlInput] = useState(
+    () => getSavedAppsScriptCredentials().webAppUrl
+  );
+  const [appsScriptSecretInput, setAppsScriptSecretInput] = useState(
+    () => getSavedAppsScriptCredentials().apiSecret
+  );
+  const [savingConfig, setSavingConfig] = useState(false);
 
-  const handleCheckConnection = async () => {
+  const handleCheckConnection = async (): Promise<AdminStorageHealthResponse | null> => {
     setCheckingConnection(true);
     setErrorMsg('');
     setFeedback('');
@@ -142,22 +152,62 @@ export function AdminStorageManager({
       } else if (!res.configured) {
         setFeedback(
           res.message ||
-            'Apps Script Web App secrets are not configured yet — running safely on fallback storage.'
+            'Apps Script Web App secrets are not configured yet — paste your Apps Script URL and Secret below to connect.'
         );
       } else if (res.error) {
         setErrorMsg(res.error);
       }
+      return res;
     } catch (err) {
       setErrorMsg(err instanceof Error ? err.message : 'Unable to check storage connection.');
+      return null;
     } finally {
       setCheckingConnection(false);
     }
   };
 
+  const handleSaveAppsScriptConfig = async () => {
+    const cleanUrl = appsScriptUrlInput.trim();
+    const cleanSecret = appsScriptSecretInput.trim();
+    if (!cleanUrl || !/^https:\/\/script\.google\.com\/macros\/s\/[^/]+\/exec/i.test(cleanUrl)) {
+      setErrorMsg(
+        'Please enter a valid Google Apps Script Web App URL (https://script.google.com/macros/s/.../exec).'
+      );
+      return;
+    }
+    if (cleanSecret.length < 12) {
+      setErrorMsg('Please enter your Apps Script API Secret (at least 12 characters).');
+      return;
+    }
+    setSavingConfig(true);
+    setErrorMsg('');
+    setFeedback('');
+    try {
+      const res = await saveAppsScriptConfigViaServer({
+        webAppUrl: cleanUrl,
+        apiSecret: cleanSecret,
+      });
+      setHealth(res);
+      if (res.configured && res.ok) {
+        setShowConfigForm(false);
+        setFeedback('Google Apps Script connected and verified! Google Sheets & Drive backups are now active.');
+        if (autoOpenBackups) {
+          await handleOpenRestorePanel(res);
+        }
+      } else {
+        setErrorMsg(res.error || res.message || 'Could not verify Apps Script connection.');
+      }
+    } catch (err) {
+      setErrorMsg(err instanceof Error ? err.message : 'Unable to connect Google Apps Script.');
+    } finally {
+      setSavingConfig(false);
+    }
+  };
+
   useEffect(() => {
-    void handleCheckConnection().then(() => {
-      if (autoOpenBackups) {
-        void handleOpenRestorePanel();
+    void handleCheckConnection().then((res) => {
+      if (autoOpenBackups && res?.configured) {
+        void handleOpenRestorePanel(res);
       }
     });
     void loadMigrationCheckpoint()
@@ -168,8 +218,13 @@ export function AdminStorageManager({
   }, [autoOpenBackups]);
 
   const handleCreateBackupNow = async () => {
-    if (!health?.configured) {
-      setErrorMsg('Connect Google Apps Script first before creating Drive backups.');
+    let currentHealth = health;
+    if (!currentHealth) {
+      currentHealth = await handleCheckConnection();
+    }
+    if (!currentHealth?.configured) {
+      setShowConfigForm(true);
+      setErrorMsg('Connect Google Apps Script below before creating Drive backups.');
       return;
     }
     setCreatingBackup(true);
@@ -180,9 +235,9 @@ export function AdminStorageManager({
       setFeedback(
         `Backup created successfully: ${res.jsonFileName || 'JSON'} & ${res.csvFileName || 'CSV'} (${res.articleCount ?? 0} articles, ${res.eventCount ?? 0} events).`
       );
-      await handleCheckConnection();
+      const refreshed = await handleCheckConnection();
       if (restorePanelOpen) {
-        await handleOpenRestorePanel();
+        await handleOpenRestorePanel(refreshed);
       }
     } catch (err) {
       setErrorMsg(err instanceof Error ? err.message : 'Failed to create backup.');
@@ -274,9 +329,14 @@ export function AdminStorageManager({
     }
   };
 
-  const handleOpenRestorePanel = async () => {
-    if (!health?.configured) {
-      setErrorMsg('Connect Google Apps Script first to browse and restore Drive backups.');
+  const handleOpenRestorePanel = async (knownHealth?: AdminStorageHealthResponse | null) => {
+    let currentHealth = knownHealth ?? health;
+    if (!currentHealth) {
+      currentHealth = await handleCheckConnection();
+    }
+    if (!currentHealth?.configured) {
+      setShowConfigForm(true);
+      setErrorMsg('Paste your Google Apps Script Web App URL & API Secret below to connect and browse Drive backups.');
       return;
     }
     setRestorePanelOpen(true);
@@ -702,15 +762,96 @@ export function AdminStorageManager({
 
           <button
             type="button"
-            onClick={handleOpenRestorePanel}
+            onClick={() => void handleOpenRestorePanel()}
             disabled={!isConnected}
             className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-white bg-[#0F274A] hover:bg-[#173a6e] disabled:opacity-50 rounded-md cursor-pointer min-h-[40px]"
           >
             <RotateCcw className="w-4 h-4" aria-hidden="true" />
             <span>Restore Backup</span>
           </button>
+
+          <button
+            type="button"
+            onClick={() => setShowConfigForm((prev) => !prev)}
+            className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-stone-800 bg-amber-50 border border-amber-300 hover:bg-amber-100 rounded-md cursor-pointer min-h-[40px]"
+          >
+            <FileCode2 className="w-4 h-4 text-amber-800" aria-hidden="true" />
+            <span>{isConnected ? 'Apps Script Settings' : 'Connect Google Apps Script'}</span>
+          </button>
         </div>
       </div>
+
+      {(!isConnected || showConfigForm) && (
+        <div className="bg-amber-50/70 border border-amber-300 rounded-lg p-4 space-y-3">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+            <div>
+              <h2 className="text-sm font-bold text-stone-950">
+                Connect Google Apps Script (Google Sheets &amp; Drive Backups)
+              </h2>
+              <p className="text-xs text-stone-600 mt-0.5">
+                Enter your deployed Google Apps Script Web App URL and API Secret below to connect immediately on Cloudflare Pages or any server.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={handleCopyAppsScriptCode}
+              disabled={loadingCode}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-stone-800 bg-white border border-stone-300 hover:bg-stone-50 rounded-md cursor-pointer shrink-0"
+            >
+              {copiedCode ? <Check className="w-3.5 h-3.5 text-emerald-700" /> : <Copy className="w-3.5 h-3.5" />}
+              <span>{copiedCode ? 'Copied Code.gs' : 'Copy Code.gs'}</span>
+            </button>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-12 gap-3">
+            <div className="md:col-span-7">
+              <label className="block text-[11px] font-bold uppercase tracking-wider text-stone-700 mb-1">
+                Apps Script Web App URL (APPS_SCRIPT_WEBAPP_URL)
+              </label>
+              <input
+                type="url"
+                value={appsScriptUrlInput}
+                onChange={(e) => setAppsScriptUrlInput(e.target.value)}
+                placeholder="https://script.google.com/macros/s/.../exec"
+                className="w-full rounded-md border border-stone-300 bg-white px-3 py-2 text-xs text-stone-900"
+              />
+            </div>
+            <div className="md:col-span-5">
+              <label className="block text-[11px] font-bold uppercase tracking-wider text-stone-700 mb-1">
+                Apps Script API Secret (APPS_SCRIPT_API_SECRET)
+              </label>
+              <input
+                type="password"
+                value={appsScriptSecretInput}
+                onChange={(e) => setAppsScriptSecretInput(e.target.value)}
+                placeholder="Enter your 12+ character secret key"
+                className="w-full rounded-md border border-stone-300 bg-white px-3 py-2 text-xs text-stone-900"
+              />
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            {showConfigForm && (
+              <button
+                type="button"
+                onClick={() => setShowConfigForm(false)}
+                className="px-3 py-1.5 text-xs font-semibold text-stone-600 hover:text-stone-900 cursor-pointer"
+              >
+                Close
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => void handleSaveAppsScriptConfig()}
+              disabled={savingConfig}
+              className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-bold text-white bg-emerald-900 hover:bg-emerald-800 disabled:opacity-50 rounded-md cursor-pointer"
+            >
+              {savingConfig ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle2 className="w-3.5 h-3.5" />}
+              <span>{savingConfig ? 'Verifying & Connecting...' : 'Save & Connect Google Apps Script'}</span>
+            </button>
+          </div>
+        </div>
+      )}
 
       {feedback && (
         <div

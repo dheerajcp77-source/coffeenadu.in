@@ -149,7 +149,7 @@ test('buildArticlePublicUrl always uses official coffeenadu.in domain', () => {
   );
 });
 
-test('buildKannadaArticleShareText preserves Kannada headline, summary, official URL, and www.coffeenadu.in promo', () => {
+test('buildKannadaArticleShareText bolds Kannada headline, omits description, and preserves location, official URL, and promo lines', () => {
   const article = makeArticle({
     id: 'koppa-coffee-price-2026',
     titleKannada: '<b>ಕೊಪ್ಪದಲ್ಲಿ ಕಾಫಿ ಧಾರಣೆ ಏರಿಕೆ</b>',
@@ -159,8 +159,9 @@ test('buildKannadaArticleShareText preserves Kannada headline, summary, official
   const url = buildArticlePublicUrl(article.id);
   const text = buildKannadaArticleShareText(article, url, article.location);
 
-  assert.ok(text.includes('ಕೊಪ್ಪದಲ್ಲಿ ಕಾಫಿ ಧಾರಣೆ ಏರಿಕೆ'));
-  assert.ok(text.includes('ಅರೇಬಿಕಾ ಹಾಗೂ ರೊಬಸ್ಟಾ ಕಾಫಿ ಬೆಲೆಯಲ್ಲಿ ಗಮನಾರ್ಹ ಹೆಚ್ಚಳ ಕಂಡುಬಂದಿದೆ.'));
+  assert.ok(text.includes('*ಕೊಪ್ಪದಲ್ಲಿ ಕಾಫಿ ಧಾರಣೆ ಏರಿಕೆ*'));
+  assert.ok(!text.includes('ಅರೇಬಿಕಾ ಹಾಗೂ ರೊಬಸ್ಟಾ ಕಾಫಿ ಬೆಲೆಯಲ್ಲಿ ಗಮನಾರ್ಹ ಹೆಚ್ಚಳ ಕಂಡುಬಂದಿದೆ.'));
+  assert.ok(text.includes('📍 ಕೊಪ್ಪ (Koppa) · Coffeenadu News'));
   assert.ok(text.includes('https://coffeenadu.in/?article=koppa-coffee-price-2026'));
   assert.ok(text.includes('www.coffeenadu.in'));
   assert.ok(!text.includes('<b>'));
@@ -319,6 +320,49 @@ test('Cloudflare standalone API handler returns valid Admin2 and public contract
   assert.equal(typeof adsAnalyticsJson.totals.ctrPct, 'number');
   assert.ok(Array.isArray(adsAnalyticsJson.series));
   assert.ok(Array.isArray(adsAnalyticsJson.perAd));
+
+  // 4. Standalone Local Ads CRUD & Settings on Cloudflare
+  const createAdRes = await handleApiDirectOnCloudflare({
+    request: new Request('https://coffeenadu.in/api/admin2/ads', {
+      method: 'POST',
+      headers: authHeaders,
+      body: JSON.stringify({
+        title: 'Malnad Coffee Estate Tools',
+        advertiserName: 'Koppa Agro Traders',
+        category: 'Agriculture / Coffee Estate',
+        status: 'active',
+      }),
+    }),
+    env,
+  });
+  assert.equal(createAdRes.status, 200);
+  const createAdJson = (await createAdRes.json()) as {
+    ok: boolean;
+    ad: { id: string; adNumber: string; title: string; effectiveStatus: string };
+  };
+  assert.equal(createAdJson.ok, true);
+  assert.equal(createAdJson.ad.adNumber, 'AD001');
+  assert.equal(createAdJson.ad.effectiveStatus, 'active');
+
+  const listAdsRes = await handleApiDirectOnCloudflare({
+    request: new Request('https://coffeenadu.in/api/admin2/ads', {
+      method: 'GET',
+      headers: authHeaders,
+    }),
+    env,
+  });
+  assert.equal(listAdsRes.status, 200);
+  const listAdsJson = (await listAdsRes.json()) as {
+    ok: boolean;
+    ads: unknown[];
+    stats: { total: number; active: number };
+    settings: { globalPlacementsEnabled: Record<string, boolean>; customCategories: string[] };
+  };
+  assert.equal(listAdsJson.ok, true);
+  assert.equal(listAdsJson.stats.total, 1);
+  assert.equal(listAdsJson.stats.active, 1);
+  assert.equal(typeof listAdsJson.settings.globalPlacementsEnabled.homepageSection, 'boolean');
+  assert.ok(Array.isArray(listAdsJson.settings.customCategories));
 });
 
 
