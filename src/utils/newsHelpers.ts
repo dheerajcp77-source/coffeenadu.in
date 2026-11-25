@@ -249,3 +249,39 @@ export function splitTextForHighlight(text: string, query: string): TextSegment[
       match: lowerTerms.has(part.toLowerCase()),
     }));
 }
+
+export const SHARE_PROMO_FOOTER = [
+  '📰 *ಕೊಪ್ಪದ ಎಲ್ಲಾ ಸ್ಥಳೀಯ ಸುದ್ದಿಗಳಿಗಾಗಿ!*',
+  '',
+  'ಪ್ರತಿದಿನದ ಸುದ್ದಿ, ಬಸ್ ಸಮಯ, ಕಾರ್ಯಕ್ರಮಗಳು ಮತ್ತು ಪ್ರಮುಖ ಮಾಹಿತಿಗಾಗಿ ನಮ್ಮ ವೆಬ್‌ಸೈಟ್ www.coffeenadu.in ಗೆ ಭೇಟಿ ನೀಡಿ.',
+  '',
+  '📲 *ಈ ಸುದ್ದಿಯನ್ನು ನಿಮ್ಮ ಸ್ನೇಹಿತರು, ಕುಟುಂಬದವರು ಹಾಗೂ ಇತರ WhatsApp ಗ್ರೂಪ್‌ಗಳಲ್ಲಿ ಶೇರ್ ಮಾಡಿ.*',
+].join('\n');
+
+export function truncateShareSummary(summary: string, maxLength = 220): string {
+  const clean = (summary || '').replace(/\s+/g, ' ').trim();
+  if (!clean) return '';
+  if (clean.length <= maxLength) return clean;
+  const sliced = clean.slice(0, maxLength - 1).trim();
+  const lastSpace = sliced.lastIndexOf(' ');
+  const cut = lastSpace > maxLength * 0.6 ? sliced.slice(0, lastSpace) : sliced;
+  return `${cut.trim()}…`;
+}
+
+export function buildKannadaArticleShareText(
+  article: Pick<NewsArticle, 'id' | 'titleKannada' | 'summaryKannada' | 'location'>,
+  articleUrl: string,
+  locationLabel?: string
+): string {
+  const plainTitle = stripRichTextToPlainText(article.titleKannada);
+  const plainSummary = truncateShareSummary(stripRichTextToPlainText(article.summaryKannada), 220);
+  const place = (locationLabel || article.location || 'ಕೊಪ್ಪ').trim();
+
+  const lines: string[] = [plainTitle];
+  if (plainSummary && plainSummary !== plainTitle) {
+    lines.push('', plainSummary);
+  }
+  lines.push('', `📍 ${place} · Coffeenadu News`, articleUrl, '', SHARE_PROMO_FOOTER);
+  return lines.join('\n');
+}
+

@@ -668,30 +668,71 @@ export default function App() {
     setReadingHistory(recordReadingHistoryEntry(selectedArticle));
   }, [selectedArticle]);
 
-  // Keep client-side <title> and OG/canonical meta tags synced during SPA transitions
+  // Keep client-side <title> and OG/Twitter/canonical meta tags synced during SPA transitions
   useEffect(() => {
     if (adminRouteActive) return;
+    const setMetaAttr = (selector: string, content: string) => {
+      const el = document.querySelector(selector);
+      if (el && content) el.setAttribute('content', content);
+    };
+    const setCanonicalHref = (href: string) => {
+      const link = document.querySelector('link[rel="canonical"]');
+      if (link) link.setAttribute('href', href);
+    };
+
     if (selectedArticle) {
       const cleanTitle = stripRichTextToPlainText(selectedArticle.titleKannada);
-      const cleanSummary = stripRichTextToPlainText(selectedArticle.summaryKannada);
+      const cleanSummary =
+        stripRichTextToPlainText(selectedArticle.summaryKannada) ||
+        'Local Koppa Taluk Kannada news update on Coffeenadu News.';
+      const canonicalArticleUrl = buildArticlePublicUrl(selectedArticle.id);
+      const ogImage = `https://coffeenadu.in/api/article-image/${encodeURIComponent(selectedArticle.id)}`;
+
       document.title = `${cleanTitle} — Coffeenadu News`;
-      const descMeta = document.querySelector('meta[name="description"]');
-      if (descMeta && cleanSummary) descMeta.setAttribute('content', cleanSummary.slice(0, 280));
-      const ogTitleMeta = document.querySelector('meta[property="og:title"]');
-      if (ogTitleMeta) ogTitleMeta.setAttribute('content', cleanTitle);
-      const ogUrlMeta = document.querySelector('meta[property="og:url"]');
-      if (ogUrlMeta) ogUrlMeta.setAttribute('content', buildArticlePublicUrl(selectedArticle.id));
-    } else if (busTimingsActiveCheck) {
-      document.title = 'Bus Timings — Coffeenadu News';
-    } else if (eventsActiveCheck) {
-      document.title = 'Programs & Events — Coffeenadu News';
-    } else if (adsActiveCheck) {
-      document.title = 'Local Advertisements — Coffeenadu News';
-    } else if (chatActiveCheck) {
-      document.title = 'Message Editorial Desk — Coffeenadu News';
-    } else {
-      document.title = 'Coffeenadu News — Koppa Taluk Local Kannada News';
+      setMetaAttr('meta[name="description"]', cleanSummary.slice(0, 280));
+      setMetaAttr('meta[property="og:type"]', 'article');
+      setMetaAttr('meta[property="og:title"]', cleanTitle);
+      setMetaAttr('meta[property="og:description"]', cleanSummary.slice(0, 280));
+      setMetaAttr('meta[property="og:url"]', canonicalArticleUrl);
+      setMetaAttr('meta[property="og:image"]', ogImage);
+      setMetaAttr('meta[name="twitter:title"]', cleanTitle);
+      setMetaAttr('meta[name="twitter:description"]', cleanSummary.slice(0, 280));
+      setMetaAttr('meta[name="twitter:image"]', ogImage);
+      setCanonicalHref(canonicalArticleUrl);
+      return;
     }
+
+    const defaultDesc =
+      'Local Koppa Taluk news publishing portal featuring Kannada updates, bus timings, and programs.';
+    const defaultImage = 'https://coffeenadu.in/api/og-default-image';
+    const defaultTitle = busTimingsActiveCheck
+      ? 'Bus Timings — Coffeenadu News'
+      : eventsActiveCheck
+      ? 'Programs & Events — Coffeenadu News'
+      : adsActiveCheck
+      ? 'Local Advertisements — Coffeenadu News'
+      : chatActiveCheck
+      ? 'Message Editorial Desk — Coffeenadu News'
+      : 'Coffeenadu News — Koppa Taluk Local Kannada News';
+    const canonicalRoute = busTimingsActiveCheck
+      ? 'https://coffeenadu.in/bus-timings'
+      : eventsActiveCheck
+      ? 'https://coffeenadu.in/events'
+      : adsActiveCheck
+      ? 'https://coffeenadu.in/ads'
+      : 'https://coffeenadu.in/';
+
+    document.title = defaultTitle;
+    setMetaAttr('meta[name="description"]', defaultDesc);
+    setMetaAttr('meta[property="og:type"]', 'website');
+    setMetaAttr('meta[property="og:title"]', defaultTitle);
+    setMetaAttr('meta[property="og:description"]', defaultDesc);
+    setMetaAttr('meta[property="og:url"]', canonicalRoute);
+    setMetaAttr('meta[property="og:image"]', defaultImage);
+    setMetaAttr('meta[name="twitter:title"]', defaultTitle);
+    setMetaAttr('meta[name="twitter:description"]', defaultDesc);
+    setMetaAttr('meta[name="twitter:image"]', defaultImage);
+    setCanonicalHref(canonicalRoute);
   }, [
     adminRouteActive,
     selectedArticle,

@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import type { NewsArticle } from '../types/news';
 import {
+  buildKannadaArticleShareText,
   getAdjacentArticles,
   getBreakingNewsArticles,
   getSameLocationArticles,
@@ -147,3 +148,22 @@ test('buildArticlePublicUrl always uses official coffeenadu.in domain', () => {
     'https://coffeenadu.in/?article=koppa-rain-2026'
   );
 });
+
+test('buildKannadaArticleShareText preserves Kannada headline, summary, official URL, and www.coffeenadu.in promo', () => {
+  const article = makeArticle({
+    id: 'koppa-coffee-price-2026',
+    titleKannada: '<b>ಕೊಪ್ಪದಲ್ಲಿ ಕಾಫಿ ಧಾರಣೆ ಏರಿಕೆ</b>',
+    summaryKannada: 'ಅರೇಬಿಕಾ ಹಾಗೂ ರೊಬಸ್ಟಾ ಕಾಫಿ ಬೆಲೆಯಲ್ಲಿ ಗಮನಾರ್ಹ ಹೆಚ್ಚಳ ಕಂಡುಬಂದಿದೆ.',
+    location: 'ಕೊಪ್ಪ (Koppa)',
+  });
+  const url = buildArticlePublicUrl(article.id);
+  const text = buildKannadaArticleShareText(article, url, article.location);
+
+  assert.ok(text.includes('ಕೊಪ್ಪದಲ್ಲಿ ಕಾಫಿ ಧಾರಣೆ ಏರಿಕೆ'));
+  assert.ok(text.includes('ಅರೇಬಿಕಾ ಹಾಗೂ ರೊಬಸ್ಟಾ ಕಾಫಿ ಬೆಲೆಯಲ್ಲಿ ಗಮನಾರ್ಹ ಹೆಚ್ಚಳ ಕಂಡುಬಂದಿದೆ.'));
+  assert.ok(text.includes('https://coffeenadu.in/?article=koppa-coffee-price-2026'));
+  assert.ok(text.includes('www.coffeenadu.in'));
+  assert.ok(!text.includes('<b>'));
+  assert.ok(!text.includes('.run.app'));
+});
+

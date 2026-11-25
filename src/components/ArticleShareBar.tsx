@@ -2,8 +2,11 @@ import { useEffect, useRef, useState } from 'react';
 import { Check, Copy, Share2 } from 'lucide-react';
 import { getKannadaLocationLabel } from '../constants/newsData';
 import type { NewsArticle } from '../types/news';
+import { buildKannadaArticleShareText, SHARE_PROMO_FOOTER } from '../utils/newsHelpers';
 import { stripRichTextToPlainText } from '../utils/richText';
 import { buildArticlePublicUrl } from '../utils/slug';
+
+export { SHARE_PROMO_FOOTER };
 
 interface ArticleShareBarProps {
   article: NewsArticle;
@@ -11,22 +14,13 @@ interface ArticleShareBarProps {
   variant?: 'light' | 'dark';
 }
 
-export const SHARE_PROMO_FOOTER = [
-  '📰 *ಕೊಪ್ಪದ ಎಲ್ಲಾ ಸ್ಥಳೀಯ ಸುದ್ದಿಗಳಿಗಾಗಿ!*',
-  '',
-  'ಪ್ರತಿದಿನದ ಸುದ್ದಿ, ಬಸ್ ಸಮಯ, ಕಾರ್ಯಕ್ರಮಗಳು ಮತ್ತು ಪ್ರಮುಖ ಮಾಹಿತಿಗಾಗಿ ನಮ್ಮ ವೆಬ್ಸೈಟ್ಗೆ ಭೇಟಿ ನೀಡಿ.',
-  '',
-  '📲 *ಈ ಸುದ್ದಿಯನ್ನು ನಿಮ್ಮ ಸ್ನೇಹಿತರು, ಕುಟುಂಬದವರು ಹಾಗೂ ಇತರ WhatsApp ಗ್ರೂಪ್ಗಳಲ್ಲಿ ಶೇರ್ ಮಾಡಿ.*',
-].join('\n');
-
 function buildArticleUrl(articleId: string): string {
   return buildArticlePublicUrl(articleId);
 }
 
 function buildShareText(article: NewsArticle): string {
   const url = buildArticleUrl(article.id);
-  const plainTitle = stripRichTextToPlainText(article.titleKannada);
-  return `${plainTitle}\n\n📍 ${getKannadaLocationLabel(article.location)} · Coffeenadu News\n${url}\n\n${SHARE_PROMO_FOOTER}`;
+  return buildKannadaArticleShareText(article, url, getKannadaLocationLabel(article.location));
 }
 
 export function ArticleShareBar({
@@ -51,14 +45,15 @@ export function ArticleShareBar({
   }, [showFallbackMenu]);
 
   const plainTitle = stripRichTextToPlainText(article.titleKannada);
+  const plainSummary = stripRichTextToPlainText(article.summaryKannada);
   const articleUrl = buildArticleUrl(article.id);
   const fullShareText = buildShareText(article);
   const whatsappHref = `https://wa.me/?text=${encodeURIComponent(fullShareText)}`;
   const telegramHref = `https://t.me/share/url?url=${encodeURIComponent(articleUrl)}&text=${encodeURIComponent(
-    `${plainTitle} — Coffeenadu News (${getKannadaLocationLabel(article.location)})\n\n${SHARE_PROMO_FOOTER}`
+    `${plainTitle}${plainSummary ? `\n\n${plainSummary}` : ''}\n\nCoffeenadu News (${getKannadaLocationLabel(article.location)})\n\n${SHARE_PROMO_FOOTER}`
   )}`;
   const facebookHref = `https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(articleUrl)}&quote=${encodeURIComponent(
-    `${plainTitle}\n\n${SHARE_PROMO_FOOTER}`
+    `${plainTitle}${plainSummary ? `\n\n${plainSummary}` : ''}\n\n${SHARE_PROMO_FOOTER}`
   )}`;
   const xHref = `https://twitter.com/intent/tweet?text=${encodeURIComponent(
     `${plainTitle} — Coffeenadu News`
@@ -104,7 +99,11 @@ export function ArticleShareBar({
 
   if (compact) {
     return (
-      <div ref={containerRef} className="relative inline-flex items-center gap-1.5" onClick={stopProp}>
+      <div
+        ref={containerRef}
+        className="relative inline-flex flex-wrap items-center gap-1.5"
+        onClick={stopProp}
+      >
         <a
           href={whatsappHref}
           target="_blank"
@@ -120,6 +119,30 @@ export function ArticleShareBar({
           <WhatsAppIcon className="w-3.5 h-3.5 shrink-0" />
           <span>WhatsApp</span>
         </a>
+
+        <button
+          type="button"
+          onClick={(e) => void handleCopyLink(e)}
+          onKeyDown={stopProp}
+          aria-label="Copy article link"
+          className={`inline-flex items-center gap-1 px-2 py-1.5 text-[11px] font-semibold rounded-md transition-colors cursor-pointer whitespace-nowrap ${
+            isDark
+              ? 'bg-white/15 text-white hover:bg-white/25'
+              : 'bg-white dark:bg-slate-900 text-[#17263A] dark:text-slate-200 border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800'
+          }`}
+        >
+          {copiedLink ? (
+            <>
+              <Check className="w-3.5 h-3.5 text-[#176B4A] dark:text-emerald-400" aria-hidden="true" />
+              <span>Copied</span>
+            </>
+          ) : (
+            <>
+              <Copy className="w-3.5 h-3.5" aria-hidden="true" />
+              <span>Copy</span>
+            </>
+          )}
+        </button>
 
         <button
           type="button"
