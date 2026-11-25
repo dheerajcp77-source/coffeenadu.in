@@ -9,7 +9,7 @@ import {
   type AdPriority,
   type Advertisement,
   type AdvertisementStats,
-} from '../types/ads';
+} from '../types/ads.ts';
 import { PUBLIC_SHARE_ORIGIN, getDeepLinkShareOrigin } from './slug.ts';
 
 const VALID_AD_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;

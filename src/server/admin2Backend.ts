@@ -68,7 +68,6 @@ import type {
   SheetsStorageManager,
   VerifiedAdminUser,
 } from './sheetsStorageProxy.ts';
-import type { PushSubscriptionService } from './pushNotificationService.ts';
 
 const PROTECTED_SUPER_ADMINS = [
   { email: 'shwethashwethak85@gmail.com', fullName: 'Shwetha (Chief Editor)' },
@@ -499,7 +498,6 @@ function createDefaultSettings(): Admin2WebsiteSettings {
     watermarkMiddleTextEnabled: true,
     watermarkMiddleText: 'COFFEENADU NEWS',
     breakingTickerNotice: '',
-    leadCarouselIntervalSec: 5,
     updatedAt: new Date().toISOString(),
     updatedBy: 'system',
   };
@@ -525,20 +523,14 @@ export class Admin2Backend {
   private readonly adMediaDir: string;
   private readonly hmacSecret: string;
   private readonly sheetsStorage: SheetsStorageManager;
-  private readonly pushService?: PushSubscriptionService;
   private state: Admin2PersistedState;
   private schedulerTimer: NodeJS.Timeout | null = null;
   private persistTimer: NodeJS.Timeout | null = null;
   private readonly startedAt = Date.now();
   private geminiClient: GoogleGenAI | null = null;
 
-  constructor(
-    baseDataDir: string,
-    sheetsStorage: SheetsStorageManager,
-    pushService?: PushSubscriptionService
-  ) {
+  constructor(baseDataDir: string, sheetsStorage: SheetsStorageManager) {
     this.sheetsStorage = sheetsStorage;
-    this.pushService = pushService;
     const resolvedDir = this.resolveWritableDir(baseDataDir);
     this.dataDir = resolvedDir;
     this.stateFile = path.join(resolvedDir, 'admin2-state.json');
@@ -3007,60 +2999,6 @@ export class Admin2Backend {
       }
     });
 
-    app.post('/api/admin2/cms/leads/unpin-older', this.requireAuth('news.edit'), async (req: Admin2Request, res) => {
-      try {
-        const allItems = await this.sheetsStorage.getAllNewsForAdmin(true);
-        const nowMs = Date.now();
-        const activeLeads = allItems
-          .filter((item) => item.featured && (!item.featuredUntil || item.featuredUntil > nowMs))
-          .sort((a, b) => (b.publishedTimestamp || 0) - (a.publishedTimestamp || 0));
-
-        const requestedKeepId =
-          typeof req.body?.keepArticleId === 'string' ? req.body.keepArticleId.trim() : '';
-        const keepId =
-          requestedKeepId && activeLeads.some((item) => item.newsId === requestedKeepId)
-            ? requestedKeepId
-            : activeLeads[0]?.newsId || '';
-
-        const toUnpin = activeLeads.filter((item) => item.newsId !== keepId);
-        let unpinnedCount = 0;
-        for (const older of toUnpin) {
-          const result = await this.sheetsStorage.setArticleLeadStatusFromServer(
-            older.newsId,
-            false,
-            req.admin2User!.email,
-            older.tags || ''
-          );
-          if (result.ok) unpinnedCount += 1;
-        }
-
-        if (unpinnedCount > 0) {
-          this.addAuditLog({
-            actorEmail: req.admin2User!.email,
-            actorRole: req.admin2User!.role,
-            action: 'news.leads_unpinned',
-            targetType: 'news',
-            targetId: keepId || 'leads',
-            details: `Unpinned ${unpinnedCount} older lead story(s); kept newest lead (${keepId}).`,
-            severity: 'info',
-            ip: getClientIp(req),
-          });
-          this.persistStateNow();
-        }
-
-        res.json({
-          ok: true,
-          keptArticleId: keepId,
-          unpinnedCount,
-        });
-      } catch (err) {
-        res.status(502).json({
-          ok: false,
-          error: err instanceof Error ? err.message : 'Unable to unpin older lead stories.',
-        });
-      }
-    });
-
     app.delete('/api/admin2/cms/drafts/:id', this.requireAuth('news.delete'), (req: Admin2Request, res) => {
       const before = this.state.drafts.length;
       this.state.drafts = this.state.drafts.filter((d) => d.id !== req.params.id);
@@ -3995,10 +3933,6 @@ export class Admin2Backend {
           typeof b.breakingTickerNotice === 'string'
             ? b.breakingTickerNotice.trim().slice(0, 240)
             : this.state.settings.breakingTickerNotice,
-        leadCarouselIntervalSec:
-          typeof b.leadCarouselIntervalSec === 'number' && Number.isFinite(b.leadCarouselIntervalSec)
-            ? Math.min(15, Math.max(3, Math.round(b.leadCarouselIntervalSec)))
-            : this.state.settings.leadCarouselIntervalSec ?? 5,
         updatedAt: new Date().toISOString(),
         updatedBy: req.admin2User!.email,
       };
@@ -4016,149 +3950,6 @@ export class Admin2Backend {
       });
       this.persistStateNow();
       res.json({ ok: true, settings: next });
-    });
-
-    // Public read-only portal display settings (non-sensitive fields only)
-    app.get('/api/public/site-settings', (_req, res) => {
-      res.setHeader('Cache-Control', 'no-store');
-      res.json({
-        ok: true,
-        settings: {
-          siteName: this.state.settings.siteName,
-          siteTagline: this.state.settings.siteTagline,
-          breakingTickerNotice: this.state.settings.breakingTickerNotice,
-          leadCarouselIntervalSec: Math.min(
-            15,
-            Math.max(3, Number(this.state.settings.leadCarouselIntervalSec) || 5)
-          ),
-          whatsappGroupUrl: this.state.settings.whatsappGroupUrl || '',
-        },
-      });
-    });
-
-    // Mobile Web Push Notification management & manual broadcast endpoints
-    app.get('/api/admin2/push/stats', this.requireAuth('dashboard.view'), (_req, res) => {
-      if (!this.pushService) {
-        res.json({
-          ok: true,
-          stats: {
-            totalSubscribers: 0,
-            breakingSubscribers: 0,
-            digestSubscribers: 0,
-            localSubscribers: 0,
-            agricultureSubscribers: 0,
-            eventsSubscribers: 0,
-            lastDigestRunAt: null,
-            lastDigestArticleCount: 0,
-            vapidPublicKeyConfigured: false,
-          },
-        });
-        return;
-      }
-      res.json({ ok: true, stats: this.pushService.getStats() });
-    });
-
-    app.post('/api/admin2/push/send-breaking', this.requireAuth('news.publish'), async (req: Admin2Request, res) => {
-      if (!this.pushService) {
-        res.status(503).json({ ok: false, error: 'Push notification service is not initialized.' });
-        return;
-      }
-      const b = req.body || {};
-      const articleId = typeof b.articleId === 'string' ? b.articleId.trim() : '';
-      const title = typeof b.title === 'string' ? b.title.trim() : '';
-      const summary = typeof b.summary === 'string' ? b.summary.trim() : '';
-      const category = typeof b.category === 'string' ? b.category.trim() : 'Local';
-      const location = typeof b.location === 'string' ? b.location.trim() : 'ಕೊಪ್ಪ';
-      const mode = b.mode === 'all' ? 'all' : 'breaking';
-      const bypassDedup = Boolean(b.bypassDedup);
-
-      if (!articleId || !title) {
-        res.status(400).json({ ok: false, error: 'Article ID and title are required to send push alerts.' });
-        return;
-      }
-
-      const summaryRes = await this.pushService.sendBreakingNotification({
-        articleId,
-        title,
-        summary,
-        category,
-        location,
-        mode,
-        bypassDedup,
-      });
-
-      this.addAuditLog({
-        actorEmail: req.admin2User!.email,
-        actorRole: req.admin2User!.role,
-        action: mode === 'all' ? 'push.broadcast_all' : 'push.broadcast_breaking',
-        targetType: 'article',
-        targetId: articleId,
-        details: `Sent push alert (${mode}) for ${articleId}: ${summaryRes.sent} delivered, ${summaryRes.pruned} pruned.`,
-        severity: 'info',
-        ip: getClientIp(req),
-      });
-      this.addNotification({
-        category: 'publishing',
-        severity: summaryRes.failed > 0 && summaryRes.sent === 0 ? 'warning' : 'success',
-        title: `Mobile Push Alert Sent (${mode === 'all' ? 'All Subscribers' : 'Breaking'})`,
-        message: `${stripMarkup(title).slice(0, 90)} — Delivered to ${summaryRes.sent} device(s)${
-          summaryRes.pruned > 0 ? `, pruned ${summaryRes.pruned} expired` : ''
-        }.`,
-      });
-      this.persistStateNow();
-
-      res.json({
-        ...summaryRes,
-        stats: this.pushService.getStats(),
-      });
-    });
-
-    app.post('/api/admin2/push/send-daily-digest', this.requireAuth('news.publish'), async (req: Admin2Request, res) => {
-      if (!this.pushService) {
-        res.status(503).json({ ok: false, error: 'Push notification service is not initialized.' });
-        return;
-      }
-      try {
-        const items = await this.sheetsStorage.getAllNewsForAdmin(false);
-        const mapped = items.map((item) => ({
-          id: item.newsId,
-          titleKannada: item.title,
-          summaryKannada: item.description,
-          category: item.category || 'Local',
-          location: item.location || 'ಕೊಪ್ಪ',
-          publishedTimestamp: item.publishedTimestamp,
-          publishedDate: item.publishedDate,
-          isFeatured: item.featured,
-        }));
-        const summaryRes = await this.pushService.sendDailyDigest({
-          articles: mapped,
-          manualTrigger: true,
-        });
-        if (!summaryRes.ok) {
-          res.status(400).json({ ok: false, error: summaryRes.error || 'No recent articles for digest.' });
-          return;
-        }
-        this.addAuditLog({
-          actorEmail: req.admin2User!.email,
-          actorRole: req.admin2User!.role,
-          action: 'push.daily_digest',
-          targetType: 'push',
-          targetId: 'daily-digest',
-          details: `Manual Daily Digest sent to ${summaryRes.sent} subscriber(s).`,
-          severity: 'info',
-          ip: getClientIp(req),
-        });
-        this.persistStateNow();
-        res.json({
-          ...summaryRes,
-          stats: this.pushService.getStats(),
-        });
-      } catch (err) {
-        res.status(502).json({
-          ok: false,
-          error: err instanceof Error ? err.message : 'Unable to send daily digest.',
-        });
-      }
     });
 
     // -------------------------------------------------------------------------

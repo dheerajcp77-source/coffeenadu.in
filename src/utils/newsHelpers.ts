@@ -56,21 +56,9 @@ export function locationsMatch(a: string, b: string): boolean {
 }
 
 /**
- * Returns actively featured Lead Story articles sorted strictly newest-first.
- */
-export function sortLeadArticles(
-  articles: NewsArticle[],
-  nowMs = Date.now()
-): NewsArticle[] {
-  return articles
-    .filter((a) => isArticleActivelyFeatured(a, nowMs))
-    .sort((a, b) => (b.publishedTimestamp ?? 0) - (a.publishedTimestamp ?? 0));
-}
-
-/**
  * Selects real breaking / top-priority articles for the Breaking News Strip.
- * Places actively featured stories first (newest-first), then backfills remaining slots
- * with the latest published articles so the ticker stays populated without fake headlines.
+ * Uses actively featured articles first, falling back to latest published stories
+ * without ever fabricating headlines.
  */
 export function getBreakingNewsArticles(
   articles: NewsArticle[],
@@ -78,22 +66,13 @@ export function getBreakingNewsArticles(
   maxCount = 8
 ): NewsArticle[] {
   if (!articles.length) return [];
-  const sortedAll = [...articles].sort(
-    (a, b) => (b.publishedTimestamp ?? 0) - (a.publishedTimestamp ?? 0)
-  );
-  const featured = sortedAll.filter((a) => isArticleActivelyFeatured(a, nowMs));
-  const seen = new Set(featured.map((a) => a.id));
-  const combined = [...featured];
-
-  for (const item of sortedAll) {
-    if (combined.length >= maxCount) break;
-    if (!seen.has(item.id)) {
-      seen.add(item.id);
-      combined.push(item);
-    }
+  const featured = articles.filter((a) => isArticleActivelyFeatured(a, nowMs));
+  if (featured.length > 0) {
+    return featured.slice(0, maxCount);
   }
-
-  return combined.slice(0, maxCount);
+  return [...articles]
+    .sort((a, b) => (b.publishedTimestamp ?? 0) - (a.publishedTimestamp ?? 0))
+    .slice(0, Math.min(maxCount, 5));
 }
 
 export interface TrendingResult {

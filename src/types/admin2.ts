@@ -345,7 +345,6 @@ export interface Admin2WebsiteSettings {
   watermarkMiddleTextEnabled: boolean;
   watermarkMiddleText: string;
   breakingTickerNotice: string;
-  leadCarouselIntervalSec?: number;
   updatedAt: string;
   updatedBy: string;
 }

@@ -59,7 +59,7 @@ function createOptimizedFirestore(): Firestore {
     return initializeFirestore(
       app,
       {
-        experimentalAutoDetectLongPolling: true,
+        experimentalForceLongPolling: true,
         localCache: canUsePersistentCache
           ? persistentLocalCache({
               tabManager: persistentMultipleTabManager(),
@@ -224,31 +224,15 @@ async function testConnection() {
   if (typeof navigator !== 'undefined' && navigator.onLine === false) {
     return;
   }
-  const probe = () => getDocFromServer(doc(db, 'test', 'connection'));
   try {
-    await probe();
+    await getDocFromServer(doc(db, 'test', 'connection'));
   } catch (error) {
     if (isFirestoreQuotaError(error)) {
       markFirestoreQuotaExceeded(error);
       return;
     }
     if (error instanceof Error && error.message.includes('the client is offline')) {
-      await new Promise((resolve) => setTimeout(resolve, 1500));
-      if (typeof navigator !== 'undefined' && navigator.onLine === false) {
-        return;
-      }
-      try {
-        await probe();
-      } catch (retryError) {
-        if (isFirestoreQuotaError(retryError)) {
-          markFirestoreQuotaExceeded(retryError);
-        } else if (
-          retryError instanceof Error &&
-          retryError.message.includes('the client is offline')
-        ) {
-          console.error('Please check your Firebase configuration.');
-        }
-      }
+      console.error('Please check your Firebase configuration.');
     }
   }
 }

@@ -140,7 +140,10 @@ export function AdminStorageManager({
       if (res.configured && res.ok) {
         setFeedback('Google Sheets, Drive & Apps Script connection verified.');
       } else if (!res.configured) {
-        setFeedback('Apps Script Web App secrets are not configured yet — running safely on fallback storage.');
+        setFeedback(
+          res.message ||
+            'Apps Script Web App secrets are not configured yet — running safely on fallback storage.'
+        );
       } else if (res.error) {
         setErrorMsg(res.error);
       }
@@ -1529,7 +1532,7 @@ export function AdminStorageManager({
           <li>Open <strong>script.google.com</strong> → New Project → paste copied <code>Code.gs</code> and Save.</li>
           <li>Select <code>setupCoffeeNaduStorage</code> in the top toolbar and click <strong>Run</strong> (creates Sheets, Drive folders, secret key &amp; daily 02:30 AM backup trigger).</li>
           <li>Click <strong>Deploy → New deployment → Web app</strong> (Execute as: <em>Me</em>, Who has access: <em>Anyone</em>).</li>
-          <li>Add <code>APPS_SCRIPT_WEBAPP_URL</code> and <code>APPS_SCRIPT_API_SECRET</code> in AI Studio Secrets, then click <strong>Check Storage Connection</strong>.</li>
+          <li>Add <code>APPS_SCRIPT_WEBAPP_URL</code> and <code>APPS_SCRIPT_API_SECRET</code> in AI Studio Secrets / Cloudflare Pages Environment Variables, then click <strong>Check Storage Connection</strong>.</li>
         </ol>
       </div>
     </div>

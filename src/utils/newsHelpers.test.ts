@@ -9,7 +9,6 @@ import {
   getSmartRecommendations,
   getTrendingArticles,
   searchArticlesAdvanced,
-  sortLeadArticles,
   splitTextForHighlight,
 } from './newsHelpers';
 import { buildArticlePublicUrl, getDeepLinkShareOrigin, PUBLIC_SHARE_ORIGIN } from './slug';
@@ -57,55 +56,17 @@ test('getTrendingArticles ranks by real viewCount and flags view-ranked vs fallb
   );
 });
 
-test('getBreakingNewsArticles prioritizes actively featured articles newest-first and backfills with latest stories', () => {
+test('getBreakingNewsArticles prioritizes actively featured articles', () => {
   const now = 1_700_000_000_000;
   const list = [
-    makeArticle({ id: 'regular-older', isFeatured: false, publishedTimestamp: now - 5_000 }),
-    makeArticle({ id: 'regular-newer', isFeatured: false, publishedTimestamp: now }),
-    makeArticle({
-      id: 'featured-active-older',
-      isFeatured: true,
-      featuredUntil: now + 60_000,
-      publishedTimestamp: now - 20_000,
-    }),
-    makeArticle({
-      id: 'featured-active-newer',
-      isFeatured: true,
-      featuredUntil: now + 60_000,
-      publishedTimestamp: now - 10_000,
-    }),
-    makeArticle({
-      id: 'featured-expired',
-      isFeatured: true,
-      featuredUntil: now - 10_000,
-      publishedTimestamp: now - 30_000,
-    }),
+    makeArticle({ id: 'regular', isFeatured: false, publishedTimestamp: now }),
+    makeArticle({ id: 'featured-active', isFeatured: true, featuredUntil: now + 60_000 }),
+    makeArticle({ id: 'featured-expired', isFeatured: true, featuredUntil: now - 10_000 }),
   ];
-  const breaking = getBreakingNewsArticles(list, now, 4);
+  const breaking = getBreakingNewsArticles(list, now, 5);
   assert.deepEqual(
     breaking.map((a) => a.id),
-    ['featured-active-newer', 'featured-active-older', 'regular-newer', 'regular-older']
-  );
-});
-
-test('sortLeadArticles excludes expired/non-featured items and always puts the newest Lead Story first', () => {
-  const now = 1_700_000_000_000;
-  const list = [
-    makeArticle({ id: 'old-lead', isFeatured: true, publishedTimestamp: now - 86_400_000 }),
-    makeArticle({ id: 'newest-lead', isFeatured: true, publishedTimestamp: now }),
-    makeArticle({
-      id: 'expired-lead',
-      isFeatured: true,
-      featuredUntil: now - 1_000,
-      publishedTimestamp: now + 50_000,
-    }),
-    makeArticle({ id: 'normal-story', isFeatured: false, publishedTimestamp: now + 100_000 }),
-  ];
-
-  const sorted = sortLeadArticles(list, now);
-  assert.deepEqual(
-    sorted.map((a) => a.id),
-    ['newest-lead', 'old-lead']
+    ['featured-active']
   );
 });
 

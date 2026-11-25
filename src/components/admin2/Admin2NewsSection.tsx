@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
   Archive,
-  BellRing,
   CalendarClock,
   Check,
   CheckSquare,
@@ -21,7 +20,6 @@ import {
   Send,
   Sparkles,
   Square,
-  StarOff,
   Trash2,
   X,
 } from 'lucide-react';
@@ -33,8 +31,6 @@ import {
   fetchAdmin2CmsState,
   publishAdmin2Draft,
   restoreArchivedArticle,
-  sendAdmin2BreakingPush,
-  unpinOlderLeadStories,
   updateAdmin2Draft,
   updateArticleCmsMeta,
 } from '../../services/admin2Client';
@@ -97,8 +93,6 @@ export function Admin2NewsSection({
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [busyId, setBusyId] = useState<string | null>(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
-  const [confirmPushId, setConfirmPushId] = useState<string | null>(null);
-  const [unpinningLeads, setUnpinningLeads] = useState(false);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [feedback, setFeedback] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
@@ -330,54 +324,6 @@ export function Admin2NewsSection({
     });
   };
 
-  const activeLeadCount = useMemo(
-    () => articles.filter((a) => isArticleActivelyFeatured(a)).length,
-    [articles]
-  );
-
-  const handleUnpinOlderLeads = async () => {
-    setUnpinningLeads(true);
-    setErrorMsg('');
-    setFeedback('');
-    try {
-      const res = await unpinOlderLeadStories();
-      setFeedback(
-        res.unpinnedCount > 0
-          ? `Unpinned ${res.unpinnedCount} older Lead Story item(s). Latest lead (${res.keptArticleId}) remains pinned.`
-          : 'Only the newest Lead Story is currently pinned.'
-      );
-      await onRefreshArticles();
-    } catch (err) {
-      setErrorMsg(err instanceof Error ? err.message : 'Unable to unpin older lead stories.');
-    } finally {
-      setUnpinningLeads(false);
-    }
-  };
-
-  const handleQuickPushArticle = async (article: NewsArticle) => {
-    setBusyId(article.id);
-    setConfirmPushId(null);
-    setErrorMsg('');
-    setFeedback('');
-    try {
-      const res = await sendAdmin2BreakingPush({
-        articleId: article.id,
-        title: article.titleKannada,
-        summary: article.summaryKannada,
-        category: article.category,
-        location: article.location,
-        mode: 'breaking',
-      });
-      setFeedback(
-        `Push alert sent for "${stripRichTextToPlainText(article.titleKannada)}": ${res.sent}/${res.targeted} delivered.`
-      );
-    } catch (err) {
-      setErrorMsg(err instanceof Error ? err.message : 'Unable to send mobile push alert.');
-    } finally {
-      setBusyId(null);
-    }
-  };
-
   const activeRevisions = revisionArticleId ? overlays[revisionArticleId]?.revisions || [] : [];
 
   return (
@@ -393,22 +339,6 @@ export function Admin2NewsSection({
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          {activeLeadCount > 1 && (
-            <button
-              type="button"
-              disabled={unpinningLeads}
-              onClick={() => void handleUnpinOlderLeads()}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-900 hover:bg-amber-100 disabled:opacity-60 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-200 cursor-pointer"
-              title="Keep only the newest Lead Story pinned and unpin older lead stories"
-            >
-              {unpinningLeads ? (
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              ) : (
-                <StarOff className="h-3.5 w-3.5" />
-              )}
-              Unpin Older Leads ({activeLeadCount})
-            </button>
-          )}
           <button
             type="button"
             onClick={() => openQuickDraftModal()}
@@ -733,27 +663,6 @@ export function Admin2NewsSection({
                           >
                             <Pencil className="h-3.5 w-3.5" />
                           </button>
-                          {canPublish &&
-                            (confirmPushId === article.id ? (
-                              <button
-                                type="button"
-                                disabled={busyId === article.id}
-                                onClick={() => void handleQuickPushArticle(article)}
-                                className="rounded-md bg-red-600 px-2 py-1 text-[11px] font-semibold text-white hover:bg-red-700 cursor-pointer"
-                              >
-                                Send Push
-                              </button>
-                            ) : (
-                              <button
-                                type="button"
-                                disabled={busyId === article.id}
-                                onClick={() => setConfirmPushId(article.id)}
-                                title="Send Mobile Breaking Push Alert"
-                                className="rounded-md border border-slate-200 p-1.5 text-red-600 hover:bg-red-50 dark:border-slate-700 dark:text-red-400 dark:hover:bg-slate-800 cursor-pointer"
-                              >
-                                <BellRing className="h-3.5 w-3.5" />
-                              </button>
-                            ))}
                           {canArchive && (
                             <button
                               type="button"

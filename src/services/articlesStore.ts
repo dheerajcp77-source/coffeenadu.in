@@ -63,12 +63,11 @@ import {
   updateNewsViaSheets,
 } from './sheetsStorageClient';
 
-export const ARTICLES_PAGE_SIZE = 50;
-const ARTICLES_CACHE_TTL_MS = 2 * 60 * 1000;
-const BACKGROUND_REVALIDATE_AGE_MS = 30 * 1000;
-const SINGLE_ARTICLE_CACHE_TTL_MS = 5 * 60 * 1000;
+export const ARTICLES_PAGE_SIZE = 15;
+const ARTICLES_CACHE_TTL_MS = 5 * 60 * 1000;
+const SINGLE_ARTICLE_CACHE_TTL_MS = 10 * 60 * 1000;
 const ADMINS_CACHE_TTL_MS = 15 * 60 * 1000;
-const ARTICLES_LIST_CACHE_KEY = 'articles:feed_v2';
+const ARTICLES_LIST_CACHE_KEY = 'articles:feed_v1';
 const ADMINS_LIST_CACHE_KEY = 'admins:directory_v1';
 
 export interface ArticleMutationInput {
@@ -321,32 +320,10 @@ export async function loadInitialArticles(options?: {
 }> {
   const pageSize = options?.pageSize ?? ARTICLES_PAGE_SIZE;
 
-  const revalidateInBackgroundIfStale = (cachedAt: number) => {
-    if (Date.now() - cachedAt < BACKGROUND_REVALIDATE_AGE_MS) return;
-    void dedupeInFlight(`revalidateInitialArticles:${pageSize}`, async () => {
-      if (await isSheetsStorageActive()) {
-        try {
-          const res = await fetchNewsPageFromSheets({
-            page: 1,
-            limit: pageSize,
-            forceRefresh: false,
-          });
-          const cleaned = res.articles.filter((a) => !REMOVED_LEGACY_ARTICLE_IDS.has(a.id));
-          if (cleaned.length > 0) {
-            updateSharedArticlesCache(sortArticlesForFeed(cleaned), res.hasMore);
-          }
-        } catch {
-          // Ignore background refresh failure
-        }
-      }
-    });
-  };
-
   if (!options?.forceRefresh) {
     if (sharedArticlesLoaded && sharedArticles.length > 0) {
       const freshMem = getCachedValue<NewsArticle[]>(ARTICLES_LIST_CACHE_KEY);
       if (freshMem) {
-        revalidateInBackgroundIfStale(freshMem.cachedAt);
         return {
           articles: sharedArticles,
           hasMore: sharedHasMoreArticles,
@@ -369,7 +346,6 @@ export async function loadInitialArticles(options?: {
       }
       emitArticlesState();
       void syncArticleViewCountsFromServer();
-      revalidateInBackgroundIfStale(cached.cachedAt);
       return {
         articles: cleaned,
         hasMore: sharedHasMoreArticles,
@@ -955,8 +931,9 @@ export async function removeLegacyFogArticleIfPresent(): Promise<void> {
       // Proceed cleanly
     }
   }
-  if (isQuotaCooldownActive()) return;
+  if (isQuotaCooldownActive() || !auth.currentUser) return;
   try {
+    if (await isSheetsStorageActive()) return;
     await ensureFreshVerifiedToken(auth.currentUser);
     for (const legacyId of REMOVED_LEGACY_ARTICLE_IDS) {
       await deleteDoc(doc(db, 'articles', legacyId));

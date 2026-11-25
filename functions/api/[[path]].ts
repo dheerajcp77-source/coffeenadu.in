@@ -1,25 +1,21 @@
 /**
- * Cloudflare Pages Function: /api/* reverse proxy
+ * Cloudflare Pages Function: /api/* hybrid router & reverse proxy
  *
- * Proxies all same-origin `/api/*` requests from the Cloudflare Pages frontend
- * to the existing CoffeeNadu News Express backend while preserving HTTP methods,
- * query strings, request bodies, auth headers, cookies, redirects, and binary streams.
- *
- * Secrets (such as APPS_SCRIPT_API_SECRET) remain strictly on the Express backend.
+ * - If BACKEND_ORIGIN is configured to a live, non-deprecated Express backend,
+ *   proxies `/api/*` requests to it while preserving methods, headers, cookies, and streams.
+ * - If BACKEND_ORIGIN is unset, deprecated (e.g. dead preview origins), unreachable,
+ *   or returns a dead HTML 404/5xx page, seamlessly executes the route directly in
+ *   Cloudflare Pages Functions using APPS_SCRIPT_WEBAPP_URL & APPS_SCRIPT_API_SECRET.
  */
 
-const DEFAULT_BACKEND_ORIGIN = 'https://coffeenad-news.ai.studio';
-const UPSTREAM_TIMEOUT_MS = 25_000;
+import {
+  handleApiDirectOnCloudflare,
+  isDeadUpstreamHtmlResponse,
+  resolveConfiguredBackendOrigin,
+  type PagesFunctionContext,
+} from '../_cfBackend';
 
-interface PagesEnv {
-  BACKEND_ORIGIN?: string;
-}
-
-interface PagesFunctionContext {
-  request: Request;
-  env: PagesEnv;
-  params: Record<string, string | string[]>;
-}
+const UPSTREAM_TIMEOUT_MS = 20_000;
 
 const HOP_BY_HOP_REQUEST_HEADERS = new Set([
   'host',
@@ -47,32 +43,6 @@ const HOP_BY_HOP_RESPONSE_HEADERS = new Set([
   'upgrade',
 ]);
 
-function resolveBackendOrigin(env: PagesEnv | undefined): URL {
-  const raw = (env?.BACKEND_ORIGIN || '').trim();
-  if (raw) {
-    try {
-      const parsed = new URL(raw);
-      const hostname = parsed.hostname.toLowerCase();
-      const isUnsafeHost =
-        hostname === 'localhost' ||
-        hostname === '0.0.0.0' ||
-        hostname === '127.0.0.1' ||
-        hostname === '::1' ||
-        hostname === '[::1]' ||
-        hostname.startsWith('10.') ||
-        hostname.startsWith('192.168.') ||
-        hostname.startsWith('169.254.') ||
-        /^172\.(1[6-9]|2\d|3[0-1])\./.test(hostname);
-      if (parsed.protocol === 'https:' && !isUnsafeHost) {
-        return new URL(parsed.origin);
-      }
-    } catch {
-      // Fall back to default trusted backend origin
-    }
-  }
-  return new URL(DEFAULT_BACKEND_ORIGIN);
-}
-
 function jsonErrorResponse(status: number, error: string): Response {
   return new Response(JSON.stringify({ ok: false, error }), {
     status,
@@ -93,8 +63,6 @@ function extractSetCookies(headers: Headers): string[] {
 }
 
 function rewriteSetCookieForProxyOrigin(cookie: string, backendHostname: string): string {
-  // Preserve host-only cookies (such as cn_admin2_rem) and strip only Domain attributes
-  // targeting the upstream backend host so the browser stores them for the Pages origin.
   const escapedHost = backendHostname.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const domainPattern = new RegExp(`;\\s*Domain=\\.?${escapedHost}(?=;|$)`, 'gi');
   return cookie.replace(domainPattern, '');
@@ -130,8 +98,6 @@ function buildUpstreamRequestHeaders(request: Request, incomingUrl: URL): Header
     upstreamHeaders.set(key, value);
   });
 
-  // Preserve original client IP and origin metadata for backend audit logs,
-  // analytics referrer/IP tracking, Secure cookie checks, and share-origin detection.
   const clientIp = request.headers.get('cf-connecting-ip');
   if (clientIp) {
     const existingFwd = upstreamHeaders.get('x-forwarded-for');
@@ -159,8 +125,6 @@ function buildProxyResponseHeaders(
     if (HOP_BY_HOP_RESPONSE_HEADERS.has(lower) || lower === 'set-cookie') {
       return;
     }
-    // Cloudflare Workers automatically decompresses upstream responses;
-    // forwarding content-encoding (or the compressed content-length) corrupts browser decoding.
     if (lower === 'content-encoding' || (hadContentEncoding && lower === 'content-length')) {
       return;
     }
@@ -182,11 +146,6 @@ function buildProxyResponseHeaders(
   return responseHeaders;
 }
 
-function isTimeoutError(err: unknown): boolean {
-  if (!(err instanceof Error)) return false;
-  return err.name === 'TimeoutError' || err.name === 'AbortError';
-}
-
 export async function onRequest(context: PagesFunctionContext): Promise<Response> {
   const { request, env } = context;
   const incomingUrl = new URL(request.url);
@@ -195,10 +154,12 @@ export async function onRequest(context: PagesFunctionContext): Promise<Response
     return jsonErrorResponse(400, 'Invalid API proxy path.');
   }
 
-  const backendOrigin = resolveBackendOrigin(env);
-  const targetUrl = new URL(`${incomingUrl.pathname}${incomingUrl.search}`, backendOrigin);
+  const backendOrigin = resolveConfiguredBackendOrigin(env);
+  if (!backendOrigin) {
+    return handleApiDirectOnCloudflare(context);
+  }
 
-  // Guard against path traversal or host confusion escaping the fixed backend /api prefix.
+  const targetUrl = new URL(`${incomingUrl.pathname}${incomingUrl.search}`, backendOrigin);
   if (
     targetUrl.origin !== backendOrigin.origin ||
     (targetUrl.pathname !== '/api' && !targetUrl.pathname.startsWith('/api/'))
@@ -207,8 +168,11 @@ export async function onRequest(context: PagesFunctionContext): Promise<Response
   }
 
   const method = request.method.toUpperCase();
-  const upstreamHeaders = buildUpstreamRequestHeaders(request, incomingUrl);
+  // Clone non-GET/HEAD requests before reading request.body so direct fallback can read the body safely
+  const fallbackRequest =
+    method !== 'GET' && method !== 'HEAD' && request.body !== null ? request.clone() : request;
 
+  const upstreamHeaders = buildUpstreamRequestHeaders(request, incomingUrl);
   const fetchInit: RequestInit & { duplex?: 'half' } = {
     method,
     headers: upstreamHeaders,
@@ -227,14 +191,18 @@ export async function onRequest(context: PagesFunctionContext): Promise<Response
   let upstreamResponse: Response;
   try {
     upstreamResponse = await fetch(targetUrl.toString(), fetchInit);
-  } catch (err) {
-    if (isTimeoutError(err)) {
-      return jsonErrorResponse(
-        504,
-        'The CoffeeNadu News backend timed out while processing the request.'
-      );
+  } catch {
+    return handleApiDirectOnCloudflare({ ...context, request: fallbackRequest });
+  }
+
+  // Never forward dead upstream 404/5xx HTML pages (e.g. expired preview hosts)
+  if (isDeadUpstreamHtmlResponse(upstreamResponse)) {
+    try {
+      await upstreamResponse.body?.cancel();
+    } catch {
+      // Ignore cancel error
     }
-    return jsonErrorResponse(502, 'Unable to reach the CoffeeNadu News backend service.');
+    return handleApiDirectOnCloudflare({ ...context, request: fallbackRequest });
   }
 
   const responseHeaders = buildProxyResponseHeaders(

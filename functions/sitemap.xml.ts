@@ -1,22 +1,22 @@
 /**
- * Cloudflare Pages Function: /sitemap.xml reverse proxy
+ * Cloudflare Pages Function: /sitemap.xml
  *
- * The Admin 2.0 SEO panel links directly to `/sitemap.xml` on the current origin.
- * This function proxies GET/HEAD requests for `/sitemap.xml` to the existing
- * CoffeeNadu News Express backend without modifying the backend itself.
+ * Proxies to BACKEND_ORIGIN when configured to a live Express server, or generates
+ * the complete XML sitemap directly from Google Apps Script in Cloudflare Pages mode.
  */
 
-const DEFAULT_BACKEND_ORIGIN = 'https://coffeenad-news.ai.studio';
-const UPSTREAM_TIMEOUT_MS = 20_000;
+import {
+  callAppsScriptGet,
+  fetchAllPublishedNewsDirect,
+  getAppsScriptConfig,
+  isDeadUpstreamHtmlResponse,
+  resolveConfiguredBackendOrigin,
+  resolvePublicOrigin,
+  type PagesFunctionContext,
+  type SheetsEventItem,
+} from './_cfBackend';
 
-interface PagesEnv {
-  BACKEND_ORIGIN?: string;
-}
-
-interface PagesFunctionContext {
-  request: Request;
-  env: PagesEnv;
-}
+const UPSTREAM_TIMEOUT_MS = 18_000;
 
 const HOP_BY_HOP_RESPONSE_HEADERS = new Set([
   'connection',
@@ -29,39 +29,105 @@ const HOP_BY_HOP_RESPONSE_HEADERS = new Set([
   'upgrade',
 ]);
 
-function resolveBackendOrigin(env: PagesEnv | undefined): URL {
-  const raw = (env?.BACKEND_ORIGIN || '').trim();
-  if (raw) {
-    try {
-      const parsed = new URL(raw);
-      const hostname = parsed.hostname.toLowerCase();
-      const isUnsafeHost =
-        hostname === 'localhost' ||
-        hostname === '0.0.0.0' ||
-        hostname === '127.0.0.1' ||
-        hostname === '::1' ||
-        hostname === '[::1]' ||
-        hostname.startsWith('10.') ||
-        hostname.startsWith('192.168.') ||
-        hostname.startsWith('169.254.') ||
-        /^172\.(1[6-9]|2\d|3[0-1])\./.test(hostname);
-      if (parsed.protocol === 'https:' && !isUnsafeHost) {
-        return new URL(parsed.origin);
-      }
-    } catch {
-      // Fall back to default trusted backend origin
-    }
-  }
-  return new URL(DEFAULT_BACKEND_ORIGIN);
+function escapeXml(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&apos;');
 }
 
-async function proxySitemap(context: PagesFunctionContext): Promise<Response> {
+function toIsoDate(value?: string | number): string | undefined {
+  if (typeof value === 'number' && Number.isFinite(value) && value > 0) {
+    return new Date(value).toISOString().slice(0, 10);
+  }
+  if (typeof value === 'string' && value.trim()) {
+    const parsed = new Date(value.trim());
+    if (!Number.isNaN(parsed.getTime())) {
+      return parsed.toISOString().slice(0, 10);
+    }
+  }
+  return undefined;
+}
+
+async function generateDirectSitemap(context: PagesFunctionContext): Promise<Response> {
+  const { request, env } = context;
+  const method = request.method.toUpperCase();
+  const publicOrigin = resolvePublicOrigin(env);
+  const todayIso = new Date().toISOString().slice(0, 10);
+
+  const entries: Array<{ loc: string; lastmod?: string; changefreq: string; priority: string }> = [
+    { loc: `${publicOrigin}/`, lastmod: todayIso, changefreq: 'hourly', priority: '1.0' },
+    { loc: `${publicOrigin}/events`, lastmod: todayIso, changefreq: 'daily', priority: '0.8' },
+    { loc: `${publicOrigin}/bus-timings`, lastmod: todayIso, changefreq: 'weekly', priority: '0.7' },
+    { loc: `${publicOrigin}/ads`, lastmod: todayIso, changefreq: 'daily', priority: '0.7' },
+  ];
+
+  if (getAppsScriptConfig(env).configured) {
+    try {
+      const [articles, eventsRes] = await Promise.all([
+        fetchAllPublishedNewsDirect(env, false).catch(() => []),
+        callAppsScriptGet<{ ok?: boolean; items?: SheetsEventItem[] }>(env, 'getEvents', {
+          page: 1,
+          limit: 100,
+        }).catch(() => ({ ok: false, items: [] as SheetsEventItem[] })),
+      ]);
+
+      for (const article of articles) {
+        if (!article.newsId) continue;
+        entries.push({
+          loc: `${publicOrigin}/?article=${encodeURIComponent(article.newsId)}`,
+          lastmod: toIsoDate(article.publishedTimestamp) || toIsoDate(article.updatedDate) || todayIso,
+          changefreq: 'daily',
+          priority: article.featured ? '0.9' : '0.8',
+        });
+      }
+
+      const events = Array.isArray(eventsRes?.items) ? eventsRes.items : [];
+      for (const ev of events) {
+        if (!ev.eventId) continue;
+        entries.push({
+          loc: `${publicOrigin}/events?event=${encodeURIComponent(ev.eventId)}`,
+          lastmod: toIsoDate(ev.updatedAt) || toIsoDate(ev.eventDate) || todayIso,
+          changefreq: 'weekly',
+          priority: '0.7',
+        });
+      }
+    } catch {
+      // Return static entries if Apps Script query fails transiently
+    }
+  }
+
+  const urlsXml = entries
+    .map((entry) => {
+      const lastmodXml = entry.lastmod ? `<lastmod>${escapeXml(entry.lastmod)}</lastmod>` : '';
+      return `  <url><loc>${escapeXml(entry.loc)}</loc>${lastmodXml}<changefreq>${entry.changefreq}</changefreq><priority>${entry.priority}</priority></url>`;
+    })
+    .join('\n');
+
+  const xml = `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urlsXml}\n</urlset>\n`;
+
+  return new Response(method === 'HEAD' ? null : xml, {
+    status: 200,
+    headers: {
+      'content-type': 'application/xml; charset=utf-8',
+      'cache-control': 'public, max-age=300, s-maxage=900',
+    },
+  });
+}
+
+async function handleSitemap(context: PagesFunctionContext): Promise<Response> {
   const { request, env } = context;
   const method = request.method.toUpperCase();
   const incomingUrl = new URL(request.url);
-  const backendOrigin = resolveBackendOrigin(env);
-  const targetUrl = new URL('/sitemap.xml', backendOrigin);
+  const backendOrigin = resolveConfiguredBackendOrigin(env);
 
+  if (!backendOrigin) {
+    return generateDirectSitemap(context);
+  }
+
+  const targetUrl = new URL('/sitemap.xml', backendOrigin);
   const upstreamHeaders = new Headers();
   const accept = request.headers.get('accept');
   if (accept) upstreamHeaders.set('accept', accept);
@@ -83,21 +149,22 @@ async function proxySitemap(context: PagesFunctionContext): Promise<Response> {
   let upstreamResponse: Response;
   try {
     upstreamResponse = await fetch(targetUrl.toString(), fetchInit);
-  } catch (err) {
-    const isTimeout =
-      err instanceof Error && (err.name === 'TimeoutError' || err.name === 'AbortError');
-    return new Response(
-      isTimeout
-        ? 'Upstream backend timed out while generating sitemap.xml.'
-        : 'Unable to reach the CoffeeNadu News backend service for sitemap.xml.',
-      {
-        status: isTimeout ? 504 : 502,
-        headers: {
-          'content-type': 'text/plain; charset=utf-8',
-          'cache-control': 'no-store',
-        },
-      }
-    );
+  } catch {
+    return generateDirectSitemap(context);
+  }
+
+  const contentType = (upstreamResponse.headers.get('content-type') || '').toLowerCase();
+  if (
+    isDeadUpstreamHtmlResponse(upstreamResponse) ||
+    !upstreamResponse.ok ||
+    !contentType.includes('xml')
+  ) {
+    try {
+      await upstreamResponse.body?.cancel();
+    } catch {
+      // Ignore cancel error
+    }
+    return generateDirectSitemap(context);
   }
 
   const responseHeaders = new Headers();
@@ -122,9 +189,9 @@ async function proxySitemap(context: PagesFunctionContext): Promise<Response> {
 }
 
 export async function onRequestGet(context: PagesFunctionContext): Promise<Response> {
-  return proxySitemap(context);
+  return handleSitemap(context);
 }
 
 export async function onRequestHead(context: PagesFunctionContext): Promise<Response> {
-  return proxySitemap(context);
+  return handleSitemap(context);
 }

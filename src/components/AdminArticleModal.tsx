@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent } from 'react';
-import { ArrowDown, ArrowUp, BellRing, Clock, ImagePlus, Images, Link2, Loader2, Trash2, X } from 'lucide-react';
+import { ArrowDown, ArrowUp, Clock, ImagePlus, Images, Link2, Loader2, Trash2, X } from 'lucide-react';
 import {
   IMAGE_PRESETS,
   KOPPA_LOCATIONS,
@@ -60,8 +60,6 @@ export interface AdminArticlePayload {
   programDate?: string;
   programTime?: string;
   programOrganizer?: string;
-  sendBreakingPush?: boolean;
-  sendAllSubscribersPush?: boolean;
 }
 
 const LEAD_TIMER_PRESETS: { label: string; value: number; unit: 'hours' | 'days' }[] = [
@@ -319,8 +317,6 @@ export function AdminArticleModal({
   const [programDate, setProgramDate] = useState(getTodayYmd());
   const [programTime, setProgramTime] = useState('10:00 AM');
   const [programOrganizer, setProgramOrganizer] = useState('');
-  const [sendBreakingPush, setSendBreakingPush] = useState(false);
-  const [sendAllSubscribersPush, setSendAllSubscribersPush] = useState(false);
   const [isProcessingImage, setIsProcessingImage] = useState(false);
   const [isProcessingExtraImages, setIsProcessingExtraImages] = useState(false);
   const [extraUploadProgress, setExtraUploadProgress] = useState('');
@@ -386,8 +382,6 @@ export function AdminArticleModal({
     setProgramDate(getTodayYmd());
     setProgramTime('10:00 AM');
     setProgramOrganizer('');
-    setSendBreakingPush(false);
-    setSendAllSubscribersPush(false);
     setIsProcessingExtraImages(false);
     setExtraUploadProgress('');
     setIsSubmitting(false);
@@ -654,8 +648,6 @@ export function AdminArticleModal({
         programOrganizer: alsoAddToProgram
           ? programOrganizer.trim() || reporter.trim() || 'Koppa Taluk Committee'
           : undefined,
-        sendBreakingPush,
-        sendAllSubscribersPush,
       });
     } catch (err) {
       setErrorMessage(err instanceof Error ? err.message : 'Unable to save article.');
@@ -1327,46 +1319,6 @@ export function AdminArticleModal({
                 </div>
               </div>
             )}
-          </div>
-
-          {/* Optional Mobile Push Notification Controls */}
-          <div className="border border-blue-200 bg-blue-50/40 rounded-lg p-4 space-y-2.5">
-            <div className="flex items-center gap-1.5 text-xs font-bold text-[#0F274A]">
-              <BellRing className="w-3.5 h-3.5 text-red-600" aria-hidden="true" />
-              <span>Mobile Push Notification Alerts (Optional)</span>
-            </div>
-            <label className="flex items-start gap-2.5 text-xs text-slate-900 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={sendBreakingPush}
-                onChange={(e) => setSendBreakingPush(e.target.checked)}
-                className="w-4 h-4 mt-0.5 accent-red-600 rounded shrink-0"
-              />
-              <div>
-                <span className="font-semibold block">
-                  Send as Breaking News Notification
-                </span>
-                <span className="text-[11px] text-slate-600">
-                  Immediately notifies subscribed readers with Breaking / matching category alerts when published.
-                </span>
-              </div>
-            </label>
-            <label className="flex items-start gap-2.5 text-xs text-slate-900 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={sendAllSubscribersPush}
-                onChange={(e) => setSendAllSubscribersPush(e.target.checked)}
-                className="w-4 h-4 mt-0.5 accent-[#0F274A] rounded shrink-0"
-              />
-              <div>
-                <span className="font-semibold block">
-                  Send to All Subscribers
-                </span>
-                <span className="text-[11px] text-slate-600">
-                  Broadcasts this story to every active Coffeenadu mobile push subscriber (with duplicate protection).
-                </span>
-              </div>
-            </label>
           </div>
 
           {errorMessage && (

@@ -134,6 +134,21 @@ interface RawSheetsEventItem {
 
 let cachedStatus: { value: StorageStatusResponse; expiresAt: number } | null = null;
 
+async function readJsonSafe<T>(resp: Response, fallbackMessage: string): Promise<T> {
+  const raw = await resp.text();
+  const trimmed = raw.trim();
+  if (!trimmed) {
+    throw new Error(`${fallbackMessage} (HTTP ${resp.status})`);
+  }
+  try {
+    return JSON.parse(trimmed) as T;
+  } catch {
+    throw new Error(
+      `${fallbackMessage} (server returned non-JSON response, HTTP ${resp.status}).`
+    );
+  }
+}
+
 export async function getStorageBackendStatus(forceRefresh = false): Promise<StorageStatusResponse> {
   if (!forceRefresh && cachedStatus && Date.now() < cachedStatus.expiresAt) {
     return cachedStatus.value;
@@ -236,20 +251,20 @@ export async function fetchNewsPageFromSheets(options: {
 }): Promise<{ articles: NewsArticle[]; hasMore: boolean; total: number; fromCache: boolean }> {
   const params = new URLSearchParams();
   params.set('page', String(options.page || 1));
-  params.set('limit', String(options.limit || 50));
+  params.set('limit', String(options.limit || 15));
   if (options.forceRefresh) params.set('refresh', '1');
 
   const resp = await fetch(`/api/storage/news?${params.toString()}`, {
     cache: options.forceRefresh ? 'no-store' : 'default',
   });
-  const json = (await resp.json()) as {
+  const json = await readJsonSafe<{
     ok?: boolean;
     items?: RawSheetsNewsItem[];
     hasMore?: boolean;
     total?: number;
     fromCache?: boolean;
     error?: string;
-  };
+  }>(resp, 'Failed to load news from Google Sheets.');
   if (!resp.ok || !json.ok) {
     throw new Error(json.error || 'Failed to load news from Google Sheets.');
   }
@@ -264,8 +279,10 @@ export async function fetchNewsPageFromSheets(options: {
 export async function fetchNewsByIdFromSheets(newsId: string): Promise<NewsArticle | null> {
   const resp = await fetch(`/api/storage/news/${encodeURIComponent(newsId)}`);
   if (resp.status === 404) return null;
-  const json = (await resp.json()) as { ok?: boolean; item?: RawSheetsNewsItem };
-  if (!resp.ok || !json.ok || !json.item) return null;
+  const contentType = (resp.headers.get('content-type') || '').toLowerCase();
+  if (!contentType.includes('application/json')) return null;
+  const json = (await resp.json().catch(() => null)) as { ok?: boolean; item?: RawSheetsNewsItem } | null;
+  if (!resp.ok || !json?.ok || !json.item) return null;
   return mapSheetsItemToArticle(json.item);
 }
 
@@ -280,14 +297,14 @@ export async function fetchEventsPageFromSheets(options: {
   if (options.forceRefresh) params.set('refresh', '1');
 
   const resp = await fetch(`/api/storage/events?${params.toString()}`);
-  const json = (await resp.json()) as {
+  const json = await readJsonSafe<{
     ok?: boolean;
     items?: RawSheetsEventItem[];
     hasMore?: boolean;
     total?: number;
     fromCache?: boolean;
     error?: string;
-  };
+  }>(resp, 'Failed to load events from Google Sheets.');
   if (!resp.ok || !json.ok) {
     throw new Error(json.error || 'Failed to load events from Google Sheets.');
   }
@@ -302,8 +319,10 @@ export async function fetchEventsPageFromSheets(options: {
 export async function fetchEventByIdFromSheets(eventId: string): Promise<ProgramEvent | null> {
   const resp = await fetch(`/api/storage/events/${encodeURIComponent(eventId)}`);
   if (resp.status === 404) return null;
-  const json = (await resp.json()) as { ok?: boolean; item?: RawSheetsEventItem };
-  if (!resp.ok || !json.ok || !json.item) return null;
+  const contentType = (resp.headers.get('content-type') || '').toLowerCase();
+  if (!contentType.includes('application/json')) return null;
+  const json = (await resp.json().catch(() => null)) as { ok?: boolean; item?: RawSheetsEventItem } | null;
+  if (!resp.ok || !json?.ok || !json.item) return null;
   return mapSheetsItemToEvent(json.item);
 }
 
@@ -399,7 +418,7 @@ export async function uploadImageToDriveViaServer(input: {
     headers,
     body: JSON.stringify(input),
   });
-  const json = (await resp.json()) as {
+  const json = await readJsonSafe<{
     ok?: boolean;
     fileId?: string;
     thumbFileId?: string;
@@ -407,7 +426,7 @@ export async function uploadImageToDriveViaServer(input: {
     imageThumbUrl?: string;
     deduplicated?: boolean;
     error?: string;
-  };
+  }>(resp, 'Failed to upload photo to Google Drive.');
   if (!resp.ok || !json.ok || !json.fileId || !json.imageUrl) {
     throw new Error(json.error || 'Failed to upload photo to Google Drive.');
   }
@@ -427,7 +446,10 @@ export async function createNewsViaSheets(payload: Record<string, unknown>): Pro
     headers,
     body: JSON.stringify(payload),
   });
-  const json = (await resp.json()) as { ok?: boolean; item?: RawSheetsNewsItem; error?: string };
+  const json = await readJsonSafe<{ ok?: boolean; item?: RawSheetsNewsItem; error?: string }>(
+    resp,
+    'Unable to publish news to Google Sheets.'
+  );
   if (!resp.ok || !json.ok || !json.item) {
     throw new Error(json.error || 'Unable to publish news to Google Sheets.');
   }
@@ -444,7 +466,10 @@ export async function updateNewsViaSheets(
     headers,
     body: JSON.stringify(payload),
   });
-  const json = (await resp.json()) as { ok?: boolean; item?: RawSheetsNewsItem; error?: string };
+  const json = await readJsonSafe<{ ok?: boolean; item?: RawSheetsNewsItem; error?: string }>(
+    resp,
+    'Unable to update news in Google Sheets.'
+  );
   if (!resp.ok || !json.ok || !json.item) {
     throw new Error(json.error || 'Unable to update news in Google Sheets.');
   }
@@ -466,14 +491,14 @@ export async function toggleNewsLeadViaSheets(
       tags: options.existingTags ?? '',
     }),
   });
-  const json = (await resp.json()) as {
+  const json = await readJsonSafe<{
     ok?: boolean;
     featured?: boolean;
     featuredUntil?: number;
     tags?: string;
     item?: RawSheetsNewsItem;
     error?: string;
-  };
+  }>(resp, 'Unable to update Lead Story status.');
   if (!resp.ok || !json.ok) {
     throw new Error(json.error || 'Unable to update Lead Story status.');
   }
@@ -491,7 +516,10 @@ export async function deleteNewsViaSheets(newsId: string): Promise<void> {
     method: 'DELETE',
     headers,
   });
-  const json = (await resp.json()) as { ok?: boolean; error?: string };
+  const json = await readJsonSafe<{ ok?: boolean; error?: string }>(
+    resp,
+    'Unable to delete news from Google Sheets.'
+  );
   if (!resp.ok || !json.ok) {
     throw new Error(json.error || 'Unable to delete news from Google Sheets.');
   }
@@ -504,7 +532,10 @@ export async function createEventViaSheets(payload: Record<string, unknown>): Pr
     headers,
     body: JSON.stringify(payload),
   });
-  const json = (await resp.json()) as { ok?: boolean; item?: RawSheetsEventItem; error?: string };
+  const json = await readJsonSafe<{ ok?: boolean; item?: RawSheetsEventItem; error?: string }>(
+    resp,
+    'Unable to create event in Google Sheets.'
+  );
   if (!resp.ok || !json.ok || !json.item) {
     throw new Error(json.error || 'Unable to create event in Google Sheets.');
   }
@@ -521,7 +552,10 @@ export async function updateEventViaSheets(
     headers,
     body: JSON.stringify(payload),
   });
-  const json = (await resp.json()) as { ok?: boolean; item?: RawSheetsEventItem; error?: string };
+  const json = await readJsonSafe<{ ok?: boolean; item?: RawSheetsEventItem; error?: string }>(
+    resp,
+    'Unable to update event in Google Sheets.'
+  );
   if (!resp.ok || !json.ok || !json.item) {
     throw new Error(json.error || 'Unable to update event in Google Sheets.');
   }
@@ -534,7 +568,10 @@ export async function deleteEventViaSheets(eventId: string): Promise<void> {
     method: 'DELETE',
     headers,
   });
-  const json = (await resp.json()) as { ok?: boolean; error?: string };
+  const json = await readJsonSafe<{ ok?: boolean; error?: string }>(
+    resp,
+    'Unable to delete event from Google Sheets.'
+  );
   if (!resp.ok || !json.ok) {
     throw new Error(json.error || 'Unable to delete event from Google Sheets.');
   }
@@ -543,7 +580,10 @@ export async function deleteEventViaSheets(eventId: string): Promise<void> {
 export async function fetchStorageAdminHealth(): Promise<AdminStorageHealthResponse> {
   const headers = await getAdminAuthHeaders();
   const resp = await fetch('/api/storage/admin/health', { headers });
-  const json = (await resp.json()) as AdminStorageHealthResponse;
+  const json = await readJsonSafe<AdminStorageHealthResponse>(
+    resp,
+    'Unable to check storage status.'
+  );
   if (!resp.ok && !json.quota) {
     throw new Error(json.error || 'Unable to check storage status.');
   }
@@ -562,7 +602,16 @@ export async function triggerBackupNowViaServer(): Promise<{
 }> {
   const headers = await getAdminAuthHeaders();
   const resp = await fetch('/api/storage/admin/backup-now', { method: 'POST', headers });
-  const json = await resp.json();
+  const json = await readJsonSafe<{
+    ok: boolean;
+    jsonFileName?: string;
+    csvFileName?: string;
+    articleCount?: number;
+    eventCount?: number;
+    availableBackupsCount?: number;
+    createdAt?: string;
+    error?: string;
+  }>(resp, 'Backup creation failed.');
   if (!resp.ok || !json.ok) {
     throw new Error(json.error || 'Backup creation failed.');
   }
@@ -572,7 +621,10 @@ export async function triggerBackupNowViaServer(): Promise<{
 export async function fetchAvailableBackupsViaServer(): Promise<BackupListItem[]> {
   const headers = await getAdminAuthHeaders();
   const resp = await fetch('/api/storage/admin/backups', { headers });
-  const json = (await resp.json()) as { ok?: boolean; backups?: BackupListItem[]; error?: string };
+  const json = await readJsonSafe<{ ok?: boolean; backups?: BackupListItem[]; error?: string }>(
+    resp,
+    'Unable to fetch backup list.'
+  );
   if (!resp.ok || !json.ok) {
     throw new Error(json.error || 'Unable to fetch backup list.');
   }
@@ -586,7 +638,7 @@ export async function previewBackupViaServer(fileId: string): Promise<BackupPrev
     headers,
     body: JSON.stringify({ fileId }),
   });
-  const json = (await resp.json()) as BackupPreviewResponse;
+  const json = await readJsonSafe<BackupPreviewResponse>(resp, 'Unable to preview backup.');
   if (!resp.ok || !json.ok) {
     throw new Error(json.error || 'Unable to preview backup.');
   }
@@ -609,7 +661,13 @@ export async function restoreBackupViaServer(input: {
     headers,
     body: JSON.stringify(input),
   });
-  const json = await resp.json();
+  const json = await readJsonSafe<{
+    ok: boolean;
+    restoredCount: number;
+    skippedCount: number;
+    safetyBackupFileName: string;
+    error?: string;
+  }>(resp, 'Restore operation failed.');
   if (!resp.ok || !json.ok) {
     throw new Error(json.error || 'Restore operation failed.');
   }
@@ -622,12 +680,12 @@ export async function exportAllFromSheetsViaServer(): Promise<{
 }> {
   const headers = await getAdminAuthHeaders();
   const resp = await fetch('/api/storage/admin/export', { headers });
-  const json = (await resp.json()) as {
+  const json = await readJsonSafe<{
     ok?: boolean;
     data?: Record<string, unknown>;
     csv?: string;
     error?: string;
-  };
+  }>(resp, 'Unable to export news.');
   if (!resp.ok || !json.ok || !json.data) {
     throw new Error(json.error || 'Unable to export news.');
   }
@@ -702,7 +760,10 @@ export async function migrateBatchToSheetsViaServer(input: {
     headers,
     body: JSON.stringify(input),
   });
-  const json = await resp.json();
+  const json = await readJsonSafe<Record<string, unknown> & { ok?: boolean; error?: string }>(
+    resp,
+    'Migration batch failed.'
+  );
   if (!resp.ok || !json.ok) {
     throw new Error(json.error || 'Migration batch failed.');
   }
@@ -713,12 +774,12 @@ export async function migrateBatchToSheetsViaServer(input: {
     skippedEvents: Number(json.skippedEvents) || 0,
     migratedImages: Number(json.migratedImages) || 0,
     categoriesAdded: Number(json.categoriesAdded) || 0,
-    migratedNewsIds: Array.isArray(json.migratedNewsIds) ? json.migratedNewsIds : [],
-    duplicateNewsIds: Array.isArray(json.duplicateNewsIds) ? json.duplicateNewsIds : [],
-    failedNews: Array.isArray(json.failedNews) ? json.failedNews : [],
-    migratedEventIds: Array.isArray(json.migratedEventIds) ? json.migratedEventIds : [],
-    duplicateEventIds: Array.isArray(json.duplicateEventIds) ? json.duplicateEventIds : [],
-    failedEvents: Array.isArray(json.failedEvents) ? json.failedEvents : [],
+    migratedNewsIds: Array.isArray(json.migratedNewsIds) ? (json.migratedNewsIds as string[]) : [],
+    duplicateNewsIds: Array.isArray(json.duplicateNewsIds) ? (json.duplicateNewsIds as string[]) : [],
+    failedNews: Array.isArray(json.failedNews) ? (json.failedNews as MigrationRecordFailure[]) : [],
+    migratedEventIds: Array.isArray(json.migratedEventIds) ? (json.migratedEventIds as string[]) : [],
+    duplicateEventIds: Array.isArray(json.duplicateEventIds) ? (json.duplicateEventIds as string[]) : [],
+    failedEvents: Array.isArray(json.failedEvents) ? (json.failedEvents as MigrationRecordFailure[]) : [],
     totalNewsInSheet: Number(json.totalNewsInSheet) || 0,
     totalEventsInSheet: Number(json.totalEventsInSheet) || 0,
   };
@@ -735,7 +796,10 @@ export async function verifyMigrationViaServer(input: {
     headers,
     body: JSON.stringify(input),
   });
-  const json = await resp.json();
+  const json = await readJsonSafe<Record<string, unknown> & { ok?: boolean; error?: string }>(
+    resp,
+    'Migration verification failed.'
+  );
   if (!resp.ok || !json.ok) {
     throw new Error(json.error || 'Migration verification failed.');
   }
@@ -744,12 +808,12 @@ export async function verifyMigrationViaServer(input: {
     allVerified: Boolean(json.allVerified),
     fullyVerifiedComplete: Boolean(json.fullyVerifiedComplete),
     exportComplete: Boolean(json.exportComplete),
-    verifiedNewsIds: Array.isArray(json.verifiedNewsIds) ? json.verifiedNewsIds : [],
-    missingNewsIds: Array.isArray(json.missingNewsIds) ? json.missingNewsIds : [],
-    mismatchedNews: Array.isArray(json.mismatchedNews) ? json.mismatchedNews : [],
-    verifiedEventIds: Array.isArray(json.verifiedEventIds) ? json.verifiedEventIds : [],
-    missingEventIds: Array.isArray(json.missingEventIds) ? json.missingEventIds : [],
-    mismatchedEvents: Array.isArray(json.mismatchedEvents) ? json.mismatchedEvents : [],
+    verifiedNewsIds: Array.isArray(json.verifiedNewsIds) ? (json.verifiedNewsIds as string[]) : [],
+    missingNewsIds: Array.isArray(json.missingNewsIds) ? (json.missingNewsIds as string[]) : [],
+    mismatchedNews: Array.isArray(json.mismatchedNews) ? (json.mismatchedNews as MigrationRecordFailure[]) : [],
+    verifiedEventIds: Array.isArray(json.verifiedEventIds) ? (json.verifiedEventIds as string[]) : [],
+    missingEventIds: Array.isArray(json.missingEventIds) ? (json.missingEventIds as string[]) : [],
+    mismatchedEvents: Array.isArray(json.mismatchedEvents) ? (json.mismatchedEvents as MigrationRecordFailure[]) : [],
     totalNewsInSheet: Number(json.totalNewsInSheet) || 0,
     totalEventsInSheet: Number(json.totalEventsInSheet) || 0,
     totalCategoriesInSheet: Number(json.totalCategoriesInSheet) || 0,
@@ -760,14 +824,20 @@ export async function verifyMigrationViaServer(input: {
 export async function flushPendingViewsViaServer(): Promise<{ flushed: boolean; count: number }> {
   const headers = await getAdminAuthHeaders();
   const resp = await fetch('/api/storage/admin/flush-views', { method: 'POST', headers });
-  const json = await resp.json();
+  const json = await readJsonSafe<{ flushed?: boolean; count?: number }>(
+    resp,
+    'Unable to flush pending views.'
+  );
   return { flushed: Boolean(json.flushed), count: Number(json.count) || 0 };
 }
 
 export async function fetchAppsScriptSourceCode(): Promise<string> {
   const headers = await getAdminAuthHeaders();
   const resp = await fetch('/api/storage/admin/apps-script-source', { headers });
-  const json = (await resp.json()) as { ok?: boolean; code?: string; error?: string };
+  const json = await readJsonSafe<{ ok?: boolean; code?: string; error?: string }>(
+    resp,
+    'Unable to load Apps Script source.'
+  );
   if (!resp.ok || !json.ok || !json.code) {
     throw new Error(json.error || 'Unable to load Apps Script source.');
   }
