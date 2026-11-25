@@ -4,6 +4,7 @@ import type { AdPlatformSettings, Advertisement } from '../types/ads';
 import type { NewsArticle } from '../types/news';
 import { HomepageAdSlot } from './HomepageAdSlot';
 import { NewsletterAlertCard } from './NewsletterAlertCard';
+import { PublicPWAInstallCard } from './PublicPWAInstallCard';
 import { TrendingNewsSection } from './TrendingNewsSection';
 import { WhatsAppGroupBanner } from './WhatsAppGroupBanner';
 
@@ -192,6 +193,9 @@ export function RightRail({
           </table>
         </div>
       </section>
+
+      {/* Public PWA Install Prompt Card */}
+      <PublicPWAInstallCard />
 
       {/* Daily Digest & Breaking News Opt-In Card */}
       <NewsletterAlertCard />

@@ -72,6 +72,7 @@ import {
   exchangeFirebaseForAdmin2Session,
   logoutAdmin2Session,
   revokeAdmin2SessionKeepalive,
+  sendAdmin2BreakingPush,
 } from '../services/admin2Client';
 import {
   isAndroidKeystoreVaultAvailable,
@@ -681,21 +682,37 @@ export function AdminPanel({ articles, onNavigateHome }: AdminPanelProps) {
         });
       }
 
+      let pushNote = '';
+      if (savedArticleId && (payload.sendBreakingPush || payload.sendAllSubscribersPush)) {
+        try {
+          const pushSummary = await sendAdmin2BreakingPush({
+            articleId: savedArticleId,
+            title: payload.titleKannada,
+            summary: payload.summaryKannada,
+            category: payload.category,
+            location: payload.location,
+            mode: payload.sendAllSubscribersPush ? 'all' : 'breaking',
+          });
+          pushNote = ` Mobile Push: sent to ${pushSummary.sent}/${pushSummary.targeted} device(s).`;
+        } catch {
+          pushNote = ' Mobile push broadcast skipped or failed.';
+        }
+      }
+
       if (savedArticleId) {
         setLastPublishedUrl(buildArticlePublicUrl(savedArticleId));
       }
 
       setModalOpen(false);
       setEditingArticle(null);
-      setDashboardFeedback(
-        payload.alsoAddToProgram
-          ? editingArticle
-            ? 'Article updated and also added to Programs & Events calendar.'
-            : 'Published to both News and Programs & Events calendar.'
-          : editingArticle
-          ? 'Article updated and saved permanently.'
-          : 'New article published and saved permanently for all readers.'
-      );
+      const baseMsg = payload.alsoAddToProgram
+        ? editingArticle
+          ? 'Article updated and also added to Programs & Events calendar.'
+          : 'Published to both News and Programs & Events calendar.'
+        : editingArticle
+        ? 'Article updated and saved permanently.'
+        : 'New article published and saved permanently for all readers.';
+      setDashboardFeedback(`${baseMsg}${pushNote}`);
       if (activeSection === 'add-article') {
         setActiveSection('news');
       }

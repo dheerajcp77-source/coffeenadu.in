@@ -75,12 +75,45 @@
 .cn-ticker-track {
   display: flex;
   width: max-content;
-  animation: cn-ticker-scroll 38s linear infinite;
+  animation: cn-ticker-scroll 40s linear infinite;
+  will-change: transform;
 }
 
 .cn-ticker-container:hover .cn-ticker-track,
-.cn-ticker-container:focus-within .cn-ticker-track {
-  animation-play-state: paused;
+.cn-ticker-container:focus-within .cn-ticker-track,
+.cn-ticker-paused .cn-ticker-track {
+  animation-play-state: paused !important;
+}
+
+@keyframes cn-lead-progress {
+  0% {
+    transform: scaleX(0);
+  }
+  100% {
+    transform: scaleX(1);
+  }
+}
+
+.cn-lead-progress-bar {
+  transform-origin: left center;
+  animation-name: cn-lead-progress;
+  animation-timing-function: linear;
+  animation-fill-mode: forwards;
+}
+
+@keyframes cn-reveal-in {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 6px, 0);
+  }
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0);
+  }
+}
+
+.cn-reveal {
+  animation: cn-reveal-in 280ms ease-out both;
 }
 
 .pb-safe {

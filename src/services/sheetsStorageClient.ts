@@ -236,7 +236,7 @@ export async function fetchNewsPageFromSheets(options: {
 }): Promise<{ articles: NewsArticle[]; hasMore: boolean; total: number; fromCache: boolean }> {
   const params = new URLSearchParams();
   params.set('page', String(options.page || 1));
-  params.set('limit', String(options.limit || 15));
+  params.set('limit', String(options.limit || 50));
   if (options.forceRefresh) params.set('refresh', '1');
 
   const resp = await fetch(`/api/storage/news?${params.toString()}`, {

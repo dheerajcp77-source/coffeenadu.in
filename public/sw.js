@@ -1,11 +1,11 @@
-/* CoffeeNadu Admin 2.0 Service Worker
+/* CoffeeNadu News & Admin 2.0 Service Worker
  * Security policy:
  * - NEVER cache /api/* responses, administrator credentials, auth tokens,
  *   Firebase/Google auth endpoints, Apps Script calls, or authenticated pages.
  * - Cache ONLY static public shell assets (JS/CSS bundles, icons, fonts).
  */
 
-const CACHE_VERSION = 'coffeenadu-admin-shell-v1';
+const CACHE_VERSION = 'coffeenadu-shell-v2';
 const STATIC_SHELL_ASSETS = [
   '/manifest.webmanifest',
   '/pwa-192x192.png',
@@ -190,19 +190,95 @@ self.addEventListener('fetch', (event) => {
   }
 });
 
-// Notification click handler for opt-in admin alerts
+// Web Push incoming alert handler
+self.addEventListener('push', (event) => {
+  let payload = {
+    title: 'Coffeenadu News',
+    body: 'ತಾಜಾ ಕೊಪ್ಪ ಹಾಗೂ ಮಲೆನಾಡು ಸುದ್ದಿಗಳು ಲಭ್ಯವಿವೆ.',
+    url: '/',
+    icon: '/pwa-192x192.png',
+    badge: '/pwa-192x192.png',
+    image: undefined,
+    tag: 'coffeenadu-news-alert',
+    articleId: '',
+  };
+
+  if (event.data) {
+    try {
+      const parsed = event.data.json();
+      if (parsed && typeof parsed === 'object') {
+        payload = {
+          title: typeof parsed.title === 'string' && parsed.title ? parsed.title : payload.title,
+          body: typeof parsed.body === 'string' && parsed.body ? parsed.body : payload.body,
+          url: typeof parsed.url === 'string' && parsed.url ? parsed.url : '/',
+          icon: typeof parsed.icon === 'string' && parsed.icon ? parsed.icon : '/pwa-192x192.png',
+          badge: typeof parsed.badge === 'string' && parsed.badge ? parsed.badge : '/pwa-192x192.png',
+          image: typeof parsed.image === 'string' && parsed.image ? parsed.image : undefined,
+          tag: typeof parsed.tag === 'string' && parsed.tag ? parsed.tag : payload.tag,
+          articleId: typeof parsed.articleId === 'string' ? parsed.articleId : '',
+        };
+      }
+    } catch {
+      try {
+        const rawText = event.data.text();
+        if (rawText) payload.body = rawText.slice(0, 240);
+      } catch {
+        // Keep default payload
+      }
+    }
+  }
+
+  const options = {
+    body: payload.body,
+    icon: payload.icon,
+    badge: payload.badge,
+    tag: payload.tag,
+    renotify: Boolean(payload.tag),
+    data: {
+      url: payload.url,
+      articleId: payload.articleId,
+    },
+  };
+  if (payload.image) {
+    options.image = payload.image;
+  }
+
+  event.waitUntil(self.registration.showNotification(payload.title, options));
+});
+
+// Notification click handler: opens target article/route in existing tab or new window
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
-  const targetUrl = (event.notification.data && event.notification.data.url) || '/admin';
+  const rawTarget = (event.notification.data && event.notification.data.url) || '/';
+  let targetPath = '/';
+  try {
+    const parsed = new URL(rawTarget, self.location.origin);
+    targetPath = `${parsed.pathname}${parsed.search}${parsed.hash}` || '/';
+  } catch {
+    targetPath = '/';
+  }
+
   event.waitUntil(
-    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clients) => {
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(async (clients) => {
       for (const client of clients) {
-        if ('focus' in client && client.url.includes('/admin')) {
-          return client.focus();
+        try {
+          const clientUrl = new URL(client.url);
+          if (clientUrl.origin === self.location.origin) {
+            client.postMessage({ type: 'COFFEENADU_OPEN_URL', url: targetPath });
+            if ('focus' in client) {
+              await client.focus();
+            }
+            if ('navigate' in client && clientUrl.pathname !== '/admin') {
+              await client.navigate(targetPath).catch(() => undefined);
+            }
+            return client;
+          }
+        } catch {
+          // Try next client
         }
       }
       if (self.clients.openWindow) {
-        return self.clients.openWindow(targetUrl);
+        return self.clients.openWindow(targetPath);
       }
       return undefined;
     })

@@ -750,3 +750,81 @@ export interface Admin2HealthResponse {
 export async function fetchAdmin2Health(withPing = false): Promise<Admin2HealthResponse> {
   return admin2Fetch(`/api/admin2/health${withPing ? '?ping=1' : ''}`);
 }
+
+export interface Admin2PushStats {
+  totalSubscribers: number;
+  breakingSubscribers: number;
+  digestSubscribers: number;
+  localSubscribers: number;
+  agricultureSubscribers: number;
+  eventsSubscribers: number;
+  lastDigestRunAt: string | null;
+  lastDigestArticleCount: number;
+  vapidPublicKeyConfigured: boolean;
+}
+
+export interface Admin2PushDeliverySummary {
+  ok: boolean;
+  targeted: number;
+  sent: number;
+  failed: number;
+  pruned: number;
+  skippedAlreadyDelivered: number;
+  error?: string;
+  stats?: Admin2PushStats;
+}
+
+export async function fetchAdmin2PushStats(): Promise<{ ok: boolean; stats: Admin2PushStats }> {
+  return admin2Fetch('/api/admin2/push/stats');
+}
+
+export async function sendAdmin2BreakingPush(payload: {
+  articleId: string;
+  title: string;
+  summary?: string;
+  category?: string;
+  location?: string;
+  mode: 'breaking' | 'all';
+  bypassDedup?: boolean;
+}): Promise<Admin2PushDeliverySummary> {
+  return admin2Fetch('/api/admin2/push/send-breaking', {
+    method: 'POST',
+    body: payload,
+  });
+}
+
+export async function sendAdmin2DailyDigestNow(): Promise<Admin2PushDeliverySummary> {
+  return admin2Fetch('/api/admin2/push/send-daily-digest', {
+    method: 'POST',
+  });
+}
+
+export async function unpinOlderLeadStories(keepArticleId?: string): Promise<{
+  ok: boolean;
+  keptArticleId: string;
+  unpinnedCount: number;
+}> {
+  return admin2Fetch('/api/admin2/cms/leads/unpin-older', {
+    method: 'POST',
+    body: keepArticleId ? { keepArticleId } : {},
+  });
+}
+
+export interface PublicSiteSettings {
+  siteName: string;
+  siteTagline: string;
+  breakingTickerNotice: string;
+  leadCarouselIntervalSec: number;
+  whatsappGroupUrl: string;
+}
+
+export async function fetchPublicSiteSettings(): Promise<PublicSiteSettings | null> {
+  try {
+    const resp = await fetch('/api/public/site-settings', { cache: 'no-store' });
+    if (!resp.ok) return null;
+    const json = (await resp.json()) as { ok?: boolean; settings?: PublicSiteSettings };
+    return json.ok && json.settings ? json.settings : null;
+  } catch {
+    return null;
+  }
+}

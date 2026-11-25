@@ -8,13 +8,17 @@ import {
   Info,
   Loader2,
   RefreshCw,
+  Send,
   Sliders,
   Smartphone,
 } from 'lucide-react';
 import {
   fetchAdmin2Notifications,
+  fetchAdmin2PushStats,
   markAdmin2NotificationRead,
+  sendAdmin2DailyDigestNow,
   updateAdmin2NotificationPrefs,
+  type Admin2PushStats,
 } from '../../services/admin2Client';
 import type { Admin2Notification, Admin2NotificationPreferences } from '../../types/admin2';
 
@@ -49,14 +53,23 @@ export function Admin2NotificationsSection({ onUnreadCountChange }: Admin2Notifi
       : 'unsupported'
   );
   const [deviceAlertStatus, setDeviceAlertStatus] = useState('');
+  const [pushStats, setPushStats] = useState<Admin2PushStats | null>(null);
+  const [sendingDigest, setSendingDigest] = useState(false);
+  const [digestFeedback, setDigestFeedback] = useState('');
 
   const load = async () => {
     setLoading(true);
     try {
-      const res = await fetchAdmin2Notifications();
+      const [res, statsRes] = await Promise.all([
+        fetchAdmin2Notifications(),
+        fetchAdmin2PushStats().catch(() => null),
+      ]);
       setNotifications(res.notifications || []);
       setUnreadCount(res.unreadCount || 0);
       setPrefs(res.preferences || null);
+      if (statsRes?.ok) {
+        setPushStats(statsRes.stats);
+      }
       onUnreadCountChange?.(res.unreadCount || 0);
     } finally {
       setLoading(false);
@@ -66,6 +79,25 @@ export function Admin2NotificationsSection({ onUnreadCountChange }: Admin2Notifi
   useEffect(() => {
     void load();
   }, []);
+
+  const handleTriggerDailyDigest = async () => {
+    if (sendingDigest) return;
+    setSendingDigest(true);
+    setDigestFeedback('');
+    try {
+      const res = await sendAdmin2DailyDigestNow();
+      if (res.stats) setPushStats(res.stats);
+      setDigestFeedback(
+        res.ok
+          ? `Daily Digest sent to ${res.sent}/${res.targeted} subscriber(s)${res.pruned > 0 ? ` (${res.pruned} expired removed)` : ''}.`
+          : res.error || 'No recent real articles found to include in Daily Digest.'
+      );
+    } catch (err) {
+      setDigestFeedback(err instanceof Error ? err.message : 'Unable to send Daily Digest.');
+    } finally {
+      setSendingDigest(false);
+    }
+  };
 
   const handleMarkRead = async (id?: string, all?: boolean) => {
     const res = await markAdmin2NotificationRead({ id, all });
@@ -290,6 +322,74 @@ export function Admin2NotificationsSection({ onUnreadCountChange }: Admin2Notifi
             {deviceAlertStatus && (
               <p className="mt-2.5 text-[11px] font-medium text-slate-600 dark:text-slate-300">
                 {deviceAlertStatus}
+              </p>
+            )}
+          </div>
+
+          <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-xs dark:border-slate-800 dark:bg-[#111C2E]">
+            <div className="mb-3 flex items-center justify-between border-b border-slate-100 pb-3 dark:border-slate-800">
+              <div className="flex items-center gap-2">
+                <BellRing className="h-4 w-4 text-red-600" />
+                <h3 className="text-sm font-bold text-slate-900 dark:text-white">
+                  Reader Mobile Push &amp; Digest
+                </h3>
+              </div>
+              <span className="text-[11px] font-bold tabular-nums text-emerald-700 dark:text-emerald-400">
+                {pushStats ? `${pushStats.totalSubscribers} active` : 'Loading…'}
+              </span>
+            </div>
+
+            {pushStats && (
+              <div className="grid grid-cols-2 gap-2 text-[11px] mb-3">
+                <div className="rounded-lg bg-slate-50 dark:bg-slate-800/50 px-2.5 py-2">
+                  <span className="text-slate-500 block">Breaking News</span>
+                  <strong className="text-slate-900 dark:text-white tabular-nums">
+                    {pushStats.breakingSubscribers}
+                  </strong>
+                </div>
+                <div className="rounded-lg bg-slate-50 dark:bg-slate-800/50 px-2.5 py-2">
+                  <span className="text-slate-500 block">Daily Digest</span>
+                  <strong className="text-slate-900 dark:text-white tabular-nums">
+                    {pushStats.digestSubscribers}
+                  </strong>
+                </div>
+                <div className="rounded-lg bg-slate-50 dark:bg-slate-800/50 px-2.5 py-2">
+                  <span className="text-slate-500 block">Local / Agri</span>
+                  <strong className="text-slate-900 dark:text-white tabular-nums">
+                    {pushStats.localSubscribers} / {pushStats.agricultureSubscribers}
+                  </strong>
+                </div>
+                <div className="rounded-lg bg-slate-50 dark:bg-slate-800/50 px-2.5 py-2">
+                  <span className="text-slate-500 block">Events Alerts</span>
+                  <strong className="text-slate-900 dark:text-white tabular-nums">
+                    {pushStats.eventsSubscribers}
+                  </strong>
+                </div>
+              </div>
+            )}
+
+            <button
+              type="button"
+              disabled={sendingDigest}
+              onClick={() => void handleTriggerDailyDigest()}
+              className="w-full inline-flex items-center justify-center gap-1.5 rounded-lg bg-[#0B192C] px-3 py-2 text-xs font-semibold text-white hover:bg-[#13294B] disabled:opacity-60 dark:bg-blue-600 cursor-pointer"
+            >
+              {sendingDigest ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <Send className="h-3.5 w-3.5" />
+              )}
+              Send Daily Digest Now
+            </button>
+
+            {pushStats?.lastDigestRunAt && (
+              <p className="mt-2 text-[11px] text-slate-500 dark:text-slate-400">
+                Last digest: {new Date(pushStats.lastDigestRunAt).toLocaleString('en-IN')} ({pushStats.lastDigestArticleCount} stories)
+              </p>
+            )}
+            {digestFeedback && (
+              <p className="mt-2 text-[11px] font-semibold text-emerald-700 dark:text-emerald-300">
+                {digestFeedback}
               </p>
             )}
           </div>

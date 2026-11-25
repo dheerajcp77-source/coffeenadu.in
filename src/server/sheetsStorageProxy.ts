@@ -17,7 +17,7 @@ import {
 } from '../utils/featuredLead.ts';
 import { validateCustomEnglishSlugInput } from '../utils/slug.ts';
 
-const CACHE_TTL_MS = 7 * 60 * 1000; // 7 minutes (within required 5–10 min window)
+const CACHE_TTL_MS = 2 * 60 * 1000; // 2 minutes for fresh headlines & leads while staying well inside Apps Script quota
 const VIEW_FLUSH_INTERVAL_MS = 60 * 1000; // Batch flush views every 60 seconds
 const VIEW_FLUSH_BATCH_THRESHOLD = 10; // Or immediately once 10 views accumulate
 const MAX_RETRY_ATTEMPTS = 3;
@@ -1266,6 +1266,40 @@ export class SheetsStorageManager {
     return { ok: Boolean(result?.ok), error: result?.error };
   }
 
+  public async setArticleLeadStatusFromServer(
+    newsId: string,
+    isFeatured: boolean,
+    actorEmail: string,
+    existingTags = ''
+  ): Promise<{ ok: boolean; error?: string }> {
+    if (!this.isConfigured()) {
+      return { ok: false, error: 'Google Sheets backend is not configured.' };
+    }
+    const cleanId = newsId.trim();
+    const tags = serializeLeadMetaToTags(existingTags, {
+      isFeatured,
+      featuredUntil: undefined,
+    });
+    const result = await this.callAppsScriptPost<{ ok?: boolean; error?: string }>(
+      'updateNews',
+      {
+        newsId: cleanId,
+        data: {
+          featured: isFeatured,
+          isFeatured,
+          featuredUntil: '',
+          tags,
+        },
+      },
+      actorEmail
+    );
+    if (result?.ok) {
+      this.setLeadOverride(cleanId, isFeatured, undefined, actorEmail);
+      this.invalidateReadCaches();
+    }
+    return { ok: Boolean(result?.ok), error: result?.error };
+  }
+
   public async triggerBackupFromServer(actorEmail: string): Promise<Record<string, unknown>> {
     if (!this.isConfigured()) {
       return { ok: false, error: 'Google Sheets backend is not configured.' };
@@ -1335,7 +1369,7 @@ export class SheetsStorageManager {
         return;
       }
       const page = Math.max(1, Number(req.query.page) || 1);
-      const limit = Math.min(50, Math.max(1, Number(req.query.limit) || 15));
+      const limit = Math.min(100, Math.max(1, Number(req.query.limit) || 50));
       const category = typeof req.query.category === 'string' ? req.query.category.trim() : '';
       const location = typeof req.query.location === 'string' ? req.query.location.trim() : '';
       const q = typeof req.query.q === 'string' ? req.query.q.trim() : '';

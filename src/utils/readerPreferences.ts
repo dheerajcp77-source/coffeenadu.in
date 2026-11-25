@@ -32,6 +32,10 @@ export interface ReaderNotificationSettings {
   browserEnabled: boolean;
   breakingOnly: boolean;
   localCategoryAlerts: boolean;
+  dailyDigest: boolean;
+  agricultureUpdates: boolean;
+  eventsUpdates: boolean;
+  digestTimeLocal: string;
   frequency: 'instant' | 'digest';
 }
 
@@ -62,6 +66,7 @@ const NOTIF_PREFS_KEY = 'cn_notifications_prefs_v1';
 const NOTIF_ITEMS_KEY = 'cn_notification_feed_v1';
 const NOTIFIED_IDS_KEY = 'cn_notified_breaking_ids_v1';
 const NEWSLETTER_KEY = 'cn_newsletter_sub_v1';
+const PUSH_INVITE_DISMISSED_KEY = 'cn_push_invite_dismissed_until_v1';
 
 export function readInitialPublicTheme(): PublicThemeMode {
   if (typeof window === 'undefined') return 'light';
@@ -235,6 +240,10 @@ export function readNotificationSettings(): ReaderNotificationSettings {
     browserEnabled: false,
     breakingOnly: true,
     localCategoryAlerts: true,
+    dailyDigest: false,
+    agricultureUpdates: true,
+    eventsUpdates: true,
+    digestTimeLocal: '08:00',
     frequency: 'instant',
   };
   if (typeof window === 'undefined') return defaults;
@@ -242,10 +251,18 @@ export function readNotificationSettings(): ReaderNotificationSettings {
     const raw = window.localStorage.getItem(NOTIF_PREFS_KEY);
     if (!raw) return defaults;
     const parsed = JSON.parse(raw) as Partial<ReaderNotificationSettings>;
+    const cleanTime =
+      typeof parsed.digestTimeLocal === 'string' && /^([01]\d|2[0-3]):[0-5]\d$/.test(parsed.digestTimeLocal)
+        ? parsed.digestTimeLocal
+        : '08:00';
     return {
       browserEnabled: Boolean(parsed.browserEnabled),
       breakingOnly: parsed.breakingOnly !== false,
       localCategoryAlerts: parsed.localCategoryAlerts !== false,
+      dailyDigest: Boolean(parsed.dailyDigest),
+      agricultureUpdates: parsed.agricultureUpdates !== false,
+      eventsUpdates: parsed.eventsUpdates !== false,
+      digestTimeLocal: cleanTime,
       frequency: parsed.frequency === 'digest' ? 'digest' : 'instant',
     };
   } catch {
@@ -325,3 +342,26 @@ export function persistNewsletterSubscription(state: NewsletterSubscriptionState
     // Ignore
   }
 }
+
+export function isPushInviteDismissed(): boolean {
+  if (typeof window === 'undefined') return false;
+  try {
+    const raw = window.localStorage.getItem(PUSH_INVITE_DISMISSED_KEY);
+    if (!raw) return false;
+    const until = Number(raw);
+    return Number.isFinite(until) && until > Date.now();
+  } catch {
+    return false;
+  }
+}
+
+export function dismissPushInviteForDays(days = 7): void {
+  if (typeof window === 'undefined') return;
+  try {
+    const until = Date.now() + Math.max(1, days) * 24 * 60 * 60 * 1000;
+    window.localStorage.setItem(PUSH_INVITE_DISMISSED_KEY, String(until));
+  } catch {
+    // Ignore
+  }
+}
+

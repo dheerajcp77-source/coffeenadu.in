@@ -10,6 +10,7 @@ import express, { type NextFunction, type Request, type Response } from 'express
 import sharp from 'sharp';
 import { SEED_ARTICLES as PORTAL_SEED_ARTICLES } from './src/constants/seedArticles.ts';
 import { Admin2Backend } from './src/server/admin2Backend.ts';
+import { PushSubscriptionService } from './src/server/pushNotificationService.ts';
 import { SheetsStorageManager } from './src/server/sheetsStorageProxy.ts';
 
 void execFile;
@@ -1442,7 +1443,8 @@ async function startServer() {
 
   // Mount free Google Sheets + Drive + Apps Script storage proxy, cache & view aggregator
   const sheetsStorage = new SheetsStorageManager(DATA_DIR);
-  const admin2Backend = new Admin2Backend(DATA_DIR, sheetsStorage);
+  const pushService = new PushSubscriptionService(DATA_DIR);
+  const admin2Backend = new Admin2Backend(DATA_DIR, sheetsStorage, pushService);
 
   // Record real public page traffic (anonymized daily hashes, never blocks response)
   app.use((req, _res, next) => {
@@ -1451,7 +1453,21 @@ async function startServer() {
   });
 
   sheetsStorage.mountRoutes(app);
+  pushService.mountPublicRoutes(app);
   admin2Backend.mountRoutes(app);
+  pushService.startDailyDigestScheduler(async () => {
+    const items = await sheetsStorage.getAllNewsForAdmin(false);
+    return items.map((item) => ({
+      id: item.newsId,
+      titleKannada: item.title,
+      summaryKannada: item.description,
+      category: item.category || 'Local',
+      location: item.location || 'ಕೊಪ್ಪ',
+      publishedTimestamp: item.publishedTimestamp,
+      publishedDate: item.publishedDate,
+      isFeatured: item.featured,
+    }));
+  });
 
   // Public Bus Timings endpoint sourced from hudkoo.com with 6-hour cache
   app.get('/api/bus-timings', async (req, res) => {
@@ -3401,6 +3417,7 @@ Rules:
       new Promise<void>((resolve) => httpServer.close(() => resolve())),
       vite ? vite.close() : Promise.resolve(),
       sheetsStorage.flushPendingViews(),
+      Promise.resolve(pushService.stopScheduler()),
     ]).finally(() => {
       process.exit(0);
     });

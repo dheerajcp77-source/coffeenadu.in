@@ -22,6 +22,7 @@ import { FloatingScrollAd } from './components/FloatingScrollAd';
 import { Header } from './components/Header';
 import { HomepageAdSlot } from './components/HomepageAdSlot';
 import { HomepagePopupAd } from './components/HomepagePopupAd';
+import { KannadaPushInviteBanner } from './components/KannadaPushInviteBanner';
 import { LocalAdsSection } from './components/LocalAdsSection';
 import { NewsImage } from './components/NewsImage';
 import { NotificationCenterDrawer } from './components/NotificationCenterDrawer';
@@ -61,6 +62,7 @@ import {
   loadMoreEvents,
   subscribeToEventsState,
 } from './services/eventsStore';
+import { fetchPublicSiteSettings } from './services/admin2Client';
 import { subscribeToQuotaStatus, type QuotaStatus } from './services/firestoreOptimizer';
 import type { AdPlatformSettings, Advertisement } from './types/ads';
 import type { FilterCategory, NewsArticle, ProgramEvent, SupportThread } from './types/news';
@@ -71,10 +73,20 @@ import {
   getTrendingArticles,
   parseArticleDateToMidnight,
   searchArticlesAdvanced,
+  sortLeadArticles,
   type TimeframeFilter,
 } from './utils/newsHelpers';
 import {
+  getExistingPushSubscription,
+  subscribeVisitorToWebPush,
+  unsubscribeVisitorFromWebPush,
+  updateVisitorPushPreferences,
+  type WebPushPreferencesPayload,
+} from './utils/webPushClient';
+import {
   clearReadingHistory,
+  dismissPushInviteForDays,
+  isPushInviteDismissed,
   markArticleIdsNotified,
   persistNotificationFeed,
   persistNotificationSettings,
@@ -361,6 +373,12 @@ export default function App() {
   const [notifDrawerOpen, setNotifDrawerOpen] = useState(false);
   const [siteInfoPage, setSiteInfoPage] = useState<SiteInfoPageKey | null>(null);
   const [activeMobileTab, setActiveMobileTab] = useState<MobileNavTab>('home');
+  const [isPushSubscribed, setIsPushSubscribed] = useState<boolean>(false);
+  const [pushInviteDismissed, setPushInviteDismissed] = useState<boolean>(() =>
+    isPushInviteDismissed()
+  );
+  const [leadCarouselIntervalSec, setLeadCarouselIntervalSec] = useState<number>(5);
+  const [siteBreakingNotice, setSiteBreakingNotice] = useState<string>('');
 
   const recordedHistoryArticleIdRef = useRef<string | null>(null);
 
@@ -387,7 +405,11 @@ export default function App() {
           .then((keys) =>
             Promise.allSettled(
               keys
-                .filter((key) => !key.startsWith('coffeenadu-admin-shell-'))
+                .filter(
+                  (key) =>
+                    !key.startsWith('coffeenadu-admin-shell-') &&
+                    !key.startsWith('coffeenadu-shell-')
+                )
                 .map((key) => window.caches.delete(key))
             )
           )
@@ -405,7 +427,29 @@ export default function App() {
       setSelectedAdPreviewToken(readAdPreviewTokenFromUrl());
     };
     window.addEventListener('popstate', handlePopState);
-    return () => window.removeEventListener('popstate', handlePopState);
+
+    const handleSwMessage = (event: MessageEvent) => {
+      const payload = event.data as { type?: string; url?: string } | null;
+      if (payload?.type === 'COFFEENADU_OPEN_URL' && typeof payload.url === 'string') {
+        try {
+          const parsed = new URL(payload.url, window.location.origin);
+          window.history.pushState({}, '', `${parsed.pathname}${parsed.search}`);
+          setPathname(parsed.pathname || '/');
+          setSelectedArticleId(parsed.searchParams.get('article'));
+          setSelectedEventId(parsed.searchParams.get('event'));
+          setSelectedAdId(parsed.searchParams.get('ad'));
+          window.scrollTo({ top: 0, behavior: 'auto' });
+        } catch {
+          // Ignore malformed URL
+        }
+      }
+    };
+    navigator.serviceWorker?.addEventListener?.('message', handleSwMessage);
+
+    return () => {
+      window.removeEventListener('popstate', handlePopState);
+      navigator.serviceWorker?.removeEventListener?.('message', handleSwMessage);
+    };
   }, []);
 
   // Subscribe to in-memory shared stores & quota monitor
@@ -444,6 +488,21 @@ export default function App() {
   useEffect(() => {
     if (adminRouteActive) return;
     void loadActiveAds();
+    void fetchPublicSiteSettings().then((settings) => {
+      if (!settings) return;
+      if (
+        typeof settings.leadCarouselIntervalSec === 'number' &&
+        Number.isFinite(settings.leadCarouselIntervalSec)
+      ) {
+        setLeadCarouselIntervalSec(Math.min(15, Math.max(3, settings.leadCarouselIntervalSec)));
+      }
+      if (typeof settings.breakingTickerNotice === 'string') {
+        setSiteBreakingNotice(settings.breakingTickerNotice);
+      }
+    });
+    void getExistingPushSubscription().then((sub) => {
+      setIsPushSubscribed(Boolean(sub));
+    });
   }, [adminRouteActive]);
 
   useEffect(() => {
@@ -935,23 +994,49 @@ export default function App() {
     setBookmarks(res.bookmarks);
   };
 
-  const handleRequestBrowserPermission = async () => {
-    if (typeof window === 'undefined' || !('Notification' in window)) {
-      setBrowserNotifPermission('unsupported');
-      return;
+  const toWebPushPrefs = (s: ReaderNotificationSettings): WebPushPreferencesPayload => ({
+    breakingNews: s.breakingOnly,
+    dailyDigest: s.dailyDigest,
+    localNews: s.localCategoryAlerts,
+    agricultureUpdates: s.agricultureUpdates,
+    events: s.eventsUpdates,
+  });
+
+  const handleRequestBrowserPermission = async (): Promise<{ ok: boolean; message: string }> => {
+    const result = await subscribeVisitorToWebPush(
+      toWebPushPrefs(notifSettings),
+      notifSettings.digestTimeLocal
+    );
+    setBrowserNotifPermission(result.permission);
+    if (result.subscribed) {
+      setIsPushSubscribed(true);
     }
-    try {
-      const perm = await window.Notification.requestPermission();
-      setBrowserNotifPermission(perm);
-      const next: ReaderNotificationSettings = {
-        ...notifSettings,
-        browserEnabled: perm === 'granted',
-      };
-      setNotifSettings(next);
-      persistNotificationSettings(next);
-    } catch {
-      // Ignore permission rejection
+    const next: ReaderNotificationSettings = {
+      ...notifSettings,
+      browserEnabled: result.permission === 'granted' && result.subscribed,
+    };
+    setNotifSettings(next);
+    persistNotificationSettings(next);
+    return { ok: result.ok, message: result.message };
+  };
+
+  const handleUpdateNotificationSettings = (next: ReaderNotificationSettings) => {
+    setNotifSettings(next);
+    persistNotificationSettings(next);
+    if (isPushSubscribed) {
+      void updateVisitorPushPreferences(toWebPushPrefs(next), next.digestTimeLocal);
     }
+  };
+
+  const handleUnsubscribePush = async () => {
+    await unsubscribeVisitorFromWebPush();
+    setIsPushSubscribed(false);
+    const next: ReaderNotificationSettings = {
+      ...notifSettings,
+      browserEnabled: false,
+    };
+    setNotifSettings(next);
+    persistNotificationSettings(next);
   };
 
   // Real-time auto-removal of expired Lead Stories
@@ -976,7 +1061,7 @@ export default function App() {
   }, [articles, leadNowMs]);
 
   const leadArticles = useMemo(
-    () => filteredArticles.filter((a) => isArticleActivelyFeatured(a, leadNowMs)),
+    () => sortLeadArticles(filteredArticles, leadNowMs),
     [filteredArticles, leadNowMs]
   );
   const dateGroups = useMemo(() => groupArticlesByDate(filteredArticles), [filteredArticles]);
@@ -1027,6 +1112,7 @@ export default function App() {
           <BreakingNewsStrip
             articles={breakingArticles}
             onSelectArticle={handleOpenArticle}
+            noticeText={siteBreakingNotice}
           />
         )}
 
@@ -1160,6 +1246,20 @@ export default function App() {
               </div>
             )}
 
+            {/* Non-blocking Kannada Push Invite Banner (never auto-prompts permission) */}
+            {!pushInviteDismissed && !isPushSubscribed && (
+              <KannadaPushInviteBanner
+                browserPermission={browserNotifPermission}
+                isSubscribed={isPushSubscribed}
+                onEnablePush={handleRequestBrowserPermission}
+                onDismiss={() => {
+                  dismissPushInviteForDays(7);
+                  setPushInviteDismissed(true);
+                }}
+                onOpenSettingsDrawer={() => setNotifDrawerOpen(true)}
+              />
+            )}
+
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
               {/* Left/Main Timeline Feed (8 cols on desktop, full width on mobile) */}
               <div id="latest-news-feed" className="lg:col-span-8">
@@ -1253,6 +1353,7 @@ export default function App() {
                       <FeaturedLeadCarousel
                         leadArticles={leadArticles}
                         onOpenArticle={handleOpenArticle}
+                        intervalMs={leadCarouselIntervalSec * 1000}
                       />
 
                       {activeAds.length > 0 && (
@@ -1637,12 +1738,11 @@ export default function App() {
           isOpen={notifDrawerOpen}
           onClose={() => setNotifDrawerOpen(false)}
           settings={notifSettings}
-          onUpdateSettings={(next) => {
-            setNotifSettings(next);
-            persistNotificationSettings(next);
-          }}
+          onUpdateSettings={handleUpdateNotificationSettings}
           onRequestBrowserPermission={handleRequestBrowserPermission}
+          onUnsubscribePush={handleUnsubscribePush}
           browserPermission={browserNotifPermission}
+          isPushSubscribed={isPushSubscribed}
           notifications={notificationFeed}
           articles={articles}
           onMarkAllRead={() => {

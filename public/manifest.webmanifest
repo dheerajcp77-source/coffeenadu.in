@@ -1,16 +1,16 @@
 {
-  "id": "/admin",
-  "name": "CoffeeNadu Admin",
-  "short_name": "CoffeeNadu",
-  "description": "CoffeeNadu News Admin 2.0 — Editorial publishing, media branding, analytics, notifications, and system administration for CoffeeNadu News.",
-  "start_url": "/admin",
+  "id": "/",
+  "name": "Coffeenadu News",
+  "short_name": "Coffeenadu",
+  "description": "Local Koppa Taluk Kannada news, live breaking alerts, bus timings, and community updates.",
+  "start_url": "/",
   "scope": "/",
   "display": "standalone",
   "display_override": ["standalone", "minimal-ui"],
   "orientation": "any",
-  "theme_color": "#0B192C",
-  "background_color": "#0B192C",
-  "categories": ["news", "productivity", "business"],
+  "theme_color": "#10243D",
+  "background_color": "#10243D",
+  "categories": ["news", "magazines", "local"],
   "icons": [
     {
       "src": "/pwa-192x192.png",
@@ -33,31 +33,31 @@
   ],
   "shortcuts": [
     {
-      "name": "Dashboard Overview",
-      "short_name": "Dashboard",
-      "description": "Open CoffeeNadu Admin 2.0 dashboard overview",
-      "url": "/admin?section=dashboard",
+      "name": "Latest Koppa News",
+      "short_name": "Latest News",
+      "description": "Read the latest Koppa Taluk and Malnad Kannada news",
+      "url": "/",
       "icons": [{ "src": "/pwa-192x192.png", "sizes": "192x192", "type": "image/png" }]
     },
     {
-      "name": "Add New Article",
-      "short_name": "Add News",
-      "description": "Create and publish a new Kannada news article",
-      "url": "/admin?section=add-article",
+      "name": "Bus Timings",
+      "short_name": "Bus Timings",
+      "description": "Check live Koppa & Malnad local bus timings",
+      "url": "/bus-timings",
       "icons": [{ "src": "/pwa-192x192.png", "sizes": "192x192", "type": "image/png" }]
     },
     {
-      "name": "News Management",
-      "short_name": "News",
-      "description": "Manage published articles, drafts, and lead stories",
-      "url": "/admin?section=news",
+      "name": "Programs & Events",
+      "short_name": "Events",
+      "description": "View upcoming community programs and events",
+      "url": "/events",
       "icons": [{ "src": "/pwa-192x192.png", "sizes": "192x192", "type": "image/png" }]
     },
     {
-      "name": "Notification Centre",
-      "short_name": "Alerts",
-      "description": "View publishing, backup, and security notifications",
-      "url": "/admin?section=notifications",
+      "name": "Admin Dashboard",
+      "short_name": "Admin",
+      "description": "Open CoffeeNadu Admin 2.0",
+      "url": "/admin",
       "icons": [{ "src": "/pwa-192x192.png", "sizes": "192x192", "type": "image/png" }]
     }
   ]

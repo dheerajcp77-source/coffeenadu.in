@@ -125,6 +125,27 @@ export function Admin2SettingsSection() {
               </select>
             </div>
           </div>
+          <div>
+            <label className="mb-1 block font-semibold text-slate-700 dark:text-slate-200">
+              Lead Story Auto-Scroll Interval (Seconds)
+            </label>
+            <select
+              value={String(settings.leadCarouselIntervalSec ?? 5)}
+              onChange={(e) =>
+                setSettings({
+                  ...settings,
+                  leadCarouselIntervalSec: Number(e.target.value),
+                })
+              }
+              className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 dark:border-slate-700 dark:bg-slate-900 dark:text-white"
+            >
+              {[3, 4, 5, 6, 8, 10, 12, 15].map((sec) => (
+                <option key={sec} value={String(sec)}>
+                  {sec} seconds{sec === 5 ? ' (Default)' : ''}
+                </option>
+              ))}
+            </select>
+          </div>
         </section>
 
         {/* Image Branding Preservation */}
