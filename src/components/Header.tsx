@@ -2,7 +2,10 @@ import { useState } from 'react';
 import {
   Bell,
   Bookmark,
+  Bus,
+  CalendarDays,
   ChevronDown,
+  Compass,
   Moon,
   Search,
   Sun,
@@ -103,9 +106,14 @@ export function Header({
     onNavigateModule?.(modId);
   };
 
+  const quickCtaBtnClass = (isActive: boolean) =>
+    `inline-flex items-center justify-center gap-1.5 px-3 xl:px-3.5 py-2 text-xs font-bold rounded-xl bg-gradient-to-r from-[#C5932B] to-[#DEB04B] hover:from-[#B6841E] hover:to-[#D4A238] text-[#181512] transition-all whitespace-nowrap shrink-0 cursor-pointer min-h-[40px] shadow-2xs ${
+      isActive ? 'ring-2 ring-[#1C1917] dark:ring-[#FBF9F5] ring-offset-1 ring-offset-[#FBF9F5] dark:ring-offset-[#151310]' : ''
+    }`;
+
   return (
     <header className="sticky top-0 z-40 bg-[#FBF9F5]/95 dark:bg-[#151310]/95 backdrop-blur-md border-b border-[#E7DFCE] dark:border-[#2E2922] shadow-[0_1px_12px_rgba(28,25,23,0.06)]">
-      <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 min-h-16 py-2 flex items-center justify-between gap-2 sm:gap-4">
+      <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 min-h-16 py-2 flex items-center justify-between gap-2 sm:gap-3">
         {/* Zone 1: Brand wordmark + Developed by Dheeraj */}
         <div className="flex flex-col items-start min-w-0 shrink-0">
           <button
@@ -125,7 +133,7 @@ export function Header({
         </div>
 
         {/* Zone 2: Clean, De-duplicated Desktop Navigation */}
-        <nav aria-label="Primary navigation" className="hidden lg:flex items-center gap-5">
+        <nav aria-label="Primary navigation" className="hidden lg:flex items-center gap-4 xl:gap-5">
           <button
             type="button"
             onClick={() => {
@@ -154,38 +162,6 @@ export function Header({
             }`}
           >
             {pickLangText('ಸುದ್ದಿ', 'News', lang)}
-          </button>
-
-          <button
-            type="button"
-            onClick={() => {
-              setMegaOpen(false);
-              onJumpToBusTimings();
-            }}
-            aria-current={isBusTimingsView ? 'page' : undefined}
-            className={`text-sm font-semibold whitespace-nowrap shrink-0 py-1.5 border-b-2 transition-colors cursor-pointer ${
-              isBusTimingsView
-                ? 'border-[#C5932B] text-[#1C1917] dark:text-[#E2B44B]'
-                : 'border-transparent text-[#574E44] dark:text-[#C5BBA9] hover:text-[#1C1917] dark:hover:text-[#FBF9F5]'
-            }`}
-          >
-            {pickLangText('ಬಸ್ ಸಮಯ', 'Bus Timings', lang)}
-          </button>
-
-          <button
-            type="button"
-            onClick={() => {
-              setMegaOpen(false);
-              onJumpToEvents();
-            }}
-            aria-current={isEventsView ? 'page' : undefined}
-            className={`text-sm font-semibold whitespace-nowrap shrink-0 py-1.5 border-b-2 transition-colors cursor-pointer ${
-              isEventsView
-                ? 'border-[#C5932B] text-[#1C1917] dark:text-[#E2B44B]'
-                : 'border-transparent text-[#574E44] dark:text-[#C5BBA9] hover:text-[#1C1917] dark:hover:text-[#FBF9F5]'
-            }`}
-          >
-            {pickLangText('ಕಾರ್ಯಕ್ರಮ', 'Events', lang)}
           </button>
 
           <button
@@ -221,7 +197,7 @@ export function Header({
           </button>
         </nav>
 
-        {/* Zone 3: Reader utilities */}
+        {/* Zone 3: Reader utilities + Matching Gold CTA Trio (Explore, Bus Timings, Programs) */}
         <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
           {onToggleLang && (
             <button
@@ -285,6 +261,61 @@ export function Header({
             {theme === 'dark' ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
           </button>
 
+          {/* Desktop/Tablet Primary Quick Buttons: Explore, Bus Timings, Programs (all identical size & style) */}
+          <div className="hidden md:flex items-center gap-1.5" data-testid="header-quick-cta-group">
+            {onExploreAll && (
+              <button
+                type="button"
+                data-testid="header-explore-btn"
+                onClick={() => {
+                  setMegaOpen(false);
+                  onExploreAll();
+                }}
+                aria-current={activePlatformRoute === '/explore' ? 'page' : undefined}
+                className={quickCtaBtnClass(activePlatformRoute === '/explore')}
+              >
+                <Compass className="w-3.5 h-3.5 hidden xl:inline-block shrink-0" aria-hidden="true" />
+                <span>{pickLangText('ಎಲ್ಲಾ ಸೇವೆಗಳು', 'Explore', lang)}</span>
+              </button>
+            )}
+
+            <button
+              type="button"
+              data-testid="header-bus-timings-btn"
+              onClick={() => {
+                setMegaOpen(false);
+                onJumpToBusTimings();
+              }}
+              aria-current={isBusTimingsView ? 'page' : undefined}
+              className={quickCtaBtnClass(isBusTimingsView)}
+            >
+              <Bus className="w-3.5 h-3.5 hidden xl:inline-block shrink-0" aria-hidden="true" />
+              <span>{pickLangText('ಬಸ್ ಸಮಯ', 'Bus Timings', lang)}</span>
+            </button>
+
+            <button
+              type="button"
+              data-testid="header-programs-btn"
+              onClick={() => {
+                setMegaOpen(false);
+                onJumpToEvents();
+              }}
+              aria-current={isEventsView ? 'page' : undefined}
+              className={quickCtaBtnClass(isEventsView)}
+            >
+              <CalendarDays className="w-3.5 h-3.5 hidden xl:inline-block shrink-0" aria-hidden="true" />
+              <span>{pickLangText('ಕಾರ್ಯಕ್ರಮ', 'Programs', lang)}</span>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Mobile Header Quick Row: Explore · Bus Timings · Programs in identical size */}
+      <div
+        className="md:hidden border-t border-[#EFE8D8] dark:border-[#26221B] bg-[#FBF9F5]/95 dark:bg-[#151310]/95 px-3 py-2"
+        data-testid="mobile-header-quick-cta-group"
+      >
+        <div className="grid grid-cols-3 gap-2">
           {onExploreAll && (
             <button
               type="button"
@@ -292,11 +323,39 @@ export function Header({
                 setMegaOpen(false);
                 onExploreAll();
               }}
-              className="hidden sm:inline-flex items-center px-3.5 py-2 text-xs font-bold rounded-xl bg-gradient-to-r from-[#C5932B] to-[#DEB04B] hover:from-[#B6841E] hover:to-[#D4A238] text-[#181512] transition-colors whitespace-nowrap shrink-0 cursor-pointer min-h-[40px] shadow-2xs"
+              aria-current={activePlatformRoute === '/explore' ? 'page' : undefined}
+              className={`${quickCtaBtnClass(activePlatformRoute === '/explore')} w-full px-2 text-[11px]`}
             >
-              {pickLangText('ಎಲ್ಲಾ ಸೇವೆಗಳು', 'Explore', lang)}
+              <Compass className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
+              <span className="truncate">{pickLangText('ಎಲ್ಲಾ ಸೇವೆಗಳು', 'Explore', lang)}</span>
             </button>
           )}
+
+          <button
+            type="button"
+            onClick={() => {
+              setMegaOpen(false);
+              onJumpToBusTimings();
+            }}
+            aria-current={isBusTimingsView ? 'page' : undefined}
+            className={`${quickCtaBtnClass(isBusTimingsView)} w-full px-2 text-[11px]`}
+          >
+            <Bus className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
+            <span className="truncate">{pickLangText('ಬಸ್ ಸಮಯ', 'Bus Timings', lang)}</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              setMegaOpen(false);
+              onJumpToEvents();
+            }}
+            aria-current={isEventsView ? 'page' : undefined}
+            className={`${quickCtaBtnClass(isEventsView)} w-full px-2 text-[11px]`}
+          >
+            <CalendarDays className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
+            <span className="truncate">{pickLangText('ಕಾರ್ಯಕ್ರಮ', 'Programs', lang)}</span>
+          </button>
         </div>
       </div>
 
