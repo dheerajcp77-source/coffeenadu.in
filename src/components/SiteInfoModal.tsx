@@ -105,7 +105,7 @@ export function SiteInfoModal({
                 onClose();
                 onOpenMessageAdmin();
               }}
-              className="inline-flex items-center gap-1.5 rounded-lg bg-[#10243D] dark:bg-[#D9A441] text-white dark:text-[#10243D] px-3.5 py-2 text-xs font-bold cursor-pointer"
+              className="inline-flex items-center gap-1.5 rounded-lg bg-[#1C1917] dark:bg-[#D4A238] text-white dark:text-[#181512] px-3.5 py-2 text-xs font-bold cursor-pointer"
             >
               <Shield className="w-3.5 h-3.5" />
               Message Admin
@@ -116,19 +116,19 @@ export function SiteInfoModal({
                 onClose();
                 onOpenLocalAds();
               }}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 dark:border-slate-700 px-3.5 py-2 text-xs font-bold text-[#17263A] dark:text-slate-100 cursor-pointer"
+              className="inline-flex items-center gap-1.5 rounded-lg border border-[#E4DAC6] dark:border-[#362F26] px-3.5 py-2 text-xs font-bold text-[#1C1917] dark:text-[#FBF9F5] cursor-pointer"
             >
-              <Megaphone className="w-3.5 h-3.5 text-amber-500" />
+              <Megaphone className="w-3.5 h-3.5 text-[#C5932B]" />
               Local Ads
             </button>
             <a
               href={COFFEENADU_WHATSAPP_GROUP_URL}
               target="_blank"
               rel="noopener noreferrer"
-              className="inline-flex items-center gap-1.5 rounded-lg bg-[#176B4A] text-white px-3.5 py-2 text-xs font-bold"
+              className="inline-flex items-center gap-1.5 rounded-lg bg-gradient-to-r from-[#D4A238] to-[#E6BC5C] text-[#181512] px-3.5 py-2 text-xs font-bold"
             >
               <MessageCircle className="w-3.5 h-3.5" />
-              WhatsApp Group
+              Join our WhatsApp Community
             </a>
           </div>
         </div>

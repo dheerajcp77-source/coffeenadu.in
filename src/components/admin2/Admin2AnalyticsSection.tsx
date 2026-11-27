@@ -103,16 +103,8 @@ export function Admin2AnalyticsSection({ onNavigateSection }: Admin2AnalyticsSec
         </div>
       ) : data ? (
         <>
-          {/* Summary KPIs */}
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            <div className="rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-[#111C2E]">
-              <p className="flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400">
-                <Eye className="h-3.5 w-3.5" /> Portal Page Views ({rangeDays}d)
-              </p>
-              <p className="mt-2 text-2xl font-bold tabular-nums text-slate-900 dark:text-white">
-                {data.totals.pageViews.toLocaleString('en-IN')}
-              </p>
-            </div>
+          {/* Summary KPIs (View counts hidden by default; database tracking remains active) */}
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
             <div className="rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-[#111C2E]">
               <p className="flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400">
                 <Users className="h-3.5 w-3.5" /> Unique Daily Visitors ({rangeDays}d)
@@ -123,18 +115,18 @@ export function Admin2AnalyticsSection({ onNavigateSection }: Admin2AnalyticsSec
             </div>
             <div className="rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-[#111C2E]">
               <p className="flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400">
-                <BarChart3 className="h-3.5 w-3.5" /> Total Views (All Articles)
-              </p>
-              <p className="mt-2 text-2xl font-bold tabular-nums text-slate-900 dark:text-white">
-                {data.totals.totalSheetArticleViews.toLocaleString('en-IN')}
-              </p>
-            </div>
-            <div className="rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-[#111C2E]">
-              <p className="flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400">
                 <FileText className="h-3.5 w-3.5" /> Live Published Stories
               </p>
               <p className="mt-2 text-2xl font-bold tabular-nums text-slate-900 dark:text-white">
                 {data.totals.totalPublishedArticles.toLocaleString('en-IN')}
+              </p>
+            </div>
+            <div className="rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-[#111C2E]">
+              <p className="flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400">
+                <BarChart3 className="h-3.5 w-3.5" /> Active Categories
+              </p>
+              <p className="mt-2 text-2xl font-bold tabular-nums text-slate-900 dark:text-white">
+                {data.categoryPerformance.length.toLocaleString('en-IN')}
               </p>
             </div>
           </div>
@@ -142,7 +134,7 @@ export function Admin2AnalyticsSection({ onNavigateSection }: Admin2AnalyticsSec
           {/* Traffic Trend Chart */}
           <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-xs dark:border-slate-800 dark:bg-[#111C2E]">
             <h3 className="mb-1 text-sm font-bold text-slate-900 dark:text-white">
-              Daily Visitors &amp; Page Views Trend
+              Daily Visitor Activity Trend
             </h3>
             <p className="mb-4 text-xs text-slate-500 dark:text-slate-400">
               Measured from actual HTTP visits to CoffeeNadu News (zero synthetic values).
@@ -179,12 +171,12 @@ export function Admin2AnalyticsSection({ onNavigateSection }: Admin2AnalyticsSec
 
             <section className="rounded-xl border border-slate-200 bg-white p-5 dark:border-slate-800 dark:bg-[#111C2E]">
               <h3 className="mb-4 text-sm font-bold text-slate-900 dark:text-white">
-                Category Views (Sheets)
+                Published Stories by Category
               </h3>
               <HorizontalBarList
                 items={data.categoryPerformance.slice(0, 7).map((c) => ({
                   label: c.category,
-                  value: c.views,
+                  value: c.articles,
                   subLabel: `${c.articles} stories`,
                 }))}
                 barClassName="bg-amber-600 dark:bg-amber-500"
@@ -235,85 +227,36 @@ export function Admin2AnalyticsSection({ onNavigateSection }: Admin2AnalyticsSec
             </div>
           </div>
 
-          {/* Most Viewed & Recently Viewed Articles */}
-          <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
-            <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xs dark:border-slate-800 dark:bg-[#111C2E]">
-              <div className="border-b border-slate-100 px-5 py-3.5 dark:border-slate-800">
-                <h3 className="text-sm font-bold text-slate-900 dark:text-white">
-                  Most Viewed Articles (Live View Counts)
-                </h3>
-              </div>
-              <div className="overflow-x-auto">
-                <table className="w-full text-left text-xs">
-                  <thead className="bg-slate-50 text-[11px] uppercase text-slate-500 dark:bg-slate-900/60 dark:text-slate-400">
-                    <tr>
-                      <th className="px-4 py-2.5">Headline</th>
-                      <th className="px-4 py-2.5">Category</th>
-                      <th className="px-4 py-2.5">Published</th>
-                      <th className="px-4 py-2.5 text-right">Total Views</th>
+          {/* Published Articles Directory Snapshot (View counts hidden) */}
+          <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xs dark:border-slate-800 dark:bg-[#111C2E]">
+            <div className="border-b border-slate-100 px-5 py-3.5 dark:border-slate-800">
+              <h3 className="text-sm font-bold text-slate-900 dark:text-white">
+                Published Stories Snapshot
+              </h3>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs">
+                <thead className="bg-slate-50 text-[11px] uppercase text-slate-500 dark:bg-slate-900/60 dark:text-slate-400">
+                  <tr>
+                    <th className="px-4 py-2.5">Headline</th>
+                    <th className="px-4 py-2.5">Category</th>
+                    <th className="px-4 py-2.5">Published</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                  {data.topArticles.map((art) => (
+                    <tr key={art.id}>
+                      <td className="px-4 py-2.5 font-semibold text-slate-900 dark:text-white">
+                        {art.title}
+                      </td>
+                      <td className="px-4 py-2.5 text-slate-600 dark:text-slate-300">{art.category}</td>
+                      <td className="px-4 py-2.5 tabular-nums text-slate-500">{art.publishedDate}</td>
                     </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                    {data.topArticles.map((art) => (
-                      <tr key={art.id}>
-                        <td className="px-4 py-2.5 font-semibold text-slate-900 dark:text-white">
-                          {art.title}
-                        </td>
-                        <td className="px-4 py-2.5 text-slate-600 dark:text-slate-300">{art.category}</td>
-                        <td className="px-4 py-2.5 tabular-nums text-slate-500">{art.publishedDate}</td>
-                        <td className="px-4 py-2.5 text-right font-bold tabular-nums text-slate-900 dark:text-white">
-                          {art.views.toLocaleString('en-IN')}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </section>
-
-            <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xs dark:border-slate-800 dark:bg-[#111C2E]">
-              <div className="flex items-center gap-2 border-b border-slate-100 px-5 py-3.5 dark:border-slate-800">
-                <Clock className="h-4 w-4 text-slate-500" />
-                <h3 className="text-sm font-bold text-slate-900 dark:text-white">
-                  Recently Viewed Articles
-                </h3>
-              </div>
-              {!data.recentlyViewedArticles || data.recentlyViewedArticles.length === 0 ? (
-                <p className="px-5 py-10 text-center text-xs text-slate-500">
-                  No recent article views recorded yet.
-                </p>
-              ) : (
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left text-xs">
-                    <thead className="bg-slate-50 text-[11px] uppercase text-slate-500 dark:bg-slate-900/60 dark:text-slate-400">
-                      <tr>
-                        <th className="px-4 py-2.5">Headline</th>
-                        <th className="px-4 py-2.5">Category</th>
-                        <th className="px-4 py-2.5">Last Viewed</th>
-                        <th className="px-4 py-2.5 text-right">Total Views</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                      {data.recentlyViewedArticles.map((art) => (
-                        <tr key={art.id}>
-                          <td className="px-4 py-2.5 font-semibold text-slate-900 dark:text-white">
-                            {art.title}
-                          </td>
-                          <td className="px-4 py-2.5 text-slate-600 dark:text-slate-300">{art.category}</td>
-                          <td className="px-4 py-2.5 tabular-nums text-slate-500">
-                            {formatViewedTime(art.viewedAt)}
-                          </td>
-                          <td className="px-4 py-2.5 text-right font-bold tabular-nums text-slate-900 dark:text-white">
-                            {art.views.toLocaleString('en-IN')}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </section>
-          </div>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </section>
         </>
       ) : null}
     </div>

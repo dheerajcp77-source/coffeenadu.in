@@ -1,21 +1,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertCircle,
-  Bookmark,
-  Calendar,
-  ChevronRight,
-  Clock,
   Loader2,
   MessageSquare,
 } from 'lucide-react';
 import { AdminPanel } from './components/AdminPanel';
 import { AdvancedSearchModal } from './components/AdvancedSearchModal';
 import { ArticleDetailView } from './components/ArticleDetailView';
-import { ArticleShareBar } from './components/ArticleShareBar';
 import { BottomMobileNav, type MobileNavTab } from './components/BottomMobileNav';
 import { BreakingNewsStrip } from './components/BreakingNewsStrip';
 import { BusTimingsSection } from './components/BusTimingsSection';
-import { CategoryBar, getCategoryShortIcon } from './components/CategoryBar';
+import { CategoryBar } from './components/CategoryBar';
 import { CoffeeCupLogo } from './components/CoffeeCupLogo';
 import { FeaturedLeadCarousel } from './components/FeaturedLeadCarousel';
 import { FloatingScrollAd } from './components/FloatingScrollAd';
@@ -23,7 +18,6 @@ import { Header } from './components/Header';
 import { HomepageAdSlot } from './components/HomepageAdSlot';
 import { HomepagePopupAd } from './components/HomepagePopupAd';
 import { LocalAdsSection } from './components/LocalAdsSection';
-import { NewsImage } from './components/NewsImage';
 import { NotificationCenterDrawer } from './components/NotificationCenterDrawer';
 import { PrivacyScreenGuard } from './components/PrivacyScreenGuard';
 import { ProgramsEventsSection } from './components/ProgramsEventsSection';
@@ -34,11 +28,7 @@ import { SupportChatSection } from './components/SupportChatSection';
 import { TrendingNewsSection } from './components/TrendingNewsSection';
 import { WebsiteEntryAd } from './components/WebsiteEntryAd';
 import { WhatsAppGroupBanner } from './components/WhatsAppGroupBanner';
-import {
-  getKannadaLocationLabel,
-  matchesSelectedLocation,
-  resolveArticleImage,
-} from './constants/newsData';
+import { matchesSelectedLocation } from './constants/newsData';
 import {
   fetchActiveAdById,
   loadActiveAds,
@@ -68,7 +58,6 @@ import { isArticleActivelyFeatured } from './utils/featuredLead';
 import {
   getBreakingNewsArticles,
   getTrendingArticles,
-  parseArticleDateToMidnight,
   searchArticlesAdvanced,
   type TimeframeFilter,
 } from './utils/newsHelpers';
@@ -96,10 +85,13 @@ import {
   type ReadingPreferences,
   type SavedArticleSnapshot,
 } from './utils/readerPreferences';
-import { sanitizeRichTextHtml, stripRichTextToPlainText } from './utils/richText';
+import { stripRichTextToPlainText } from './utils/richText';
 import { buildArticlePublicUrl } from './utils/slug';
 import { auth } from './firebase';
 import {
+  DEFAULT_DISPLAY_SETTINGS,
+  DEFAULT_FEED_CATEGORIES,
+  DEFAULT_HOMEPAGE_ANNOUNCEMENT,
   DEFAULT_MALNAD_LOCALITIES,
   DEFAULT_WEATHER_CONFIG,
   PLATFORM_MODULES,
@@ -109,6 +101,7 @@ import {
 import {
   fetchPlatformBootstrap,
   loadSavedBundle,
+  submitListingReport,
   toggleSavedListingInBundle,
   trackPlatformEvent,
 } from './services/platformClient';
@@ -122,8 +115,13 @@ import type {
   PublicCommunityPost,
 } from './types/community';
 import type {
+  AnnouncementButtonConfig,
   DirectoryModuleId,
+  FeedCategoryConfig,
+  FeedCategoryId,
+  HomepageAnnouncementConfig,
   LocalityOption,
+  PlatformDisplaySettings,
   PlatformLanguage,
   PlatformListing,
   PlatformModuleId,
@@ -131,17 +129,23 @@ import type {
   WeatherConfig,
   WeatherRainfallRecord,
 } from './types/platform';
+import {
+  buildUnifiedCommunityFeed,
+  filterUnifiedCommunityFeed,
+  type UnifiedFeedItem,
+} from './utils/unifiedFeedHelpers';
 import { CoffeenaduCommunityPage } from './components/community/CoffeenaduCommunityPage';
 import {
   CommunityComposerModal,
   CommunityRegisterModal,
+  CommunityReportModal,
 } from './components/community/CommunityModals';
-import { HomepageCommunitySection } from './components/community/HomepageCommunitySection';
+import { HomepageAnnouncementBanner } from './components/community/HomepageAnnouncementBanner';
+import { UnifiedCommunityFeed } from './components/community/UnifiedCommunityFeed';
 import { PlatformAccountPage } from './components/platform/PlatformAccountPage';
 import { PlatformDirectoryPage } from './components/platform/PlatformDirectoryPage';
 import { PlatformExplorePage } from './components/platform/PlatformExplorePage';
 import { PlatformGamesPage } from './components/platform/PlatformGamesPage';
-import { PlatformHomepageTopBar } from './components/platform/PlatformHomepageSections';
 import { PlatformWeatherPage } from './components/platform/PlatformWeatherPage';
 import { SearchEverythingPage } from './components/platform/SearchEverythingPage';
 
@@ -207,70 +211,6 @@ function isChatPath(pathname: string): boolean {
 function isAdsPath(pathname: string): boolean {
   const normalized = pathname.replace(/\/+$/, '') || '/';
   return normalized === '/ads' || normalized.startsWith('/ads/');
-}
-
-function formatDateLabelFromMidnight(midnightMs: number): string {
-  return new Date(midnightMs).toLocaleDateString('en-GB', {
-    day: '2-digit',
-    month: 'short',
-    year: 'numeric',
-  });
-}
-
-interface DateWiseArticleGroup {
-  key: string;
-  heading: string;
-  subLabel?: string;
-  sortDayMs: number;
-  articles: NewsArticle[];
-}
-
-function groupArticlesByDate(list: NewsArticle[]): DateWiseArticleGroup[] {
-  const now = new Date();
-  const todayMidnight = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
-  const oneDayMs = 24 * 60 * 60 * 1000;
-  const groupsMap = new Map<string, DateWiseArticleGroup>();
-
-  for (const article of list) {
-    const midnight = parseArticleDateToMidnight(article.publishedDate, article.publishedTimestamp);
-    const sortDayMs = midnight ?? 0;
-    const formattedDate =
-      midnight !== null ? formatDateLabelFromMidnight(midnight) : article.publishedDate || 'Archive';
-    const diffDays = midnight !== null ? Math.round((todayMidnight - midnight) / oneDayMs) : null;
-
-    let heading = formattedDate;
-    let subLabel: string | undefined;
-    if (diffDays === 0) {
-      heading = 'Today';
-      subLabel = formattedDate;
-    } else if (diffDays === 1) {
-      heading = 'Yesterday';
-      subLabel = formattedDate;
-    }
-
-    const key = midnight !== null ? String(midnight) : `date:${formattedDate}`;
-    const existing = groupsMap.get(key);
-    if (existing) {
-      existing.articles.push(article);
-    } else {
-      groupsMap.set(key, {
-        key,
-        heading,
-        subLabel,
-        sortDayMs,
-        articles: [article],
-      });
-    }
-  }
-
-  return Array.from(groupsMap.values())
-    .sort((a, b) => b.sortDayMs - a.sortDayMs)
-    .map((group) => ({
-      ...group,
-      articles: [...group.articles].sort(
-        (a, b) => (b.publishedTimestamp ?? 0) - (a.publishedTimestamp ?? 0)
-      ),
-    }));
 }
 
 function readArticleIdFromUrl(): string | null {
@@ -339,27 +279,6 @@ function ArticleLoadingSkeleton({ onBack }: { onBack: () => void }) {
         </div>
       </div>
     </main>
-  );
-}
-
-function FeedLoadingSkeleton() {
-  return (
-    <div aria-busy="true" aria-label="Loading latest news" className="space-y-4">
-      <div className="rounded-2xl h-[250px] sm:h-[275px] bg-slate-200 dark:bg-slate-800 animate-pulse" />
-      {[1, 2, 3, 4].map((idx) => (
-        <div
-          key={idx}
-          className="bg-white dark:bg-[#0F1E33] border border-slate-200 dark:border-slate-800 rounded-xl p-3 sm:p-4 flex items-center gap-3.5 sm:gap-4"
-        >
-          <div className="w-24 h-20 sm:w-36 sm:h-24 shrink-0 rounded-lg bg-slate-200 dark:bg-slate-800 animate-pulse" />
-          <div className="flex-1 space-y-2.5">
-            <div className="h-3 w-28 rounded bg-slate-200 dark:bg-slate-800 animate-pulse" />
-            <div className="h-4 w-full rounded bg-slate-200 dark:bg-slate-800 animate-pulse" />
-            <div className="h-3 w-3/4 rounded bg-slate-100 dark:bg-slate-800/60 animate-pulse" />
-          </div>
-        </div>
-      ))}
-    </div>
   );
 }
 
@@ -473,9 +392,34 @@ export default function App() {
     readSearchQFromUrl()
   );
 
+  // Unified Homepage Feed, Admin Announcement Banner, Display Settings & 31 Categories state
+  const [homepageAnnouncement, setHomepageAnnouncement] = useState<HomepageAnnouncementConfig>(
+    DEFAULT_HOMEPAGE_ANNOUNCEMENT
+  );
+  const [feedCategories, setFeedCategories] = useState<FeedCategoryConfig[]>(
+    DEFAULT_FEED_CATEGORIES
+  );
+  const [displaySettings, setDisplaySettings] = useState<PlatformDisplaySettings>(
+    DEFAULT_DISPLAY_SETTINGS
+  );
+  const [activeFeedCategory, setActiveFeedCategory] = useState<FeedCategoryId>('all');
+  const [feedSort, setFeedSort] = useState<'latest' | 'popular'>('latest');
+  const [feedError, setFeedError] = useState<string | null>(null);
+  const [reportingCommunityPost, setReportingCommunityPost] = useState<PublicCommunityPost | null>(
+    null
+  );
+  const [reportingPlatformListing, setReportingPlatformListing] = useState<PlatformListing | null>(
+    null
+  );
+  const [platformReportReason, setPlatformReportReason] = useState('ತಪ್ಪು ಅಥವಾ ಹಳೆಯ ಮಾಹಿತಿ');
+  const [platformReportDetails, setPlatformReportDetails] = useState('');
+  const [platformReportSaving, setPlatformReportSaving] = useState(false);
+  const [platformReportDone, setPlatformReportDone] = useState(false);
+
   // Coffeenadu Community (simple name + mobile registration, instant publish) state
   const [communityUser, setCommunityUser] = useState<CommunitySelfProfile | null>(null);
   const [communityPosts, setCommunityPosts] = useState<PublicCommunityPost[]>([]);
+  const [communityFeedLoaded, setCommunityFeedLoaded] = useState(false);
   const [communityInitialCategory, setCommunityInitialCategory] = useState<
     CommunityCategoryId | 'all'
   >('all');
@@ -490,12 +434,24 @@ export default function App() {
   const refreshPlatformBootstrap = useCallback(() => {
     fetchPlatformBootstrap()
       .then((data) => {
+        setFeedError(null);
         if (data.localities?.length) setPlatformLocalities(data.localities);
         if (data.moduleCounts) setPlatformModuleCounts(data.moduleCounts);
         if (Array.isArray(data.featuredListings)) setPlatformListings(data.featuredListings);
         if (Array.isArray(data.popularSearches)) setPopularSearches(data.popularSearches);
         if (data.weatherConfig) setWeatherConfig(data.weatherConfig);
         if (Array.isArray(data.latestWeatherLogs)) setWeatherLogs(data.latestWeatherLogs);
+        if (data.homepageAnnouncement) setHomepageAnnouncement(data.homepageAnnouncement);
+        if (Array.isArray(data.feedCategories) && data.feedCategories.length > 0) {
+          setFeedCategories(data.feedCategories);
+        }
+        if (data.displaySettings) {
+          setDisplaySettings({
+            ...DEFAULT_DISPLAY_SETTINGS,
+            ...data.displaySettings,
+            showViewCounts: Boolean(data.displaySettings.showViewCounts),
+          });
+        }
       })
       .catch(() => {
         // Keep starter defaults gracefully if offline
@@ -503,12 +459,13 @@ export default function App() {
   }, []);
 
   const refreshCommunityPublicFeed = useCallback(() => {
-    fetchCommunityPosts({ limit: 12 })
+    fetchCommunityPosts({ limit: 100 })
       .then((res) => {
         if (Array.isArray(res.posts)) setCommunityPosts(res.posts);
+        setCommunityFeedLoaded(true);
       })
       .catch(() => {
-        // Non-blocking fallback
+        setCommunityFeedLoaded(true);
       });
   }, []);
 
@@ -641,7 +598,7 @@ export default function App() {
   ]);
 
   useEffect(() => {
-    if (adminRouteActive || !eventsActiveCheck || selectedEventId) {
+    if (adminRouteActive || selectedEventId) {
       return;
     }
     void loadInitialEvents();
@@ -1198,8 +1155,45 @@ export default function App() {
     navigateTo('/explore');
   };
 
+  const handleSelectFeedCategory = (categoryId: FeedCategoryId) => {
+    setActiveFeedCategory(categoryId);
+    if (categoryId === 'all') setActiveCategory('All');
+    else if (categoryId === 'local') setActiveCategory('Local');
+    else if (categoryId === 'malnad') setActiveCategory('Malnad');
+    else if (categoryId === 'agriculture') setActiveCategory('Agriculture');
+    else if (categoryId === 'health') setActiveCategory('Health');
+    else if (categoryId === 'entertainment') setActiveCategory('Entertainment');
+    else if (categoryId === 'crime') setActiveCategory('Crime');
+    else if (categoryId === 'general') setActiveCategory('General');
+    else if (categoryId === 'education') setActiveCategory('Education');
+    else if (categoryId === 'politics') setActiveCategory('Politics');
+    else if (categoryId === 'sports') setActiveCategory('Sports');
+    else if (categoryId === 'culture') setActiveCategory('Culture');
+    else if (categoryId === 'civic-roads') setActiveCategory('Civic & Roads');
+    else if (categoryId === 'special') setActiveCategory('Special');
+    else if (categoryId === 'state') setActiveCategory('State');
+    else if (categoryId === 'nation') setActiveCategory('Nation');
+    setSelectedArticleId(null);
+    setSelectedEventId(null);
+    setSelectedAdId(null);
+    setActiveMobileTab('home');
+    if (isSpecialRoute || window.location.search) {
+      navigateTo('/');
+    }
+  };
+
   const handleSelectCategory = (category: FilterCategory) => {
     setActiveCategory(category);
+    if (category === 'All') setActiveFeedCategory('news');
+    else if (category === 'Local') setActiveFeedCategory('local');
+    else if (category === 'Malnad') setActiveFeedCategory('malnad');
+    else if (category === 'Agriculture') setActiveFeedCategory('agriculture');
+    else if (category === 'Health') setActiveFeedCategory('health');
+    else if (category === 'Entertainment') setActiveFeedCategory('entertainment');
+    else if (category === 'Crime') setActiveFeedCategory('crime');
+    else if (category === 'General') setActiveFeedCategory('general');
+    else if (category === 'Education') setActiveFeedCategory('education');
+    else setActiveFeedCategory('news');
     setSelectedArticleId(null);
     setSelectedEventId(null);
     setSelectedAdId(null);
@@ -1211,8 +1205,55 @@ export default function App() {
     }
   };
 
+  const handleAnnouncementButtonClick = (btn: AnnouncementButtonConfig) => {
+    const action = btn.action;
+    if (action === 'open-submit-modal') {
+      handleHomepageAddInformation();
+      return;
+    }
+    if (action.startsWith('filter:')) {
+      const targetCat = action.slice('filter:'.length) as FeedCategoryId;
+      handleSelectFeedCategory(targetCat);
+      const feedEl = document.getElementById('latest-news-feed');
+      feedEl?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      return;
+    }
+    if (action === 'route:/community') {
+      handleOpenCommunity();
+      return;
+    }
+    if (action === 'route:/marketplace') {
+      handleNavigatePlatformModule('marketplace');
+      return;
+    }
+    if (action === 'route:/businesses') {
+      handleNavigatePlatformModule('businesses');
+      return;
+    }
+    if (action === 'route:/jobs') {
+      handleNavigatePlatformModule('jobs');
+      return;
+    }
+    if (action === 'route:/events') {
+      handleJumpToEvents();
+      return;
+    }
+    if (action === 'route:/ads') {
+      handleJumpToAds();
+      return;
+    }
+    if (action === 'custom-url' && btn.customUrl) {
+      if (btn.customUrl.startsWith('/')) {
+        navigateTo(btn.customUrl);
+      } else if (btn.customUrl.startsWith('https://') || btn.customUrl.startsWith('http://')) {
+        window.open(btn.customUrl, '_blank', 'noopener,noreferrer');
+      }
+    }
+  };
+
   const handleResetHome = () => {
     setActiveCategory('All');
+    setActiveFeedCategory('all');
     setSelectedLocation('All');
     setTimeframe('All');
     setSearchQuery('');
@@ -1353,13 +1394,92 @@ export default function App() {
     () => filteredArticles.filter((a) => isArticleActivelyFeatured(a, leadNowMs)),
     [filteredArticles, leadNowMs]
   );
-  const dateGroups = useMemo(() => groupArticlesByDate(filteredArticles), [filteredArticles]);
+
+  // Unified Social Feed combining News, Community Submissions, Approved Listings & Events
+  const allUnifiedFeedItems = useMemo(
+    () =>
+      buildUnifiedCommunityFeed({
+        articles,
+        communityPosts,
+        platformListings,
+        events,
+      }),
+    [articles, communityPosts, platformListings, events]
+  );
+
+  const unifiedFeedCategoryCounts = useMemo(() => {
+    const counts: Partial<Record<FeedCategoryId, number>> = {
+      all: allUnifiedFeedItems.length,
+    };
+    for (const item of allUnifiedFeedItems) {
+      for (const catId of item.feedCategories) {
+        counts[catId] = (counts[catId] || 0) + 1;
+      }
+    }
+    return counts;
+  }, [allUnifiedFeedItems]);
+
+  const filteredUnifiedFeedItems = useMemo(
+    () =>
+      filterUnifiedCommunityFeed(allUnifiedFeedItems, {
+        categoryId: activeFeedCategory,
+        location: selectedLocation,
+        searchQuery,
+        sort: feedSort,
+      }),
+    [allUnifiedFeedItems, activeFeedCategory, selectedLocation, searchQuery, feedSort]
+  );
 
   const bookmarkedIdSet = useMemo(() => new Set(bookmarks.map((b) => b.id)), [bookmarks]);
+  const savedListingIdSet = useMemo(
+    () =>
+      new Set([
+        ...savedBundle.businesses,
+        ...savedBundle.jobs,
+        ...savedBundle.marketplace,
+        ...savedBundle.otherListings,
+      ]),
+    [savedBundle]
+  );
   const unreadNotificationsCount = useMemo(
     () => notificationFeed.filter((n) => !n.read).length,
     [notificationFeed]
   );
+
+  const isUnifiedItemSaved = useCallback(
+    (item: UnifiedFeedItem): boolean => {
+      if (item.source === 'news') return bookmarkedIdSet.has(item.id);
+      if (item.source === 'platform') return savedListingIdSet.has(item.id);
+      return savedBundle.otherListings.includes(item.key);
+    },
+    [bookmarkedIdSet, savedListingIdSet, savedBundle.otherListings]
+  );
+
+  const handleToggleSaveUnifiedItem = useCallback(
+    (item: UnifiedFeedItem) => {
+      if (item.source === 'news' && item.newsArticle) {
+        handleToggleBookmark(item.newsArticle);
+        return;
+      }
+      if (item.source === 'platform' && item.platformListing) {
+        handleToggleSaveListing(item.platformListing.module, item.platformListing.id);
+        return;
+      }
+      handleToggleSaveListing('community', item.key);
+    },
+    [handleToggleSaveListing]
+  );
+
+  const handleReportUnifiedItem = useCallback((item: UnifiedFeedItem) => {
+    if (item.source === 'community' && item.communityPost) {
+      setReportingCommunityPost(item.communityPost);
+    } else if (item.source === 'platform' && item.platformListing) {
+      setPlatformReportReason('ತಪ್ಪು ಅಥವಾ ಹಳೆಯ ಮಾಹಿತಿ');
+      setPlatformReportDetails('');
+      setPlatformReportDone(false);
+      setReportingPlatformListing(item.platformListing);
+    }
+  }, []);
 
   if (adminRouteActive) {
     return (
@@ -1372,7 +1492,7 @@ export default function App() {
 
   return (
     <PrivacyScreenGuard enabled={!adminRouteActive}>
-      <div className="min-h-screen flex flex-col bg-[#F3F6F8] dark:bg-[#0B1626] text-[#17263A] dark:text-slate-100 transition-colors">
+      <div className="min-h-screen flex flex-col bg-[#FBF9F5] dark:bg-[#11100E] text-[#1C1917] dark:text-[#FBF9F5] transition-colors">
         <WhatsAppGroupBanner variant="top-bar" />
         <Header
           activeCategory={activeCategory}
@@ -1402,7 +1522,7 @@ export default function App() {
         />
 
         {/* Breaking News Strip across homepage feed */}
-        {!selectedArticleId && !selectedAdId && !isSpecialRoute && (
+        {!selectedArticleId && !selectedAdId && !isSpecialRoute && displaySettings.showBreakingTicker && (
           <BreakingNewsStrip
             articles={breakingArticles}
             onSelectArticle={handleOpenArticle}
@@ -1412,6 +1532,11 @@ export default function App() {
         {!selectedArticleId && !selectedAdId && !isSpecialRoute && (
           <CategoryBar
             activeCategory={activeCategory}
+            feedCategories={feedCategories}
+            activeFeedCategory={activeFeedCategory}
+            onSelectFeedCategory={handleSelectFeedCategory}
+            showCategoryGrid={displaySettings.showCategoryGrid}
+            language={platformLang}
             isAdsView={adsActive || Boolean(selectedAdId)}
             onSelectCategory={handleSelectCategory}
             onJumpToAds={handleJumpToAds}
@@ -1420,6 +1545,14 @@ export default function App() {
             searchQuery={searchQuery}
             onSearchChange={setSearchQuery}
             onOpenAdvancedSearch={() => setSearchModalOpen(true)}
+            latestWeather={weatherLogs[0] || null}
+            bannerSlot={
+              <HomepageAnnouncementBanner
+                config={homepageAnnouncement}
+                language={platformLang}
+                onButtonClick={handleAnnouncementButtonClick}
+              />
+            }
           />
         )}
 
@@ -1625,21 +1758,8 @@ export default function App() {
             )}
           </div>
         ) : (
-          <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-5 sm:py-6 space-y-6">
-            {/* Regional Digital Platform Quick-Access Hub, Search & Locality Selector */}
-            <PlatformHomepageTopBar
-              lang={platformLang}
-              selectedLocation={selectedLocation === 'All' ? 'all' : selectedLocation}
-              localities={platformLocalities}
-              moduleCounts={platformModuleCounts}
-              onSelectLocation={(loc) => setSelectedLocation(loc === 'all' ? 'All' : loc)}
-              onToggleLang={handleTogglePlatformLang}
-              onOpenSearch={(q) => handleOpenSearchEverything(q)}
-              onNavigateModule={(modId) => handleNavigatePlatformModule(modId)}
-              onExploreAll={handleExploreAllServices}
-            />
-
-            {/* Custom Top Banner Homepage Ad Slot */}
+          <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-4 sm:py-5 space-y-6">
+            {/* Custom Top Banner Homepage Admin Ad Slot */}
             {activeAds.length > 0 && (
               <HomepageAdSlot
                 ads={activeAds}
@@ -1652,320 +1772,123 @@ export default function App() {
             )}
 
             {/* Mobile/Tablet Trending News Horizontal Strip */}
-            {trendingResult.items.length > 0 && (
+            {displaySettings.showTrendingSection && trendingResult.items.length > 0 && (
               <div id="trending-news-mobile" className="lg:hidden">
                 <TrendingNewsSection
                   articles={trendingResult.items}
-                  isViewRanked={trendingResult.isViewRanked}
+                  isViewRanked={false}
                   onSelectArticle={handleOpenArticle}
                   variant="horizontal"
                 />
               </div>
             )}
 
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
-              {/* Left/Main Timeline Feed (8 cols on desktop, full width on mobile) */}
-              <div id="latest-news-feed" className="lg:col-span-8">
-                {/* Section Heading & Timeframe Filter Row */}
-                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-5">
-                  <div className="flex items-start gap-3">
-                    <span
-                      className="mt-2 w-3 h-3 rounded-full border-2 border-[#D9A441] bg-white dark:bg-[#0B1626] shrink-0"
-                      aria-hidden="true"
-                    />
-                    <div>
-                      <h1 className="text-lg sm:text-xl font-extrabold text-[#10243D] dark:text-white tracking-tight">
-                        {activeCategory === 'All'
-                          ? 'Koppa Latest Updates'
-                          : `${activeCategory} Updates`}
-                      </h1>
-                      <div
-                        className="h-1 w-20 bg-[#D9A441] rounded-full mt-1"
-                        aria-hidden="true"
-                      />
-                    </div>
-                  </div>
-
-                  {/* Segmented Timeframe Control */}
-                  <div
-                    role="group"
-                    aria-label="Filter by timeframe"
-                    className="inline-flex items-center bg-white dark:bg-[#0F1E33] border border-slate-200 dark:border-slate-800 rounded-xl p-1 self-start sm:self-auto"
-                  >
-                    {(['All', 'Today', 'Yesterday', 'This Week'] as TimeframeFilter[]).map(
-                      (tf) => {
-                        const active = timeframe === tf;
-                        return (
-                          <button
-                            key={tf}
-                            type="button"
-                            onClick={() => setTimeframe(tf)}
-                            className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
-                              active
-                                ? 'bg-[#10243D] text-white dark:bg-[#D9A441] dark:text-[#10243D]'
-                                : 'text-[#738093] dark:text-slate-300 hover:text-[#17263A] dark:hover:text-white'
-                            }`}
-                          >
-                            {active && <Calendar className="w-3.5 h-3.5" aria-hidden="true" />}
-                            <span>{tf}</span>
-                          </button>
-                        );
-                      }
-                    )}
-                  </div>
-                </div>
-
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-7 items-start">
+              {/* Left/Main Unified Social Community Feed (8 cols on desktop, full width on mobile) */}
+              <div id="latest-news-feed" className="lg:col-span-8 space-y-5">
                 {quotaStatus.quotaExceeded && (
                   <div
                     role="status"
-                    className="mb-4 px-4 py-3 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 rounded-xl flex items-start gap-2.5 text-xs text-amber-950 dark:text-amber-200"
+                    className="px-4 py-3 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 rounded-xl flex items-start gap-2.5 text-xs text-amber-950 dark:text-amber-200"
                   >
-                    <AlertCircle className="w-4 h-4 text-amber-700 dark:text-amber-400 shrink-0 mt-0.5" aria-hidden="true" />
+                    <AlertCircle
+                      className="w-4 h-4 text-amber-700 dark:text-amber-400 shrink-0 mt-0.5"
+                      aria-hidden="true"
+                    />
                     <p className="font-kannada leading-relaxed">
-                      Daily live database read limit temporarily reached. Showing saved news stories — live sync resumes automatically after quota reset.
+                      Daily live database read limit temporarily reached. Showing saved stories — live sync resumes automatically after quota reset.
                     </p>
                   </div>
                 )}
 
-                {!articlesLoaded ? (
-                  <FeedLoadingSkeleton />
-                ) : filteredArticles.length === 0 ? (
-                  <div className="bg-white dark:bg-[#0F1E33] border border-slate-200 dark:border-slate-800 rounded-xl p-8 text-center">
-                    <h2 className="text-base font-bold text-[#17263A] dark:text-white mb-1.5">
-                      No matching updates found
-                    </h2>
-                    <p className="text-sm text-[#738093] dark:text-slate-400 mb-4">
-                      Try clearing your search or switching back to all Koppa Taluk updates.
-                    </p>
-                    <button
-                      type="button"
-                      onClick={handleResetHome}
-                      className="px-4 py-2 text-xs font-semibold text-white bg-[#10243D] hover:bg-[#19385F] dark:bg-[#D9A441] dark:text-[#10243D] rounded-lg transition-colors cursor-pointer min-h-[40px]"
-                    >
-                      Reset Filters
-                    </button>
-                  </div>
-                ) : (
-                  <div className="relative pl-5 sm:pl-7">
-                    <div
-                      className="absolute left-[4px] sm:left-[5px] top-0 bottom-4 w-px bg-slate-300 dark:bg-slate-700"
-                      aria-hidden="true"
-                    />
+                {/* Featured Lead Stories Carousel (shown when specifically filtering News) */}
+                {activeFeedCategory === 'news' && leadArticles.length > 0 && (
+                  <FeaturedLeadCarousel
+                    leadArticles={leadArticles}
+                    onOpenArticle={handleOpenArticle}
+                  />
+                )}
 
-                    <div className="space-y-6">
-                      <FeaturedLeadCarousel
-                        leadArticles={leadArticles}
-                        onOpenArticle={handleOpenArticle}
-                      />
-
-                      {activeAds.length > 0 && (
+                {/* Main Unified Social Feed: COFFEENADU COMMUNITY | ಕಾಫಿನಾಡು ಸಮುದಾಯ */}
+                {displaySettings.showCommunityFeed && (
+                  <UnifiedCommunityFeed
+                    items={filteredUnifiedFeedItems}
+                    totalUnfilteredCount={allUnifiedFeedItems.length}
+                    loading={!articlesLoaded && !communityFeedLoaded && allUnifiedFeedItems.length === 0}
+                    error={feedError}
+                    onRetry={() => {
+                      refreshPlatformBootstrap();
+                      refreshCommunityPublicFeed();
+                      void loadInitialArticles();
+                    }}
+                    language={platformLang}
+                    activeCategoryId={activeFeedCategory}
+                    feedCategories={feedCategories}
+                    selectedLocation={selectedLocation}
+                    searchQuery={searchQuery}
+                    sort={displaySettings.showViewCounts ? feedSort : 'latest'}
+                    onSortChange={setFeedSort}
+                    showViewCounts={displaySettings.showViewCounts}
+                    onResetFilters={handleResetHome}
+                    onAddInfoClick={handleHomepageAddInformation}
+                    onOpenArticle={handleOpenArticle}
+                    onOpenCommunityPost={(post) => handleOpenCommunityPost(post.slug)}
+                    onOpenPlatformListing={(listing) =>
+                      handleNavigatePlatformModule(listing.module, listing.id)
+                    }
+                    onOpenEvent={handleOpenEvent}
+                    onReportItem={handleReportUnifiedItem}
+                    isItemSaved={isUnifiedItemSaved}
+                    onToggleSaveItem={handleToggleSaveUnifiedItem}
+                    onShareTracked={(item) => {
+                      trackPlatformEvent({
+                        type: 'whatsapp_share',
+                        module: item.source === 'news' ? 'news' : 'community',
+                        location: item.location,
+                      });
+                    }}
+                    renderInlineAd={(slotIdx) =>
+                      activeAds.length > 0 ? (
                         <HomepageAdSlot
                           ads={activeAds}
                           settings={adSettings}
-                          position="below_headline"
+                          position={slotIdx === 0 ? 'below_headline' : 'between_news'}
                           onOpenAd={handleOpenAd}
                           onViewAllAds={handleJumpToAds}
                         />
-                      )}
-
-                      {dateGroups.map((group, groupIdx) => (
-                        <div key={group.key} className="space-y-6">
-                          <section aria-label={`${group.heading} news`} className="space-y-3">
-                            <div className="relative flex items-center justify-between gap-3 pt-1">
-                              <span
-                                className="absolute -left-5 sm:-left-7 top-1/2 -translate-y-1/2 w-3.5 h-3.5 rounded-full bg-[#10243D] border-2 border-[#D9A441] z-10"
-                                aria-hidden="true"
-                              />
-                              <div className="flex items-baseline gap-2.5">
-                                <h2 className="text-sm sm:text-base font-extrabold text-[#10243D] dark:text-white tracking-tight">
-                                  {group.heading}
-                                </h2>
-                                {group.subLabel && (
-                                  <span className="text-xs font-medium text-[#738093] dark:text-slate-400">
-                                    {group.subLabel}
-                                  </span>
-                                )}
-                              </div>
-                              <span className="text-[11px] font-semibold text-[#738093] dark:text-slate-400 tabular-nums">
-                                {group.articles.length}{' '}
-                                {group.articles.length === 1 ? 'story' : 'stories'}
-                              </span>
-                            </div>
-
-                            <div className="space-y-3">
-                              {group.articles.map((article, index) => {
-                                const imgSrc = resolveArticleImage(article);
-                                const isAccentNode = index % 2 === 1;
-                                const isSaved = bookmarkedIdSet.has(article.id);
-                                return (
-                                  <div key={article.id} className="relative">
-                                    <span
-                                      className={`absolute -left-5 sm:-left-7 top-1/2 -translate-y-1/2 w-2.5 h-2.5 rounded-full border-2 bg-white dark:bg-[#0B1626] z-10 ${
-                                        isAccentNode ? 'border-[#D9A441]' : 'border-slate-400 dark:border-slate-600'
-                                      }`}
-                                      aria-hidden="true"
-                                    />
-
-                                    <article
-                                      onClick={() => handleOpenArticle(article)}
-                                      onKeyDown={(e) => {
-                                        if (e.key === 'Enter' || e.key === ' ') {
-                                          e.preventDefault();
-                                          handleOpenArticle(article);
-                                        }
-                                      }}
-                                      role="button"
-                                      tabIndex={0}
-                                      className="group bg-white dark:bg-[#0F1E33] border border-slate-200 dark:border-slate-800 hover:border-[#10243D]/40 dark:hover:border-[#D9A441]/60 rounded-xl p-3 sm:p-4 shadow-xs transition-colors flex items-center gap-3.5 sm:gap-4 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#10243D]"
-                                    >
-                                      {/* Left Thumbnail */}
-                                      <div className="w-28 h-24 sm:w-40 sm:h-28 shrink-0 rounded-lg overflow-hidden bg-slate-950 border border-slate-200 dark:border-slate-700">
-                                        {imgSrc ? (
-                                          <NewsImage
-                                            src={imgSrc}
-                                            alt={stripRichTextToPlainText(article.titleKannada)}
-                                            fitMode="contain-blur"
-                                            aspectClass="w-full h-full"
-                                            watermarkApplied={Boolean(
-                                              article.watermarkApplied && article.imageUrl
-                                            )}
-                                            className="h-full"
-                                          />
-                                        ) : (
-                                          <div className="w-full h-full flex flex-col items-center justify-center text-[#10243D] dark:text-slate-200 bg-slate-100 dark:bg-slate-800 p-2 text-center">
-                                            {getCategoryShortIcon(article.category)}
-                                            <span className="text-[10px] font-semibold mt-1 text-slate-600 dark:text-slate-300">
-                                              {article.category}
-                                            </span>
-                                          </div>
-                                        )}
-                                      </div>
-
-                                      {/* Center Content */}
-                                      <div className="flex-1 min-w-0 space-y-1">
-                                        <div className="flex flex-wrap items-center justify-between gap-1.5 text-[11px] font-semibold text-[#738093] dark:text-slate-400">
-                                          <div className="flex flex-wrap items-center gap-1.5">
-                                            <span className="text-[#176B4A] dark:text-[#D9A441] font-bold">
-                                              {article.category}
-                                            </span>
-                                            <span aria-hidden="true">·</span>
-                                            <span className="font-kannada">
-                                              {getKannadaLocationLabel(article.location)}
-                                            </span>
-                                            {isArticleActivelyFeatured(article, leadNowMs) && (
-                                              <>
-                                                <span aria-hidden="true">·</span>
-                                                <span className="text-amber-700 dark:text-[#D9A441]">
-                                                  Featured
-                                                </span>
-                                              </>
-                                            )}
-                                          </div>
-
-                                          <button
-                                            type="button"
-                                            onClick={(e) => {
-                                              e.stopPropagation();
-                                              handleToggleBookmark(article);
-                                            }}
-                                            aria-label={isSaved ? 'Remove saved article' : 'Save article'}
-                                            title={isSaved ? 'Saved' : 'Save for later'}
-                                            className={`p-1 rounded-md transition-colors cursor-pointer ${
-                                              isSaved
-                                                ? 'text-[#176B4A] dark:text-[#D9A441]'
-                                                : 'text-slate-400 hover:text-[#10243D] dark:hover:text-white'
-                                            }`}
-                                          >
-                                            <Bookmark
-                                              className={`w-3.5 h-3.5 ${isSaved ? 'fill-current' : ''}`}
-                                            />
-                                          </button>
-                                        </div>
-
-                                        <h3
-                                          className="article-rich-content article-rich-inline-compact font-kannada text-sm sm:text-base font-bold text-[#17263A] dark:text-slate-100 group-hover:text-[#176B4A] dark:group-hover:text-[#D9A441] transition-colors leading-snug line-clamp-2"
-                                          dangerouslySetInnerHTML={{
-                                            __html: sanitizeRichTextHtml(article.titleKannada),
-                                          }}
-                                        />
-
-                                        <div
-                                          className="article-rich-content article-rich-inline-compact font-kannada text-xs text-[#738093] dark:text-slate-400 line-clamp-1"
-                                          dangerouslySetInnerHTML={{
-                                            __html: sanitizeRichTextHtml(article.summaryKannada),
-                                          }}
-                                        />
-
-                                        <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
-                                          <div className="flex items-center gap-2 text-[11px] text-[#738093] dark:text-slate-400 tabular-nums">
-                                            <span className="inline-flex items-center gap-1">
-                                              <Clock className="w-3 h-3" aria-hidden="true" />
-                                              <span>{article.publishedDate}</span>
-                                            </span>
-                                            <span aria-hidden="true">·</span>
-                                            <span>{article.publishedTime}</span>
-                                            <span aria-hidden="true">·</span>
-                                            <span>{article.readTimeMinutes} min read</span>
-                                          </div>
-
-                                          <ArticleShareBar
-                                            article={article}
-                                            compact
-                                            variant={publicTheme === 'dark' ? 'dark' : 'light'}
-                                          />
-                                        </div>
-
-                                        <WhatsAppGroupBanner variant="inline-news" />
-                                      </div>
-
-                                      {/* Right Chevron Affordance */}
-                                      <div
-                                        className="hidden sm:flex w-8 h-8 rounded-full bg-slate-100 dark:bg-slate-800 text-[#17263A] dark:text-slate-200 group-hover:bg-[#10243D] group-hover:text-white dark:group-hover:bg-[#D9A441] dark:group-hover:text-[#10243D] transition-colors items-center justify-center shrink-0"
-                                        aria-hidden="true"
-                                      >
-                                        <ChevronRight className="w-4 h-4" />
-                                      </div>
-                                    </article>
-                                  </div>
-                                );
-                              })}
-                            </div>
-                          </section>
-
-                          {groupIdx === 0 && activeAds.length > 0 && (
-                            <HomepageAdSlot
-                              ads={activeAds}
-                              settings={adSettings}
-                              position="between_news"
-                              onOpenAd={handleOpenAd}
-                              onViewAllAds={handleJumpToAds}
-                            />
-                          )}
-                        </div>
-                      ))}
-                    </div>
-
-                    {hasMoreArticles && (
-                      <div className="pt-5 flex justify-center">
-                        <button
-                          type="button"
-                          onClick={handleLoadMoreArticles}
-                          disabled={loadingMoreArticles}
-                          className="inline-flex items-center gap-2 px-5 py-2.5 text-xs sm:text-sm font-semibold text-[#10243D] dark:text-slate-100 bg-white dark:bg-[#0F1E33] hover:bg-slate-50 dark:hover:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl shadow-xs transition-colors cursor-pointer disabled:opacity-60 min-h-[42px]"
-                        >
-                          {loadingMoreArticles ? (
-                            <>
-                              <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" />
-                              <span>Loading older stories...</span>
-                            </>
-                          ) : (
-                            <span>Load More News</span>
-                          )}
-                        </button>
-                      </div>
-                    )}
-                  </div>
+                      ) : null
+                    }
+                  />
                 )}
+
+                {/* Load Older News Stories from Firestore Archive if available */}
+                {hasMoreArticles &&
+                  (activeFeedCategory === 'all' ||
+                    activeFeedCategory === 'news' ||
+                    activeFeedCategory === 'local' ||
+                    activeFeedCategory === 'malnad') && (
+                    <div className="pt-1 flex justify-center">
+                      <button
+                        type="button"
+                        onClick={handleLoadMoreArticles}
+                        disabled={loadingMoreArticles}
+                        className="inline-flex items-center gap-2 px-5 py-2.5 text-xs sm:text-sm font-semibold text-[#10243D] dark:text-slate-100 bg-white dark:bg-[#0F1E33] hover:bg-slate-50 dark:hover:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl shadow-2xs transition-colors cursor-pointer disabled:opacity-60 min-h-[42px]"
+                      >
+                        {loadingMoreArticles ? (
+                          <>
+                            <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" />
+                            <span>Loading older news archive...</span>
+                          </>
+                        ) : (
+                          <span>
+                            {platformLang === 'kn'
+                              ? 'ಹಳೆಯ ಸುದ್ದಿ ಸಂಗ್ರಹ ನೋಡಿ'
+                              : 'Load Older News Archive'}
+                          </span>
+                        )}
+                      </button>
+                    </div>
+                  )}
               </div>
 
               {/* Right Rail (4 cols on desktop, stacks below on mobile) */}
@@ -1976,8 +1899,8 @@ export default function App() {
                     setSelectedLocation(loc);
                     window.scrollTo({ top: 0, behavior: 'smooth' });
                   }}
-                  trendingArticles={trendingResult.items}
-                  trendingIsViewRanked={trendingResult.isViewRanked}
+                  trendingArticles={displaySettings.showTrendingSection ? trendingResult.items : []}
+                  trendingIsViewRanked={false}
                   onSelectArticle={handleOpenArticle}
                   activeAds={activeAds}
                   adSettings={adSettings}
@@ -1986,16 +1909,6 @@ export default function App() {
                 />
               </div>
             </div>
-
-            {/* COFFEENADU COMMUNITY – ನಮ್ಮ ಮಲೆನಾಡು ಸಮುದಾಯ (Replaced homepage community-style listings) */}
-            <HomepageCommunitySection
-              posts={communityPosts}
-              isSignedIn={Boolean(communityUser)}
-              onAddInformation={handleHomepageAddInformation}
-              onOpenCommunity={handleOpenCommunity}
-              onOpenDashboard={handleOpenCommunityDashboard}
-              onOpenPost={handleOpenCommunityPost}
-            />
 
             {activeAds.length > 0 && (
               <HomepageAdSlot
@@ -2009,18 +1922,18 @@ export default function App() {
           </main>
         )}
 
-        <footer className="border-t border-slate-200 dark:border-slate-800 bg-white dark:bg-[#0A1728] mt-10 transition-colors">
+        <footer className="border-t border-[#E7DFCE] dark:border-[#2E2922] bg-white dark:bg-[#151310] mt-10 transition-colors">
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-8 pb-24 md:py-8 space-y-6">
             <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-6">
               <div>
-                <div className="inline-flex items-center gap-2 font-masthead text-lg font-bold text-[#10243D] dark:text-white">
+                <div className="inline-flex items-center gap-2 font-masthead text-lg font-bold text-[#1C1917] dark:text-[#FBF9F5]">
                   <CoffeeCupLogo className="w-7 h-7 shrink-0" />
                   <span>Coffeenadu News</span>
                 </div>
-                <p className="text-xs text-[#738093] dark:text-slate-400 mt-1 max-w-md leading-relaxed">
+                <p className="text-xs text-[#6B6052] dark:text-[#A89C8B] mt-1 max-w-md leading-relaxed">
                   Koppa Taluk, Chikkamagaluru District · Malnad Kannada News, Local Bus Timings, Community Programs &amp; Business Directory
                 </p>
-                <div className="mt-3 flex flex-wrap items-center gap-3 text-xs font-semibold text-[#176B4A] dark:text-[#D9A441]">
+                <div className="mt-3 flex flex-wrap items-center gap-3 text-xs font-semibold text-[#926710] dark:text-[#E6BC5C]">
                   <button
                     type="button"
                     onClick={() => setSiteInfoPage('about')}
@@ -2059,13 +1972,13 @@ export default function App() {
                 </div>
               </div>
 
-              <div className="flex flex-wrap items-center gap-x-3.5 gap-y-2 text-xs font-medium text-[#738093] dark:text-slate-300 max-w-2xl">
+              <div className="flex flex-wrap items-center gap-x-3.5 gap-y-2 text-xs font-medium text-[#6B6052] dark:text-[#C4B8A5] max-w-2xl">
                 {PLATFORM_MODULES.map((mod) => (
                   <button
                     key={mod.id}
                     type="button"
                     onClick={() => handleNavigatePlatformModule(mod.id)}
-                    className="hover:text-[#176B4A] dark:hover:text-[#D9A441] transition-colors cursor-pointer whitespace-nowrap"
+                    className="hover:text-[#926710] dark:hover:text-[#E6BC5C] transition-colors cursor-pointer whitespace-nowrap"
                   >
                     {platformLang === 'kn' ? mod.titleKn : mod.titleEn}
                   </button>
@@ -2073,29 +1986,29 @@ export default function App() {
                 <button
                   type="button"
                   onClick={handleJumpToAds}
-                  className="font-semibold text-amber-800 dark:text-[#D9A441] hover:underline cursor-pointer whitespace-nowrap"
+                  className="font-semibold text-[#926710] dark:text-[#E6BC5C] hover:underline cursor-pointer whitespace-nowrap"
                 >
                   Local Ads
                 </button>
                 <button
                   type="button"
                   onClick={handleJumpToChat}
-                  className="font-semibold text-[#10243D] dark:text-white hover:underline cursor-pointer whitespace-nowrap"
+                  className="font-semibold text-[#1C1917] dark:text-[#FBF9F5] hover:underline cursor-pointer whitespace-nowrap"
                 >
                   Message Admin
                 </button>
               </div>
             </div>
 
-            <div className="pt-6 border-t border-slate-200 dark:border-slate-800 space-y-4">
+            <div className="pt-6 border-t border-[#EFE8D8] dark:border-[#2E2922] space-y-4">
               <div className="text-center py-2">
-                <p className="text-base sm:text-lg md:text-xl font-bold tracking-tight text-[#10243D] dark:text-white">
+                <p className="text-base sm:text-lg md:text-xl font-bold tracking-tight text-[#1C1917] dark:text-[#FBF9F5]">
                   © 2026 CoffeeNadu News. All rights reserved.
                 </p>
               </div>
 
-              <div className="pt-4 border-t border-slate-100 dark:border-slate-800 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 text-center sm:text-left text-[11px] sm:text-xs text-[#738093] dark:text-slate-400">
-                <p className="font-bold text-[#17263A] dark:text-slate-200">
+              <div className="pt-4 border-t border-[#F4EFE4] dark:border-[#24201A] flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 text-center sm:text-left text-[11px] sm:text-xs text-[#6B6052] dark:text-[#A89C8B]">
+                <p className="font-bold text-[#1C1917] dark:text-[#ECE5D7]">
                   Developed by Dheeraj
                 </p>
                 <p className="leading-relaxed">
@@ -2194,7 +2107,102 @@ export default function App() {
                 handleOpenCommunityPost(post.slug);
               }}
             />
+
+            <CommunityReportModal
+              post={reportingCommunityPost}
+              onClose={() => setReportingCommunityPost(null)}
+            />
           </>
+        )}
+
+        {/* Platform Listing Report Modal from Unified Homepage Feed */}
+        {reportingPlatformListing && (
+          <div
+            className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-xs flex items-center justify-center p-4"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Report listing"
+          >
+            <div className="w-full max-w-md bg-white dark:bg-[#101D30] rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xl p-5 space-y-4">
+              <h2 className="font-kannada text-base font-extrabold text-[#10243D] dark:text-white">
+                {platformLang === 'kn' ? 'ಮಾಹಿತಿ ವರದಿ ಮಾಡಿ' : 'Report Listing'}
+              </h2>
+              {platformReportDone ? (
+                <div className="space-y-3 text-sm text-[#10243D] dark:text-slate-100">
+                  <p className="font-kannada">
+                    {platformLang === 'kn'
+                      ? 'ನಿಮ್ಮ ವರದಿಯನ್ನು ಸ್ವೀಕರಿಸಲಾಗಿದೆ. ಆಡ್ಮಿನ್ ತಂಡ ಶೀಘ್ರದಲ್ಲೇ ಪರಿಶೀಲಿಸುತ್ತದೆ.'
+                      : 'Your report has been received. Our admin team will review it shortly.'}
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => setReportingPlatformListing(null)}
+                    className="px-4 py-2 rounded-xl bg-[#10243D] dark:bg-[#D9A441] text-white dark:text-[#10243D] text-xs font-bold cursor-pointer"
+                  >
+                    {platformLang === 'kn' ? 'ಮುಚ್ಚಿ' : 'Close'}
+                  </button>
+                </div>
+              ) : (
+                <form
+                  className="space-y-3"
+                  onSubmit={async (e) => {
+                    e.preventDefault();
+                    setPlatformReportSaving(true);
+                    try {
+                      await submitListingReport({
+                        listingId: reportingPlatformListing.id,
+                        reason: platformReportReason,
+                        details: platformReportDetails.trim(),
+                      });
+                      setPlatformReportDone(true);
+                    } finally {
+                      setPlatformReportSaving(false);
+                    }
+                  }}
+                >
+                  <p className="text-xs text-slate-600 dark:text-slate-300 font-kannada">
+                    {reportingPlatformListing.title}
+                  </p>
+                  <select
+                    value={platformReportReason}
+                    onChange={(e) => setPlatformReportReason(e.target.value)}
+                    className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs text-[#10243D] dark:text-white [&>option]:bg-white [&>option]:text-[#10243D] dark:[&>option]:bg-slate-900 dark:[&>option]:text-white"
+                  >
+                    <option value="ತಪ್ಪು ಅಥವಾ ಹಳೆಯ ಮಾಹಿತಿ">ತಪ್ಪು ಅಥವಾ ಹಳೆಯ ಮಾಹಿತಿ (Incorrect / Outdated)</option>
+                    <option value="ವಂಚನೆ / ಸ್ಪ್ಯಾಮ್">ವಂಚನೆ / ಸ್ಪ್ಯಾಮ್ (Spam / Fraud)</option>
+                    <option value="ಅನುಚಿತ ವಿಷಯ">ಅನುಚಿತ ವಿಷಯ (Inappropriate)</option>
+                  </select>
+                  <textarea
+                    rows={2}
+                    value={platformReportDetails}
+                    onChange={(e) => setPlatformReportDetails(e.target.value)}
+                    placeholder={platformLang === 'kn' ? 'ಹೆಚ್ಚುವರಿ ವಿವರ (ಐಚ್ಛಿಕ)' : 'Additional details (optional)'}
+                    className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs text-[#10243D] dark:text-white placeholder:text-slate-500 dark:placeholder:text-slate-400"
+                  />
+                  <div className="flex justify-end gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setReportingPlatformListing(null)}
+                      className="px-4 py-2 rounded-xl border border-slate-300 dark:border-slate-700 text-xs font-bold text-slate-700 dark:text-slate-200 cursor-pointer"
+                    >
+                      {platformLang === 'kn' ? 'ರದ್ದುಮಾಡಿ' : 'Cancel'}
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={platformReportSaving}
+                      className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold cursor-pointer disabled:opacity-60"
+                    >
+                      {platformReportSaving
+                        ? '...'
+                        : platformLang === 'kn'
+                          ? 'ವರದಿ ಸಲ್ಲಿಸಿ'
+                          : 'Submit Report'}
+                    </button>
+                  </div>
+                </form>
+              )}
+            </div>
+          </div>
         )}
 
         {/* Optional Website Entry Advertisement Overlay */}
@@ -2280,12 +2288,12 @@ export default function App() {
             type="button"
             onClick={handleJumpToChat}
             aria-label="Message Coffeenadu Admin"
-            className="fixed bottom-20 md:bottom-4 right-3 sm:right-4 z-30 inline-flex items-center justify-center gap-2 w-11 h-11 sm:w-auto sm:h-auto sm:px-4 sm:py-2.5 text-xs sm:text-sm font-bold text-white bg-[#10243D] hover:bg-[#19385F] border border-[#D9A441]/60 rounded-full sm:rounded-xl shadow-lg transition-transform hover:-translate-y-0.5 cursor-pointer min-h-[44px]"
+            className="fixed bottom-20 md:bottom-4 right-3 sm:right-4 z-30 inline-flex items-center justify-center gap-2 w-11 h-11 sm:w-auto sm:h-auto sm:px-4 sm:py-2.5 text-xs sm:text-sm font-bold text-[#FBF9F5] bg-[#1C1917] hover:bg-[#2E2922] border border-[#D4A238]/70 rounded-full sm:rounded-xl shadow-lg transition-transform hover:-translate-y-0.5 cursor-pointer min-h-[44px]"
           >
-            <MessageSquare className="w-4 h-4 text-[#D9A441] shrink-0" aria-hidden="true" />
+            <MessageSquare className="w-4 h-4 text-[#E6BC5C] shrink-0" aria-hidden="true" />
             <span className="hidden sm:inline font-kannada whitespace-nowrap">Message · ಸಂದೇಶ</span>
             {readerThread?.unreadByReader && (
-              <span className="hidden sm:inline ml-1 px-1.5 py-0.5 text-[10px] font-extrabold bg-[#D9A441] text-[#10243D] rounded">
+              <span className="hidden sm:inline ml-1 px-1.5 py-0.5 text-[10px] font-extrabold bg-[#E6BC5C] text-[#171411] rounded">
                 Reply
               </span>
             )}

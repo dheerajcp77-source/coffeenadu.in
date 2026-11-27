@@ -499,7 +499,6 @@ export function Admin2NewsSection({
                   <th className="px-3 py-3">Article &amp; Slug</th>
                   <th className="px-3 py-3">Category / Lang</th>
                   <th className="px-3 py-3">Published</th>
-                  <th className="px-3 py-3 text-right">Views</th>
                   <th className="px-3 py-3 text-right">Actions</th>
                 </tr>
               </thead>
@@ -535,7 +534,7 @@ export function Admin2NewsSection({
                             <img
                               src={article.imageThumbUrl || article.imageUrl}
                               alt=""
-                              className="h-11 w-14 shrink-0 rounded-md border border-slate-200 object-cover dark:border-slate-700"
+                              className="h-11 w-14 shrink-0 rounded-md border border-slate-200 bg-[#F4F1EA] object-contain dark:border-slate-700 dark:bg-slate-900"
                               loading="lazy"
                             />
                           ) : (
@@ -633,9 +632,6 @@ export function Admin2NewsSection({
                             Lead ends {formatLeadExpiryDateTime(article.featuredUntil)}
                           </p>
                         )}
-                      </td>
-                      <td className="px-3 py-3 align-top text-right font-semibold tabular-nums text-slate-800 dark:text-slate-100">
-                        {(article.viewCount ?? 0).toLocaleString('en-IN')}
                       </td>
                       <td className="px-3 py-3 align-top text-right">
                         <div className="inline-flex flex-wrap items-center justify-end gap-1">
@@ -1057,8 +1053,7 @@ export function Admin2NewsSection({
               dangerouslySetInnerHTML={{ __html: sanitizeRichTextHtml(previewArticle.titleKannada) }}
             />
             <p className="mt-1.5 text-xs text-slate-500 dark:text-slate-400">
-              {previewArticle.publishedDate} {previewArticle.publishedTime} · {previewArticle.reporter} ·{' '}
-              {(previewArticle.viewCount ?? 0).toLocaleString('en-IN')} views
+              {previewArticle.publishedDate} {previewArticle.publishedTime} · {previewArticle.reporter}
             </p>
             <div className="mt-4 space-y-3 text-sm leading-relaxed text-slate-700 dark:text-slate-200">
               {previewArticle.bodyKannada.map((para, i) => (

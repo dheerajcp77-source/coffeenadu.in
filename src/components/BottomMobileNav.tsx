@@ -68,15 +68,15 @@ export function BottomMobileNav({
   const navBtnClass = (isActive: boolean) =>
     `flex-1 min-h-[52px] flex flex-col items-center justify-center gap-0.5 text-[10px] font-bold transition-colors cursor-pointer ${
       isActive
-        ? 'text-[#176B4A] dark:text-[#D9A441]'
-        : 'text-[#64748B] dark:text-slate-400 hover:text-[#10243D] dark:hover:text-white'
+        ? 'text-[#926710] dark:text-[#E6BC5C]'
+        : 'text-[#6B6052] dark:text-[#A89C8B] hover:text-[#1C1917] dark:hover:text-[#FBF9F5]'
     }`;
 
   return (
     <>
       {menuOpen && (
         <div
-          className="fixed inset-0 z-50 md:hidden bg-slate-950/60 backdrop-blur-[1px] flex items-end"
+          className="fixed inset-0 z-50 md:hidden bg-[#11100E]/70 backdrop-blur-[1px] flex items-end"
           role="dialog"
           aria-modal="true"
           aria-label="Coffeenadu Malnad Menu"
@@ -84,13 +84,13 @@ export function BottomMobileNav({
             if (e.target === e.currentTarget) setMenuOpen(false);
           }}
         >
-          <div className="w-full max-h-[85vh] overflow-y-auto rounded-t-2xl bg-white dark:bg-[#0F1E33] border-t border-slate-200 dark:border-slate-800 p-4 pb-6 shadow-2xl space-y-4">
+          <div className="w-full max-h-[85vh] overflow-y-auto rounded-t-2xl bg-white dark:bg-[#1A1815] border-t border-[#E7DFCE] dark:border-[#3A3122] p-4 pb-6 shadow-2xl space-y-4">
             <div className="flex items-center justify-between">
               <div>
-                <h3 className="text-sm font-extrabold text-[#10243D] dark:text-white font-kannada">
+                <h3 className="text-sm font-extrabold text-[#1C1917] dark:text-[#FBF9F5] font-kannada">
                   {pickLangText('ಕಾಫಿನಾಡು ಮಲೆನಾಡು ಮೆನು', 'Coffeenadu Malnad Menu', lang)}
                 </h3>
-                <p className="font-kannada text-[11px] text-[#738093] dark:text-slate-400">
+                <p className="font-kannada text-[11px] text-[#6B6052] dark:text-[#A89C8B]">
                   {pickLangText('ಎಲ್ಲಾ 22 ಸೇವೆಗಳು ಮತ್ತು ಖಾತೆ ಆಯ್ಕೆಗಳು', 'All 22 services & reader controls', lang)}
                 </p>
               </div>
@@ -98,7 +98,7 @@ export function BottomMobileNav({
                 type="button"
                 onClick={() => setMenuOpen(false)}
                 aria-label="Close mobile menu"
-                className="min-h-[44px] min-w-[44px] rounded-lg flex items-center justify-center text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
+                className="min-h-[44px] min-w-[44px] rounded-lg flex items-center justify-center text-[#6B6052] hover:bg-[#F5F1E8] dark:hover:bg-[#26221B] cursor-pointer"
               >
                 <X className="w-5 h-5" />
               </button>
@@ -112,9 +112,9 @@ export function BottomMobileNav({
                   setMenuOpen(false);
                   onOpenSearch();
                 }}
-                className="min-h-[44px] flex items-center gap-2 rounded-xl bg-[#10243D] text-white px-3 text-xs font-bold cursor-pointer"
+                className="min-h-[44px] flex items-center gap-2 rounded-xl bg-[#1C1917] text-[#FBF9F5] border border-[#3A3122] px-3 text-xs font-bold cursor-pointer"
               >
-                <Search className="w-4 h-4 text-[#D9A441]" />
+                <Search className="w-4 h-4 text-[#E6BC5C]" />
                 <span>{pickLangText('ಎಲ್ಲವನ್ನೂ ಹುಡುಕಿ', 'Search Everything', lang)}</span>
               </button>
 
@@ -124,9 +124,9 @@ export function BottomMobileNav({
                   setMenuOpen(false);
                   onNavigateModule('account');
                 }}
-                className="min-h-[44px] flex items-center gap-2 rounded-xl bg-[#176B4A] text-white px-3 text-xs font-bold cursor-pointer"
+                className="min-h-[44px] flex items-center gap-2 rounded-xl bg-gradient-to-r from-[#C5932B] to-[#DEB04B] text-[#171411] px-3 text-xs font-extrabold cursor-pointer"
               >
-                <UserCheck className="w-4 h-4 text-emerald-200" />
+                <UserCheck className="w-4 h-4 text-[#171411]" />
                 <span>{pickLangText('ಖಾತೆ & ಉಳಿಸಿದವು', 'Account & Saved', lang)}</span>
               </button>
 
@@ -134,7 +134,7 @@ export function BottomMobileNav({
                 <button
                   type="button"
                   onClick={() => onToggleLang(lang === 'kn' ? 'en' : 'kn')}
-                  className="min-h-[44px] flex items-center justify-center gap-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-[#13253E] px-3 text-xs font-bold text-[#10243D] dark:text-slate-100 cursor-pointer"
+                  className="min-h-[44px] flex items-center justify-center gap-2 rounded-xl border border-[#E7DFCE] dark:border-[#3A3122] bg-[#FAF7F0] dark:bg-[#221F1A] px-3 text-xs font-bold text-[#1C1917] dark:text-[#FBF9F5] cursor-pointer"
                 >
                   <span>{lang === 'kn' ? 'Switch to English' : 'ಕನ್ನಡಕ್ಕೆ ಬದಲಾಯಿಸಿ'}</span>
                 </button>
@@ -143,12 +143,12 @@ export function BottomMobileNav({
               <button
                 type="button"
                 onClick={onToggleTheme}
-                className="min-h-[44px] flex items-center justify-center gap-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-[#13253E] px-3 text-xs font-bold text-[#10243D] dark:text-slate-100 cursor-pointer"
+                className="min-h-[44px] flex items-center justify-center gap-2 rounded-xl border border-[#E7DFCE] dark:border-[#3A3122] bg-[#FAF7F0] dark:bg-[#221F1A] px-3 text-xs font-bold text-[#1C1917] dark:text-[#FBF9F5] cursor-pointer"
               >
                 {theme === 'dark' ? (
-                  <Sun className="w-4 h-4 text-[#D9A441]" />
+                  <Sun className="w-4 h-4 text-[#E6BC5C]" />
                 ) : (
-                  <Moon className="w-4 h-4 text-[#10243D]" />
+                  <Moon className="w-4 h-4 text-[#926710]" />
                 )}
                 <span>{theme === 'dark' ? 'Light Mode' : 'Dark Mode'}</span>
               </button>
@@ -156,7 +156,7 @@ export function BottomMobileNav({
 
             {/* All 22 Platform Modules Grid */}
             <div className="space-y-2">
-              <div className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
+              <div className="text-[11px] font-bold uppercase tracking-wider text-[#8A7D6B]">
                 {pickLangText('ಎಲ್ಲಾ ಮಲೆನಾಡು ವಿಭಾಗಗಳು', 'All Malnad Modules', lang)}
               </div>
               <div className="grid grid-cols-2 gap-2">
@@ -168,9 +168,9 @@ export function BottomMobileNav({
                       setMenuOpen(false);
                       onNavigateModule(mod.id);
                     }}
-                    className="min-h-[44px] flex items-center gap-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-[#FAFBFC] dark:bg-slate-900/60 px-2.5 py-2 text-left text-xs font-bold text-[#10243D] dark:text-slate-100 cursor-pointer"
+                    className="min-h-[44px] flex items-center gap-2 rounded-xl border border-[#E7DFCE] dark:border-[#2E2922] bg-[#FAF7F0] dark:bg-[#14120F] px-2.5 py-2 text-left text-xs font-bold text-[#1C1917] dark:text-[#FBF9F5] cursor-pointer"
                   >
-                    <span className="text-[#176B4A] dark:text-[#D9A441] shrink-0">
+                    <span className="text-[#926710] dark:text-[#E6BC5C] shrink-0">
                       <PlatformIcon icon={mod.icon} className="w-4 h-4" />
                     </span>
                     <span className="font-kannada truncate">
@@ -182,16 +182,16 @@ export function BottomMobileNav({
             </div>
 
             {/* Reader Library & Support Row */}
-            <div className="pt-2 border-t border-slate-200 dark:border-slate-800 grid grid-cols-2 gap-2 text-xs">
+            <div className="pt-2 border-t border-[#EFE8D8] dark:border-[#2E2922] grid grid-cols-2 gap-2 text-xs">
               <button
                 type="button"
                 onClick={() => {
                   setMenuOpen(false);
                   onOpenSaved();
                 }}
-                className="min-h-[44px] flex items-center gap-2 rounded-xl border border-slate-200 dark:border-slate-700 px-3 font-bold text-[#10243D] dark:text-slate-200 cursor-pointer"
+                className="min-h-[44px] flex items-center gap-2 rounded-xl border border-[#E7DFCE] dark:border-[#3A3122] px-3 font-bold text-[#1C1917] dark:text-[#F0E9DC] cursor-pointer"
               >
-                <Bookmark className="w-4 h-4 text-[#176B4A]" />
+                <Bookmark className="w-4 h-4 text-[#B88623] dark:text-[#E6BC5C]" />
                 <span>Saved ({bookmarkCount})</span>
               </button>
               <button
@@ -200,9 +200,9 @@ export function BottomMobileNav({
                   setMenuOpen(false);
                   onOpenHistory();
                 }}
-                className="min-h-[44px] flex items-center gap-2 rounded-xl border border-slate-200 dark:border-slate-700 px-3 font-bold text-[#10243D] dark:text-slate-200 cursor-pointer"
+                className="min-h-[44px] flex items-center gap-2 rounded-xl border border-[#E7DFCE] dark:border-[#3A3122] px-3 font-bold text-[#1C1917] dark:text-[#F0E9DC] cursor-pointer"
               >
-                <History className="w-4 h-4 text-sky-600" />
+                <History className="w-4 h-4 text-[#926710] dark:text-[#E6BC5C]" />
                 <span>History</span>
               </button>
               <button
@@ -211,9 +211,9 @@ export function BottomMobileNav({
                   setMenuOpen(false);
                   onOpenNotifications();
                 }}
-                className="min-h-[44px] flex items-center gap-2 rounded-xl border border-slate-200 dark:border-slate-700 px-3 font-bold text-[#10243D] dark:text-slate-200 cursor-pointer"
+                className="min-h-[44px] flex items-center gap-2 rounded-xl border border-[#E7DFCE] dark:border-[#3A3122] px-3 font-bold text-[#1C1917] dark:text-[#F0E9DC] cursor-pointer"
               >
-                <Bell className="w-4 h-4 text-[#D9A441]" />
+                <Bell className="w-4 h-4 text-[#C5932B]" />
                 <span>Alerts ({unreadNotificationsCount})</span>
               </button>
               <button
@@ -222,9 +222,9 @@ export function BottomMobileNav({
                   setMenuOpen(false);
                   onNavigateSection('local-ads');
                 }}
-                className="min-h-[44px] flex items-center gap-2 rounded-xl border border-slate-200 dark:border-slate-700 px-3 font-bold text-[#10243D] dark:text-slate-200 cursor-pointer"
+                className="min-h-[44px] flex items-center gap-2 rounded-xl border border-[#E7DFCE] dark:border-[#3A3122] px-3 font-bold text-[#1C1917] dark:text-[#F0E9DC] cursor-pointer"
               >
-                <Megaphone className="w-4 h-4 text-amber-500" />
+                <Megaphone className="w-4 h-4 text-[#C5932B]" />
                 <span>Local Ads</span>
               </button>
               <button
@@ -233,9 +233,9 @@ export function BottomMobileNav({
                   setMenuOpen(false);
                   onNavigateSection('support-chat');
                 }}
-                className="col-span-2 min-h-[44px] flex items-center justify-center gap-2 rounded-xl border border-slate-200 dark:border-slate-700 px-3 font-bold text-[#10243D] dark:text-slate-200 cursor-pointer"
+                className="col-span-2 min-h-[44px] flex items-center justify-center gap-2 rounded-xl border border-[#DFC996] dark:border-[#4A3B22] bg-[#FAF7F0] dark:bg-[#221F1A] px-3 font-bold text-[#1C1917] dark:text-[#F0E9DC] cursor-pointer"
               >
-                <MessageSquareHeart className="w-4 h-4 text-[#176B4A]" />
+                <MessageSquareHeart className="w-4 h-4 text-[#B88623] dark:text-[#E6BC5C]" />
                 <span>{pickLangText('ಆಡ್ಮಿನ್‌ಗೆ ಸಂದೇಶ ಕಳುಹಿಸಿ', 'Message Admin', lang)}</span>
               </button>
             </div>
@@ -245,7 +245,7 @@ export function BottomMobileNav({
 
       {/* Fixed 5-Tab Mobile Bottom Bar: Home · Explore · Services · Marketplace · Menu */}
       <nav
-        className="fixed bottom-0 inset-x-0 z-40 md:hidden bg-white/95 dark:bg-[#0B1626]/95 backdrop-blur-md border-t border-slate-200 dark:border-slate-800 pb-safe shadow-[0_-4px_18px_rgba(16,36,61,0.08)]"
+        className="fixed bottom-0 inset-x-0 z-40 md:hidden bg-white/95 dark:bg-[#151310]/95 backdrop-blur-md border-t border-[#E7DFCE] dark:border-[#2E2922] pb-safe shadow-[0_-4px_18px_rgba(28,25,23,0.08)]"
         aria-label="Mobile bottom navigation"
       >
         <div className="flex items-stretch justify-around px-1">

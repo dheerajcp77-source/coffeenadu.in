@@ -40,7 +40,7 @@ export function RightRail({
         variant="rail"
       />
 
-      {/* Join Coffeenadu News WhatsApp Group */}
+      {/* Join our WhatsApp Community */}
       <WhatsAppGroupBanner variant="card" />
 
       {/* Custom Homepage Right Rail Advertisement Placement */}
@@ -56,17 +56,17 @@ export function RightRail({
       )}
 
       {/* Town / Hobli Quick Filter in Kannada */}
-      <section className="bg-white dark:bg-[#0F1E33] border border-slate-200 dark:border-slate-800 rounded-xl p-4 sm:p-5 shadow-xs">
+      <section className="bg-white dark:bg-[#1A1815] border border-[#E7DFCE] dark:border-[#2E2922] rounded-2xl p-4 sm:p-5 shadow-xs">
         <div className="flex items-center justify-between mb-3">
-          <h2 className="inline-flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-[#10243D] dark:text-white">
-            <MapPin className="w-3.5 h-3.5 text-[#176B4A] dark:text-[#D9A441]" />
+          <h2 className="inline-flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-[#1C1917] dark:text-[#FBF9F5]">
+            <MapPin className="w-3.5 h-3.5 text-[#B88623] dark:text-[#E6BC5C]" />
             <span>Places · ಸ್ಥಳಗಳು</span>
           </h2>
           {selectedLocation !== 'All' && (
             <button
               type="button"
               onClick={() => onSelectLocation('All')}
-              className="text-xs font-semibold text-[#176B4A] dark:text-[#D9A441] hover:underline cursor-pointer"
+              className="text-xs font-semibold text-[#926710] dark:text-[#E6BC5C] hover:underline cursor-pointer"
             >
               Show All
             </button>
@@ -78,8 +78,8 @@ export function RightRail({
             onClick={() => onSelectLocation('All')}
             className={`font-kannada px-3 py-1.5 text-xs font-semibold rounded-lg border transition-colors cursor-pointer ${
               selectedLocation === 'All'
-                ? 'bg-[#10243D] text-white border-[#10243D] dark:bg-[#D9A441] dark:text-[#10243D] dark:border-[#D9A441]'
-                : 'bg-slate-50 dark:bg-[#13253E] text-[#17263A] dark:text-slate-200 border-slate-200 dark:border-slate-700 hover:border-[#10243D]/40 dark:hover:border-slate-500'
+                ? 'bg-gradient-to-r from-[#C5932B] to-[#DEB04B] text-[#171411] border-[#B88623] font-bold'
+                : 'bg-[#FAF7F0] dark:bg-[#14120F] text-[#2A2520] dark:text-[#E8E0D1] border-[#E7DFCE] dark:border-[#3A3122] hover:border-[#C5932B] dark:hover:border-[#E2B44B]/60'
             }`}
           >
             ಎಲ್ಲಾ (Show All)
@@ -93,8 +93,8 @@ export function RightRail({
                 onClick={() => onSelectLocation(place.labelKn)}
                 className={`font-kannada px-3 py-1.5 text-xs font-semibold rounded-lg border transition-colors cursor-pointer ${
                   active
-                    ? 'bg-[#10243D] text-white border-[#10243D] dark:bg-[#D9A441] dark:text-[#10243D] dark:border-[#D9A441]'
-                    : 'bg-slate-50 dark:bg-[#13253E] text-[#17263A] dark:text-slate-200 border-slate-200 dark:border-slate-700 hover:border-[#10243D]/40 dark:hover:border-slate-500'
+                    ? 'bg-gradient-to-r from-[#C5932B] to-[#DEB04B] text-[#171411] border-[#B88623] font-bold'
+                    : 'bg-[#FAF7F0] dark:bg-[#14120F] text-[#2A2520] dark:text-[#E8E0D1] border-[#E7DFCE] dark:border-[#3A3122] hover:border-[#C5932B] dark:hover:border-[#E2B44B]/60'
                 }`}
               >
                 {place.labelKn}
@@ -105,22 +105,22 @@ export function RightRail({
       </section>
 
       {/* Fast-Scan Local Briefs */}
-      <section className="bg-white dark:bg-[#0F1E33] border border-slate-200 dark:border-slate-800 rounded-xl p-4 sm:p-5 shadow-xs">
-        <h2 className="inline-flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-[#10243D] dark:text-white mb-3">
-          <Newspaper className="w-3.5 h-3.5 text-[#D9A441]" />
+      <section className="bg-white dark:bg-[#1A1815] border border-[#E7DFCE] dark:border-[#2E2922] rounded-2xl p-4 sm:p-5 shadow-xs">
+        <h2 className="inline-flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-[#1C1917] dark:text-[#FBF9F5] mb-3">
+          <Newspaper className="w-3.5 h-3.5 text-[#C5932B] dark:text-[#E6BC5C]" />
           <span>Koppa Quick Briefs</span>
         </h2>
-        <div className="divide-y divide-slate-200 dark:divide-slate-800">
+        <div className="divide-y divide-[#EFE8D8] dark:divide-[#2A251E]">
           {KOPPA_BRIEFS.map((brief) => (
             <div key={brief.id} className="py-3 first:pt-1 last:pb-0">
-              <div className="flex items-center gap-2 text-[11px] font-medium text-[#738093] dark:text-slate-400 mb-1">
-                <span className="text-[#176B4A] dark:text-emerald-400 font-bold">
+              <div className="flex items-center gap-2 text-[11px] font-medium text-[#6B6052] dark:text-[#A89C8B] mb-1">
+                <span className="text-[#926710] dark:text-[#E6BC5C] font-bold">
                   {brief.area}
                 </span>
                 <span aria-hidden="true">·</span>
                 <span>{brief.timeLabel}</span>
               </div>
-              <p className="font-kannada text-sm text-[#17263A] dark:text-slate-200 leading-relaxed">
+              <p className="font-kannada text-sm text-[#2A2520] dark:text-[#ECE5D7] leading-relaxed">
                 {brief.textKannada}
               </p>
             </div>
@@ -129,50 +129,50 @@ export function RightRail({
       </section>
 
       {/* Koppa APMC / Estate Market Reference Rates */}
-      <section className="bg-white dark:bg-[#0F1E33] border border-slate-200 dark:border-slate-800 rounded-xl p-4 sm:p-5 shadow-xs">
+      <section className="bg-white dark:bg-[#1A1815] border border-[#E7DFCE] dark:border-[#2E2922] rounded-2xl p-4 sm:p-5 shadow-xs">
         <div className="flex items-baseline justify-between mb-3">
           <div>
-            <h2 className="text-xs font-bold uppercase tracking-wider text-[#10243D] dark:text-white">
+            <h2 className="text-xs font-bold uppercase tracking-wider text-[#1C1917] dark:text-[#FBF9F5]">
               Local Market Rates
             </h2>
-            <p className="text-[11px] text-[#738093] dark:text-slate-400 mt-0.5">
+            <p className="text-[11px] text-[#6B6052] dark:text-[#A89C8B] mt-0.5">
               Koppa Reference Desk
             </p>
           </div>
-          <span className="text-[11px] font-semibold text-[#738093] dark:text-slate-400">
+          <span className="text-[11px] font-semibold text-[#6B6052] dark:text-[#A89C8B]">
             ₹ / Quintal
           </span>
         </div>
 
-        <div className="border border-slate-200 dark:border-slate-800 rounded-lg overflow-hidden">
+        <div className="border border-[#E7DFCE] dark:border-[#2E2922] rounded-xl overflow-hidden">
           <table className="w-full text-left border-collapse">
             <thead>
-              <tr className="border-b border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-[#0A1728] text-[11px] font-semibold uppercase tracking-wider text-[#738093] dark:text-slate-400">
+              <tr className="border-b border-[#E7DFCE] dark:border-[#2E2922] bg-[#FAF7F0] dark:bg-[#14120F] text-[11px] font-semibold uppercase tracking-wider text-[#6B6052] dark:text-[#A89C8B]">
                 <th className="py-2 px-3">Crop</th>
                 <th className="py-2 px-3 text-right">Rate</th>
                 <th className="py-2 px-3 text-right">Diff</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-200 dark:divide-slate-800 text-xs">
+            <tbody className="divide-y divide-[#EFE8D8] dark:divide-[#2A251E] text-xs">
               {KOPPA_MARKET_RATES.map((rate) => {
                 const isUp = rate.change >= 0;
                 return (
                   <tr key={rate.commodity}>
                     <td className="py-2.5 px-3">
-                      <div className="font-semibold text-[#17263A] dark:text-slate-100">
+                      <div className="font-semibold text-[#1C1917] dark:text-[#FBF9F5]">
                         {rate.commodity}
                       </div>
-                      <div className="text-[11px] text-[#738093] dark:text-slate-400">
+                      <div className="text-[11px] text-[#6B6052] dark:text-[#A89C8B]">
                         {rate.variety}
                       </div>
                     </td>
-                    <td className="py-2.5 px-3 text-right font-bold text-[#17263A] dark:text-white tabular-nums">
+                    <td className="py-2.5 px-3 text-right font-bold text-[#1C1917] dark:text-[#FBF9F5] tabular-nums">
                       ₹{rate.pricePerQuintal.toLocaleString('en-IN')}
                     </td>
                     <td
                       className={`py-2.5 px-3 text-right font-semibold tabular-nums ${
                         isUp
-                          ? 'text-[#176B4A] dark:text-emerald-400'
+                          ? 'text-emerald-700 dark:text-emerald-400'
                           : 'text-amber-700 dark:text-amber-400'
                       }`}
                     >

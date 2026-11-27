@@ -54,7 +54,7 @@ export interface AdminNavItem {
 
 export const ADMIN2_NAV_ITEMS: AdminNavItem[] = [
   { id: 'dashboard', label: 'Dashboard Overview', description: 'Live visitors, articles, ads & platform metrics', group: 'Editorial', icon: LayoutDashboard, requiredPermission: 'dashboard.view' },
-  { id: 'news', label: 'News Management', description: 'Published articles, drafts, breaking news & views', group: 'Editorial', icon: Newspaper, requiredPermission: 'dashboard.view' },
+  { id: 'news', label: 'News Management', description: 'Published articles, drafts, breaking news & categories', group: 'Editorial', icon: Newspaper, requiredPermission: 'dashboard.view' },
   { id: 'add-article', label: 'Add New Article', description: 'Publish Kannada & English news stories', group: 'Editorial', icon: FilePlus2, requiredPermission: 'news.create' },
   { id: 'ads', label: 'Local Advertisements', description: 'Manage banner slots, sponsors, clicks & schedules', group: 'Editorial', icon: Megaphone, requiredPermission: 'ads.manage' },
   { id: 'add-ad', label: 'Add Advertisement', description: 'Create a new local ad placement campaign', group: 'Editorial', icon: BadgePlus, requiredPermission: 'ads.manage' },

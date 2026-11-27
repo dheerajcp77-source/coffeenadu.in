@@ -940,7 +940,7 @@ export function AdminStorageManager({
                 <span>High-Traffic Cache &amp; Google Free Quota Monitor</span>
               </h2>
               <p className="text-xs text-stone-500">
-                Designed for 3,600+ daily views: 7-minute server cache + disk-cached Drive image proxy + 5-minute batched view writes.
+                High-traffic cache layer: 7-minute server cache + disk-cached Drive image proxy + 5-minute batched Sheets sync.
               </p>
             </div>
             <button
@@ -949,12 +949,12 @@ export function AdminStorageManager({
               disabled={flushingViews || !isConnected}
               className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-stone-800 bg-stone-100 hover:bg-stone-200 disabled:opacity-50 rounded-md cursor-pointer"
             >
-              {flushingViews ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Eye className="w-3.5 h-3.5" />}
-              <span>Flush Pending Views ({health.quota.pendingViewsCount})</span>
+              {flushingViews ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
+              <span>Sync Pending Telemetry</span>
             </button>
           </div>
 
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
             <div className="bg-stone-50 border border-stone-200 rounded-md p-3">
               <span className="text-stone-500 block">Apps Script Calls Today</span>
               <strong className="text-stone-950 text-base tabular-nums">
@@ -965,12 +965,6 @@ export function AdminStorageManager({
               <span className="text-stone-500 block">Server Cache Hit Rate</span>
               <strong className="text-emerald-800 text-base tabular-nums">
                 {health.quota.cacheHitRatePct}%
-              </strong>
-            </div>
-            <div className="bg-stone-50 border border-stone-200 rounded-md p-3">
-              <span className="text-stone-500 block">Aggregated Views Today</span>
-              <strong className="text-stone-950 text-base tabular-nums">
-                {health.quota.totalViewsAggregatedToday} ({health.quota.batchedViewFlushesToday} batches)
               </strong>
             </div>
             <div className="bg-stone-50 border border-stone-200 rounded-md p-3">
@@ -1577,7 +1571,7 @@ export function AdminStorageManager({
                                 {item.title}
                               </p>
                               <p className="text-[11px] text-stone-500">
-                                {item.category} · {item.publishedDate} · {item.views} views
+                                {item.category} · {item.publishedDate}
                                 {!item.existsInCurrent && (
                                   <span className="ml-2 font-semibold text-amber-800">
                                     ({item.isDeletedInCurrent ? 'Deleted in Live' : 'Missing in Live'})

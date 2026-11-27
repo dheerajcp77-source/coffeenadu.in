@@ -750,19 +750,7 @@ export function Admin2AdsSection({
                     </h3>
                     <div className="flex flex-wrap gap-4 text-xs text-slate-600 dark:text-slate-300 tabular-nums">
                       <span>
-                        <strong>{bestPerformingAd.views.toLocaleString('en-IN')}</strong> impressions
-                      </span>
-                      <span>
                         <strong>{bestPerformingAd.clicks.toLocaleString('en-IN')}</strong> clicks
-                      </span>
-                      <span>
-                        CTR{' '}
-                        <strong>
-                          {bestPerformingAd.views > 0
-                            ? ((bestPerformingAd.clicks / bestPerformingAd.views) * 100).toFixed(1)
-                            : '0.0'}
-                          %
-                        </strong>
                       </span>
                     </div>
                     <div className="flex flex-wrap gap-2 pt-1">
@@ -972,7 +960,6 @@ export function Admin2AdsSection({
                     <th className="py-3 px-3">Advertiser</th>
                     <th className="py-3 px-3">Status</th>
                     <th className="py-3 px-3">Placements</th>
-                    <th className="py-3 px-3 text-right">Impressions</th>
                     <th className="py-3 px-3 text-right">Clicks</th>
                     <th className="py-3 px-4 text-right">Actions</th>
                   </tr>
@@ -1041,9 +1028,6 @@ export function Admin2AdsSection({
                           ) : (
                             <span className="text-[11px] text-slate-400">Directory Only</span>
                           )}
-                        </td>
-                        <td className="py-3 px-3 text-right tabular-nums font-semibold text-slate-800 dark:text-slate-200">
-                          {ad.views.toLocaleString('en-IN')}
                         </td>
                         <td className="py-3 px-3 text-right tabular-nums font-semibold text-slate-800 dark:text-slate-200">
                           {ad.clicks.toLocaleString('en-IN')}
@@ -1757,9 +1741,7 @@ export function Admin2AdsSection({
                         {analyticsData.bestPerformingAd.adNumber} · {analyticsData.bestPerformingAd.title}
                       </p>
                       <p className="text-xs text-slate-500 tabular-nums">
-                        {analyticsData.bestPerformingAd.impressions.toLocaleString('en-IN')} views ·{' '}
-                        {analyticsData.bestPerformingAd.clicks.toLocaleString('en-IN')} clicks ·{' '}
-                        {analyticsData.bestPerformingAd.ctrPct.toFixed(2)}% CTR
+                        {analyticsData.bestPerformingAd.clicks.toLocaleString('en-IN')} clicks
                       </p>
                     </div>
                   )}
@@ -1767,11 +1749,11 @@ export function Admin2AdsSection({
 
                 <div className="lg:col-span-7 rounded-xl border border-slate-200 bg-white p-5 space-y-3 dark:border-slate-800 dark:bg-[#111C2E]">
                   <h4 className="text-xs font-bold uppercase tracking-wider text-slate-700 dark:text-slate-200">
-                    Views by Placement
+                    Activity by Placement
                   </h4>
                   {Object.keys(analyticsData.byPlacement).length === 0 ? (
                     <p className="text-xs text-slate-500 py-4">
-                      Placement-level breakdown will populate automatically as visitors view ads across placements.
+                      Placement-level breakdown will populate automatically across active ad placements.
                     </p>
                   ) : (
                     <div className="space-y-2.5">

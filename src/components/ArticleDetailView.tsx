@@ -460,8 +460,8 @@ export function ArticleDetailView({
                   src={resolvedImage}
                   alt={stripRichTextToPlainText(article.titleKannada)}
                   fitMode="natural"
-                  maxHeightClass="max-h-[560px]"
-                  className="rounded-xl border border-slate-200 dark:border-slate-800"
+                  maxHeightClass="max-h-[760px]"
+                  className="rounded-xl border border-[#E3DEC9] dark:border-[#1E3B34]"
                   watermarkApplied={Boolean(article.watermarkApplied && article.imageUrl)}
                 />
                 {article.imageCaption && (
@@ -763,12 +763,13 @@ export function ArticleDetailView({
                   onClick={() => onSelectArticle(related)}
                   className="w-full text-left py-4 group flex items-start gap-3 hover:bg-slate-50 dark:hover:bg-slate-800/40 transition-colors cursor-pointer px-2 -mx-2 rounded-lg"
                 >
-                  <div className="w-16 h-14 rounded-lg overflow-hidden shrink-0 bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700">
+                  <div className="relative w-16 h-14 rounded-lg overflow-hidden shrink-0 bg-[#F4F1EA] dark:bg-[#0B1714] border border-[#E3DEC9] dark:border-[#1E3B34]">
                     <NewsImage
                       src={resolveArticleImage(related, true)}
                       alt={stripRichTextToPlainText(related.titleKannada)}
                       watermarkApplied={related.watermarkApplied}
-                      className="w-full h-full object-cover"
+                      fitMode="contain"
+                      fillParent
                     />
                   </div>
                   <div className="min-w-0 flex-1">

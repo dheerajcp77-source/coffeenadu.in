@@ -1191,3 +1191,83 @@ export const KANNADA_WORD_PUZZLES: Array<{
 ];
 
 export const STARTER_WEATHER_LOGS: WeatherRainfallRecord[] = [];
+
+export const DEFAULT_HOMEPAGE_ANNOUNCEMENT: import('../types/platform').HomepageAnnouncementConfig = {
+  enabled: true,
+  headingKn: 'ನಿಮ್ಮ ಊರಿನ ಮಾಹಿತಿಯನ್ನು ಮಲೆನಾಡಿನ ಜನರೊಂದಿಗೆ ಹಂಚಿಕೊಳ್ಳಿ!',
+  headingEn: 'Share Your Local Information with Malnad!',
+  descriptionKn:
+    'ಅಂಗಡಿಗಳು, ಖರೀದಿ–ಮಾರಾಟ, ಉದ್ಯೋಗ, ಕೃಷಿ ಉತ್ಪನ್ನಗಳು, ಸೇವೆಗಳು, ಕಳೆದುಹೋದ ವಸ್ತುಗಳು ಹಾಗೂ ನಿಮ್ಮ ಊರಿನ ಕಾರ್ಯಕ್ರಮಗಳನ್ನು ತಕ್ಷಣವೇ ಉಚಿತವಾಗಿ ಪ್ರಕಟಿಸಿ.',
+  descriptionEn:
+    'Publish local shops, buy & sell items, jobs, farm produce, services, lost & found notices, and community events instantly for Koppa & Malnad.',
+  imageUrl: '',
+  startDate: '',
+  endDate: '',
+  buttons: [
+    {
+      id: 'btn-add-info',
+      labelKn: 'ನಿಮ್ಮ ಮಾಹಿತಿ ಸೇರಿಸಿ',
+      labelEn: 'Add Your Information',
+      action: 'open-submit-modal',
+      variant: 'primary',
+    },
+    {
+      id: 'btn-buy-sell',
+      labelKn: 'ಖರೀದಿ ಮತ್ತು ಮಾರಾಟ',
+      labelEn: 'Buy & Sell',
+      action: 'filter:marketplace',
+      variant: 'secondary',
+    },
+    {
+      id: 'btn-explore-community',
+      labelKn: 'ಸಮುದಾಯವನ್ನು ನೋಡಿ',
+      labelEn: 'Explore Community',
+      action: 'route:/community',
+      variant: 'outline',
+    },
+  ],
+};
+
+export const DEFAULT_DISPLAY_SETTINGS: import('../types/platform').PlatformDisplaySettings = {
+  showViewCounts: false,
+  showBreakingTicker: true,
+  showTrendingSection: true,
+  showCategoryGrid: true,
+  showCommunityFeed: true,
+};
+
+export const DEFAULT_FEED_CATEGORIES: import('../types/platform').FeedCategoryConfig[] = [
+  { id: 'all', labelKn: 'ಎಲ್ಲಾ', labelEn: 'All', icon: 'layout-grid', enabled: true, order: 1 },
+  { id: 'news', labelKn: 'ಸುದ್ದಿ', labelEn: 'News', icon: 'newspaper', enabled: true, order: 2 },
+  { id: 'local', labelKn: 'ಸ್ಥಳೀಯ', labelEn: 'Local', icon: 'map-pin', enabled: true, order: 3 },
+  { id: 'malnad', labelKn: 'ಮಲೆನಾಡು', labelEn: 'Malnad', icon: 'mountain', enabled: true, order: 4 },
+  { id: 'agriculture', labelKn: 'ಕೃಷಿ', labelEn: 'Agriculture', icon: 'sprout', enabled: true, order: 5 },
+  { id: 'marketplace', labelKn: 'ಖರೀದಿ-ಮಾರಾಟ', labelEn: 'Buy & Sell', icon: 'shopping-bag', enabled: true, order: 6 },
+  { id: 'businesses', labelKn: 'ಅಂಗಡಿ & ವ್ಯಾಪಾರ', labelEn: 'Shops & Business', icon: 'store', enabled: true, order: 7 },
+  { id: 'jobs', labelKn: 'ಉದ್ಯೋಗ', labelEn: 'Jobs', icon: 'briefcase', enabled: true, order: 8 },
+  { id: 'property', labelKn: 'ಮನೆ / ಜಮೀನು', labelEn: 'Property', icon: 'home', enabled: true, order: 9 },
+  { id: 'vehicles', labelKn: 'ವಾಹನ', labelEn: 'Vehicles', icon: 'car', enabled: true, order: 10 },
+  { id: 'lost-found', labelKn: 'ಕಳೆದ / ಸಿಕ್ಕ', labelEn: 'Lost & Found', icon: 'search-check', enabled: true, order: 11 },
+  { id: 'services', labelKn: 'ಸ್ಥಳೀಯ ಸೇವೆ', labelEn: 'Local Services', icon: 'wrench', enabled: true, order: 12 },
+  { id: 'education', labelKn: 'ಶಿಕ್ಷಣ', labelEn: 'Education', icon: 'graduation-cap', enabled: true, order: 13 },
+  { id: 'health', labelKn: 'ಆರೋಗ್ಯ', labelEn: 'Health', icon: 'heart-pulse', enabled: true, order: 14 },
+  { id: 'events', labelKn: 'ಕಾರ್ಯಕ್ರಮ', labelEn: 'Events', icon: 'calendar', enabled: true, order: 15 },
+  { id: 'tourism', labelKn: 'ಪ್ರವಾಸೋದ್ಯಮ', labelEn: 'Tourism', icon: 'compass', enabled: true, order: 16 },
+  { id: 'community', labelKn: 'ಸಮುದಾಯ', labelEn: 'Community', icon: 'users', enabled: true, order: 17 },
+  { id: 'public-info', labelKn: 'ಪ್ರಕಟಣೆಗಳು', labelEn: 'Announcements', icon: 'megaphone', enabled: true, order: 18 },
+  { id: 'offers', labelKn: 'ಆಫರ್ & ಡೀಲ್ಸ್', labelEn: 'Offers', icon: 'tag', enabled: true, order: 19 },
+  { id: 'schemes', labelKn: 'ಸರ್ಕಾರಿ ಯೋಜನೆ', labelEn: 'Govt Schemes', icon: 'landmark', enabled: true, order: 20 },
+  { id: 'contacts', labelKn: 'ಸಹಾಯವಾಣಿ', labelEn: 'Helplines', icon: 'phone-call', enabled: true, order: 21 },
+  { id: 'entertainment', labelKn: 'ಮನರಂಜನೆ', labelEn: 'Entertainment', icon: 'film', enabled: true, order: 22 },
+  { id: 'crime', labelKn: 'ಅಪರಾಧ', labelEn: 'Crime', icon: 'shield-alert', enabled: true, order: 23 },
+  { id: 'politics', labelKn: 'ರಾಜಕೀಯ', labelEn: 'Politics', icon: 'vote', enabled: true, order: 24 },
+  { id: 'sports', labelKn: 'ಕ್ರೀಡೆ', labelEn: 'Sports', icon: 'trophy', enabled: true, order: 25 },
+  { id: 'culture', labelKn: 'ಸಂಸ್ಕೃತಿ', labelEn: 'Culture', icon: 'theater', enabled: true, order: 26 },
+  { id: 'civic-roads', labelKn: 'ರಸ್ತೆ & ನಾಗರಿಕ', labelEn: 'Civic & Roads', icon: 'route', enabled: true, order: 27 },
+  { id: 'special', labelKn: 'ವಿಶೇಷ ವರದಿ', labelEn: 'Special', icon: 'sparkles', enabled: true, order: 28 },
+  { id: 'state', labelKn: 'ರಾಜ್ಯ', labelEn: 'State', icon: 'building-2', enabled: true, order: 29 },
+  { id: 'nation', labelKn: 'ದೇಶ', labelEn: 'Nation', icon: 'flag', enabled: true, order: 30 },
+  { id: 'general', labelKn: 'ಸಾಮಾನ್ಯ', labelEn: 'General', icon: 'globe', enabled: true, order: 31 },
+];
+
+

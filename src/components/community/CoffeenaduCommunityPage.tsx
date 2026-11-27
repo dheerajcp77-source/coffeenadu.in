@@ -390,13 +390,13 @@ export const CoffeenaduCommunityPage: React.FC<CoffeenaduCommunityPageProps> = (
                         key={photoUrl}
                         type="button"
                         onClick={() => setActivePhotoIdx(idx)}
-                        className={`w-16 h-16 rounded-lg overflow-hidden border-2 shrink-0 cursor-pointer ${
+                        className={`w-16 h-16 rounded-lg overflow-hidden border-2 shrink-0 cursor-pointer bg-[#F4F1EA] dark:bg-[#0B1714] flex items-center justify-center ${
                           activePhotoIdx === idx
-                            ? 'border-[#176B4A]'
+                            ? 'border-[#14452F] dark:border-[#D9A441]'
                             : 'border-transparent opacity-70 hover:opacity-100'
                         }`}
                       >
-                        <img src={photoUrl} alt="" className="w-full h-full object-cover" />
+                        <img src={photoUrl} alt="" className="w-full h-full object-contain" />
                       </button>
                     ))}
                   </div>
@@ -997,13 +997,13 @@ export const CoffeenaduCommunityPage: React.FC<CoffeenaduCommunityPageProps> = (
                         <button
                           type="button"
                           onClick={() => onNavigatePost(post.slug)}
-                          className="block w-full aspect-[16/10] overflow-hidden bg-slate-100 dark:bg-slate-900 cursor-pointer"
+                          className="block w-full overflow-hidden bg-[#F4F1EA] dark:bg-[#0B1714] border-b border-[#E6E1D1] dark:border-[#1E3B34] cursor-pointer"
                         >
                           <img
                             src={post.photos[0]}
                             alt={post.title}
                             loading="lazy"
-                            className="w-full h-full object-cover hover:scale-[1.02] transition-transform duration-300"
+                            className="w-full h-auto max-h-72 object-contain mx-auto block"
                           />
                         </button>
                       )}

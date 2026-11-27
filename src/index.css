@@ -9,20 +9,20 @@
 }
 
 :root {
-  --cn-navy: #10243D;
-  --cn-green: #176B4A;
-  --cn-gold: #D9A441;
-  --cn-bg: #F3F6F8;
+  --cn-obsidian: #1C1917;
+  --cn-gold: #C5932B;
+  --cn-gold-deep: #926710;
+  --cn-bg: #FBF9F5;
   --cn-card: #FFFFFF;
-  --cn-ink: #17263A;
-  --cn-muted: #738093;
+  --cn-ink: #1C1917;
+  --cn-muted: #6B6258;
 }
 
 .dark {
-  --cn-bg: #0B1626;
-  --cn-card: #112238;
-  --cn-ink: #F1F5F9;
-  --cn-muted: #94A3B8;
+  --cn-bg: #11100E;
+  --cn-card: #1A1815;
+  --cn-ink: #F7F3EA;
+  --cn-muted: #A89F91;
 }
 
 @layer base {
@@ -75,12 +75,22 @@
 .cn-ticker-track {
   display: flex;
   width: max-content;
-  animation: cn-ticker-scroll 38s linear infinite;
+  will-change: transform;
+  animation: cn-ticker-scroll 34s linear infinite;
 }
 
 .cn-ticker-container:hover .cn-ticker-track,
 .cn-ticker-container:focus-within .cn-ticker-track {
   animation-play-state: paused;
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
 }
 
 .pb-safe {
@@ -133,7 +143,7 @@
 .article-rich-content h2 {
   font-size: 1.35em;
   font-weight: 800;
-  color: #10243D;
+  color: #1C1917;
   line-height: 1.4;
   margin-top: 0.75em;
   margin-bottom: 0.35em;
@@ -141,13 +151,13 @@
 
 .dark .article-rich-content h2,
 .dark .article-rich-content h3 {
-  color: #F8FAFC;
+  color: #F7F3EA;
 }
 
 .article-rich-content h3 {
   font-size: 1.15em;
   font-weight: 700;
-  color: #10243D;
+  color: #1C1917;
   line-height: 1.45;
   margin-top: 0.65em;
   margin-bottom: 0.3em;
@@ -170,19 +180,20 @@
 }
 
 .article-rich-content blockquote {
-  border-left: 4px solid #10243D;
-  background-color: #f8fafc;
-  padding: 0.65rem 1rem;
+  border-top: 1px solid #DFC996;
+  border-bottom: 1px solid #DFC996;
+  background-color: #FAF6EC;
+  padding: 0.75rem 1rem;
   margin: 0.75rem 0;
-  border-radius: 0 0.375rem 0.375rem 0;
-  color: #334155;
+  color: #3F372E;
   font-style: italic;
 }
 
 .dark .article-rich-content blockquote {
-  border-left-color: #D9A441;
-  background-color: rgba(16, 36, 61, 0.75);
-  color: #E2E8F0;
+  border-top-color: #463A24;
+  border-bottom-color: #463A24;
+  background-color: rgba(29, 25, 20, 0.85);
+  color: #EAE2D3;
 }
 
 .article-rich-content p {

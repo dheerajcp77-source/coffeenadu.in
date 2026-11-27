@@ -1,10 +1,13 @@
 import type {
   DirectoryModuleId,
+  FeedCategoryConfig,
+  HomepageAnnouncementConfig,
   HomepageSectionConfig,
   ListingStatus,
   LocalityOption,
   PlatformAnalyticsSummary,
   PlatformBootstrapPayload,
+  PlatformDisplaySettings,
   PlatformListing,
   PlatformQuiz,
   PlatformReport,
@@ -224,6 +227,9 @@ export async function fetchAdminPlatformOverview(): Promise<{
   analytics: PlatformAnalyticsSummary;
   localities: LocalityOption[];
   homepageSections: HomepageSectionConfig[];
+  homepageAnnouncement?: HomepageAnnouncementConfig;
+  feedCategories?: FeedCategoryConfig[];
+  displaySettings?: PlatformDisplaySettings;
   weatherConfig: WeatherConfig;
 }> {
   const res = await fetch('/api/admin2/platform/overview', {
@@ -302,6 +308,39 @@ export async function saveAdminHomepageSections(
     method: 'PUT',
     headers: await getAdmin2AuthHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({ sections }),
+  });
+  return parseJson(res);
+}
+
+export async function saveAdminHomepageAnnouncement(
+  announcement: HomepageAnnouncementConfig
+): Promise<{ ok: boolean; announcement: HomepageAnnouncementConfig }> {
+  const res = await fetch('/api/admin2/platform/announcement', {
+    method: 'PUT',
+    headers: await getAdmin2AuthHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify({ announcement }),
+  });
+  return parseJson(res);
+}
+
+export async function saveAdminFeedCategories(
+  feedCategories: FeedCategoryConfig[]
+): Promise<{ ok: boolean; feedCategories: FeedCategoryConfig[] }> {
+  const res = await fetch('/api/admin2/platform/feed-categories', {
+    method: 'PUT',
+    headers: await getAdmin2AuthHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify({ feedCategories }),
+  });
+  return parseJson(res);
+}
+
+export async function saveAdminDisplaySettings(
+  displaySettings: PlatformDisplaySettings
+): Promise<{ ok: boolean; displaySettings: PlatformDisplaySettings }> {
+  const res = await fetch('/api/admin2/platform/display-settings', {
+    method: 'PUT',
+    headers: await getAdmin2AuthHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify({ displaySettings }),
   });
   return parseJson(res);
 }

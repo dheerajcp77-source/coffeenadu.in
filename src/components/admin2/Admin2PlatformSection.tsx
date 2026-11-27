@@ -443,7 +443,6 @@ export const Admin2PlatformSection: React.FC<Admin2PlatformSectionProps> = ({
                     </p>
                     <div className="text-[11px] text-slate-400 flex flex-wrap gap-3">
                       {item.phone && <span>Phone: {item.phone}</span>}
-                      <span>Views: {item.views}</span>
                       <span>Calls: {item.callClicks}</span>
                       <span>WhatsApp: {item.whatsappClicks}</span>
                     </div>

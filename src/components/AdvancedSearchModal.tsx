@@ -299,12 +299,13 @@ export function AdvancedSearchModal({
                     }}
                     className="w-full text-left py-3 first:pt-0 last:pb-0 flex gap-3 items-start hover:bg-slate-50 dark:hover:bg-slate-800/40 rounded-lg px-2 -mx-2 transition-colors cursor-pointer"
                   >
-                    <div className="w-20 h-16 rounded-lg overflow-hidden shrink-0 bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700">
+                    <div className="relative w-20 h-16 rounded-lg overflow-hidden shrink-0 bg-[#F4F1EA] dark:bg-[#0B1714] border border-[#E3DEC9] dark:border-[#1E3B34]">
                       <NewsImage
                         src={resolveArticleImage(article, true)}
                         alt={titlePlain}
                         watermarkApplied={article.watermarkApplied}
-                        className="w-full h-full object-cover"
+                        fitMode="contain"
+                        fillParent
                       />
                     </div>
                     <div className="min-w-0 flex-1">

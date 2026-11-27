@@ -99,13 +99,13 @@ export const HomepageCommunitySection: React.FC<HomepageCommunitySectionProps> =
                       <button
                         type="button"
                         onClick={() => onOpenPost(post.slug)}
-                        className="block w-full aspect-[16/10] overflow-hidden bg-slate-100 dark:bg-slate-900 cursor-pointer"
+                        className="block w-full overflow-hidden bg-[#F4F1EA] dark:bg-[#0B1714] border-b border-[#E6E1D1] dark:border-[#1E3B34] cursor-pointer"
                       >
                         <img
                           src={post.photos[0]}
                           alt={post.title}
                           loading="lazy"
-                          className="w-full h-full object-cover"
+                          className="w-full h-auto max-h-64 object-contain mx-auto block"
                         />
                       </button>
                     )}

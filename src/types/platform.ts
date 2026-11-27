@@ -267,10 +267,103 @@ export interface UserSavedBundle {
   otherListings: string[];
 }
 
+export type AnnouncementButtonAction =
+  | 'open-submit-modal'
+  | 'filter:all'
+  | 'filter:marketplace'
+  | 'filter:news'
+  | 'filter:community'
+  | 'filter:jobs'
+  | 'filter:businesses'
+  | 'route:/community'
+  | 'route:/marketplace'
+  | 'route:/businesses'
+  | 'route:/jobs'
+  | 'route:/events'
+  | 'route:/ads'
+  | 'custom-url';
+
+export interface AnnouncementButtonConfig {
+  id: string;
+  labelKn: string;
+  labelEn: string;
+  action: AnnouncementButtonAction;
+  customUrl?: string;
+  variant: 'primary' | 'secondary' | 'outline';
+}
+
+export interface HomepageAnnouncementConfig {
+  enabled: boolean;
+  headingKn: string;
+  headingEn: string;
+  descriptionKn: string;
+  descriptionEn: string;
+  imageUrl?: string;
+  startDate?: string; // Optional YYYY-MM-DD
+  endDate?: string;   // Optional YYYY-MM-DD
+  buttons: AnnouncementButtonConfig[];
+  updatedAt?: string;
+}
+
+export type FeedCategoryId =
+  | 'all'
+  | 'news'
+  | 'local'
+  | 'malnad'
+  | 'agriculture'
+  | 'marketplace'
+  | 'businesses'
+  | 'jobs'
+  | 'property'
+  | 'vehicles'
+  | 'lost-found'
+  | 'services'
+  | 'education'
+  | 'health'
+  | 'events'
+  | 'tourism'
+  | 'community'
+  | 'public-info'
+  | 'offers'
+  | 'schemes'
+  | 'contacts'
+  | 'entertainment'
+  | 'crime'
+  | 'politics'
+  | 'sports'
+  | 'culture'
+  | 'civic-roads'
+  | 'special'
+  | 'state'
+  | 'nation'
+  | 'general';
+
+export interface FeedCategoryConfig {
+  id: FeedCategoryId;
+  labelKn: string;
+  labelEn: string;
+  icon: string;
+  enabled: boolean;
+  order: number;
+}
+
+export interface PlatformDisplaySettings {
+  /** Strictly false by default: hides all view counts across public and admin interfaces while preserving database records. */
+  showViewCounts: boolean;
+  showBreakingTicker: boolean;
+  showTrendingSection: boolean;
+  showCategoryGrid: boolean;
+  showCommunityFeed: boolean;
+  updatedAt?: string;
+}
+
 export interface PlatformBootstrapPayload {
   ok: boolean;
   localities: LocalityOption[];
   homepageSections: HomepageSectionConfig[];
+  homepageAnnouncement?: HomepageAnnouncementConfig;
+  feedCategories?: FeedCategoryConfig[];
+  displaySettings?: PlatformDisplaySettings;
   moduleCounts: Record<string, number>;
   featuredListings: PlatformListing[];
   popularSearches: Array<{ term: string; count: number }>;

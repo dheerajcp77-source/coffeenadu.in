@@ -3,6 +3,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type { Express, Request, RequestHandler, Response } from 'express';
 import {
+  DEFAULT_DISPLAY_SETTINGS,
+  DEFAULT_FEED_CATEGORIES,
+  DEFAULT_HOMEPAGE_ANNOUNCEMENT,
   DEFAULT_HOMEPAGE_SECTIONS,
   DEFAULT_MALNAD_LOCALITIES,
   DEFAULT_WEATHER_CONFIG,
@@ -14,11 +17,17 @@ import {
 } from '../constants/platformCatalog.ts';
 import type { AdminPermission } from '../types/admin2.ts';
 import type {
+  AnnouncementButtonAction,
+  AnnouncementButtonConfig,
   DirectoryModuleId,
+  FeedCategoryConfig,
+  FeedCategoryId,
+  HomepageAnnouncementConfig,
   HomepageSectionConfig,
   ListingStatus,
   LocalityOption,
   PlatformAnalyticsSummary,
+  PlatformDisplaySettings,
   PlatformListing,
   PlatformQuiz,
   PlatformReport,
@@ -48,6 +57,9 @@ interface PlatformStoreState {
   version: number;
   localities: LocalityOption[];
   homepageSections: HomepageSectionConfig[];
+  homepageAnnouncement: HomepageAnnouncementConfig;
+  feedCategories: FeedCategoryConfig[];
+  displaySettings: PlatformDisplaySettings;
   listings: PlatformListing[];
   reports: PlatformReport[];
   quizzes: PlatformQuiz[];
@@ -59,6 +71,74 @@ interface PlatformStoreState {
   locationActivity: Record<string, number>;
   analyticsByDay: Record<string, PlatformDailyAnalytics>;
   activeVisitors: Record<string, number>; // visitorHash -> lastSeenMs
+}
+
+const VALID_ANNOUNCEMENT_ACTIONS = new Set<AnnouncementButtonAction>([
+  'open-submit-modal',
+  'filter:all',
+  'filter:marketplace',
+  'filter:news',
+  'filter:community',
+  'filter:jobs',
+  'filter:businesses',
+  'route:/community',
+  'route:/marketplace',
+  'route:/businesses',
+  'route:/jobs',
+  'route:/events',
+  'route:/ads',
+  'custom-url',
+]);
+
+const VALID_FEED_CATEGORY_IDS = new Set<FeedCategoryId>(
+  DEFAULT_FEED_CATEGORIES.map((c) => c.id)
+);
+
+function mergeFeedCategoriesWithDefaults(raw?: FeedCategoryConfig[]): FeedCategoryConfig[] {
+  if (!Array.isArray(raw) || raw.length === 0) {
+    return DEFAULT_FEED_CATEGORIES.map((c) => ({ ...c }));
+  }
+  const seen = new Set<FeedCategoryId>();
+  const defaultMap = new Map(DEFAULT_FEED_CATEGORIES.map((c) => [c.id, c]));
+  const merged: FeedCategoryConfig[] = [];
+  for (const item of raw) {
+    if (!item || !VALID_FEED_CATEGORY_IDS.has(item.id) || seen.has(item.id)) continue;
+    seen.add(item.id);
+    const fb = defaultMap.get(item.id)!;
+    merged.push({
+      id: item.id,
+      labelKn: item.labelKn || fb.labelKn,
+      labelEn: item.labelEn || fb.labelEn,
+      icon: item.icon || fb.icon,
+      enabled: item.id === 'all' ? true : item.enabled !== false,
+      order: item.id === 'all' ? 1 : Number.isFinite(Number(item.order)) ? Number(item.order) : merged.length + 1,
+    });
+  }
+  for (const fb of DEFAULT_FEED_CATEGORIES) {
+    if (!seen.has(fb.id)) {
+      merged.push({ ...fb, order: merged.length + 1 });
+    }
+  }
+  merged.sort((a, b) => (a.id === 'all' ? -1 : b.id === 'all' ? 1 : a.order - b.order));
+  return merged.map((c, idx) => ({ ...c, order: idx + 1 }));
+}
+
+function sanitizeAnnouncementImageUrl(raw: unknown): string {
+  const str = String(raw ?? '').trim();
+  if (!str) return '';
+  if (str.startsWith('data:image/')) {
+    // Allow safe raster image data URLs up to ~2.5MB base64
+    if (/^data:image\/(jpeg|jpg|png|webp);base64,[A-Za-z0-9+/=\s]+$/i.test(str) && str.length <= 3_500_000) {
+      return str;
+    }
+    return '';
+  }
+  return sanitizePlatformUrl(str);
+}
+
+function cleanScheduleDate(raw: unknown): string {
+  const str = String(raw ?? '').trim();
+  return /^\d{4}-\d{2}-\d{2}$/.test(str) ? str : '';
 }
 
 const VALID_DIRECTORY_MODULES = new Set<string>(
@@ -124,9 +204,15 @@ export class PlatformBackend {
 
   private createDefaultState(): PlatformStoreState {
     return {
-      version: 1,
+      version: 2,
       localities: DEFAULT_MALNAD_LOCALITIES.map((l) => ({ ...l })),
       homepageSections: DEFAULT_HOMEPAGE_SECTIONS.map((s) => ({ ...s })),
+      homepageAnnouncement: {
+        ...DEFAULT_HOMEPAGE_ANNOUNCEMENT,
+        buttons: DEFAULT_HOMEPAGE_ANNOUNCEMENT.buttons.map((b) => ({ ...b })),
+      },
+      feedCategories: DEFAULT_FEED_CATEGORIES.map((c) => ({ ...c })),
+      displaySettings: { ...DEFAULT_DISPLAY_SETTINGS },
       listings: STARTER_VERIFIED_PUBLIC_LISTINGS.map((l) => ({ ...l })),
       reports: [],
       quizzes: STARTER_PLATFORM_QUIZZES.map((q) => ({
@@ -161,6 +247,27 @@ export class PlatformBackend {
             Array.isArray(parsed.homepageSections) && parsed.homepageSections.length > 0
               ? parsed.homepageSections
               : defaults.homepageSections,
+          homepageAnnouncement:
+            parsed.homepageAnnouncement && typeof parsed.homepageAnnouncement === 'object'
+              ? {
+                  ...defaults.homepageAnnouncement,
+                  ...parsed.homepageAnnouncement,
+                  buttons:
+                    Array.isArray(parsed.homepageAnnouncement.buttons) &&
+                    parsed.homepageAnnouncement.buttons.length > 0
+                      ? parsed.homepageAnnouncement.buttons
+                      : defaults.homepageAnnouncement.buttons,
+                }
+              : defaults.homepageAnnouncement,
+          feedCategories: mergeFeedCategoriesWithDefaults(parsed.feedCategories),
+          displaySettings:
+            parsed.displaySettings && typeof parsed.displaySettings === 'object'
+              ? {
+                  ...defaults.displaySettings,
+                  ...parsed.displaySettings,
+                  showViewCounts: Boolean(parsed.displaySettings.showViewCounts),
+                }
+              : defaults.displaySettings,
           listings: Array.isArray(parsed.listings) ? parsed.listings : defaults.listings,
           reports: Array.isArray(parsed.reports) ? parsed.reports : [],
           quizzes:
@@ -475,6 +582,9 @@ export class PlatformBackend {
         ok: true,
         localities: this.state.localities.filter((l) => l.active),
         homepageSections: [...this.state.homepageSections].sort((a, b) => a.order - b.order),
+        homepageAnnouncement: this.state.homepageAnnouncement,
+        feedCategories: [...this.state.feedCategories].sort((a, b) => a.order - b.order),
+        displaySettings: this.state.displaySettings,
         moduleCounts,
         featuredListings: approvedListings.slice(0, 80),
         popularSearches,
@@ -760,6 +870,9 @@ export class PlatformBackend {
           analytics: this.buildAnalyticsSummary(),
           localities: this.state.localities,
           homepageSections: [...this.state.homepageSections].sort((a, b) => a.order - b.order),
+          homepageAnnouncement: this.state.homepageAnnouncement,
+          feedCategories: [...this.state.feedCategories].sort((a, b) => a.order - b.order),
+          displaySettings: this.state.displaySettings,
           weatherConfig: this.state.weatherConfig,
         });
       }
@@ -950,6 +1063,153 @@ export class PlatformBackend {
         this.state.homepageSections = cleaned;
         this.saveState();
         res.json({ ok: true, sections: cleaned });
+      }
+    );
+
+    // Admin-Controlled Bilingual Homepage Announcement Banner
+    app.get(
+      '/api/admin2/platform/announcement',
+      this.authFactory('dashboard.view'),
+      (_req: Admin2Request, res: Response) => {
+        res.json({ ok: true, announcement: this.state.homepageAnnouncement });
+      }
+    );
+
+    app.put(
+      '/api/admin2/platform/announcement',
+      this.authFactory('settings.manage'),
+      (req: Admin2Request, res: Response) => {
+        const body = (req.body?.announcement || req.body || {}) as Record<string, unknown>;
+        const rawButtons = Array.isArray(body.buttons)
+          ? body.buttons
+          : this.state.homepageAnnouncement.buttons;
+
+        const cleanedButtons: AnnouncementButtonConfig[] = rawButtons
+          .slice(0, 4)
+          .map((btn: Record<string, unknown>, idx: number) => {
+            const rawAction = String(btn.action || 'open-submit-modal') as AnnouncementButtonAction;
+            const action: AnnouncementButtonAction = VALID_ANNOUNCEMENT_ACTIONS.has(rawAction)
+              ? rawAction
+              : 'open-submit-modal';
+            const variant = (['primary', 'secondary', 'outline'].includes(String(btn.variant || ''))
+              ? String(btn.variant)
+              : idx === 0
+                ? 'primary'
+                : idx === 1
+                  ? 'secondary'
+                  : 'outline') as AnnouncementButtonConfig['variant'];
+            return {
+              id: cleanText(btn.id, 40) || `btn-${idx + 1}`,
+              labelKn: cleanText(btn.labelKn, 80) || DEFAULT_HOMEPAGE_ANNOUNCEMENT.buttons[idx]?.labelKn || 'ನೋಡಿ',
+              labelEn: cleanText(btn.labelEn, 80) || DEFAULT_HOMEPAGE_ANNOUNCEMENT.buttons[idx]?.labelEn || 'Explore',
+              action,
+              customUrl:
+                action === 'custom-url'
+                  ? sanitizePlatformUrl(typeof btn.customUrl === 'string' ? btn.customUrl : '')
+                  : undefined,
+              variant,
+            };
+          });
+
+        const nextAnnouncement: HomepageAnnouncementConfig = {
+          enabled: Boolean(body.enabled),
+          headingKn: cleanText(body.headingKn, 220) || DEFAULT_HOMEPAGE_ANNOUNCEMENT.headingKn,
+          headingEn: cleanText(body.headingEn, 220) || DEFAULT_HOMEPAGE_ANNOUNCEMENT.headingEn,
+          descriptionKn: cleanMultilineText(body.descriptionKn, 600),
+          descriptionEn: cleanMultilineText(body.descriptionEn, 600),
+          imageUrl: sanitizeAnnouncementImageUrl(body.imageUrl),
+          startDate: cleanScheduleDate(body.startDate),
+          endDate: cleanScheduleDate(body.endDate),
+          buttons: cleanedButtons.length > 0 ? cleanedButtons : DEFAULT_HOMEPAGE_ANNOUNCEMENT.buttons,
+          updatedAt: new Date().toISOString(),
+        };
+
+        this.state.homepageAnnouncement = nextAnnouncement;
+        this.saveState();
+        res.json({ ok: true, announcement: nextAnnouncement });
+      }
+    );
+
+    // Admin-Controlled 22 Feed Categories (Reorder & Enable/Disable)
+    app.get(
+      '/api/admin2/platform/feed-categories',
+      this.authFactory('dashboard.view'),
+      (_req: Admin2Request, res: Response) => {
+        res.json({
+          ok: true,
+          feedCategories: [...this.state.feedCategories].sort((a, b) => a.order - b.order),
+        });
+      }
+    );
+
+    app.put(
+      '/api/admin2/platform/feed-categories',
+      this.authFactory('settings.manage'),
+      (req: Admin2Request, res: Response) => {
+        const incoming = Array.isArray(req.body?.feedCategories) ? req.body.feedCategories : null;
+        if (!incoming || incoming.length === 0) {
+          res.status(400).json({ ok: false, error: 'Feed categories array is required.' });
+          return;
+        }
+        const defaultMap = new Map(DEFAULT_FEED_CATEGORIES.map((c) => [c.id, c]));
+        const seen = new Set<FeedCategoryId>();
+        const cleaned: FeedCategoryConfig[] = [];
+
+        incoming.forEach((raw: Record<string, unknown>, idx: number) => {
+          const id = cleanText(raw.id, 40) as FeedCategoryId;
+          if (!VALID_FEED_CATEGORY_IDS.has(id) || seen.has(id)) return;
+          seen.add(id);
+          const fallback = defaultMap.get(id)!;
+          cleaned.push({
+            id,
+            labelKn: cleanText(raw.labelKn, 60) || fallback.labelKn,
+            labelEn: cleanText(raw.labelEn, 60) || fallback.labelEn,
+            icon: cleanText(raw.icon, 40) || fallback.icon,
+            enabled: id === 'all' ? true : Boolean(raw.enabled),
+            order: id === 'all' ? 1 : Number.isFinite(Number(raw.order)) ? Number(raw.order) : idx + 2,
+          });
+        });
+
+        // Ensure no default category was accidentally dropped
+        for (const fallback of DEFAULT_FEED_CATEGORIES) {
+          if (!seen.has(fallback.id)) {
+            cleaned.push({ ...fallback, order: cleaned.length + 1 });
+          }
+        }
+
+        cleaned.sort((a, b) => (a.id === 'all' ? -1 : b.id === 'all' ? 1 : a.order - b.order));
+        const reindexed = cleaned.map((c, idx) => ({ ...c, order: idx + 1 }));
+        this.state.feedCategories = reindexed;
+        this.saveState();
+        res.json({ ok: true, feedCategories: reindexed });
+      }
+    );
+
+    // Admin-Controlled Display & View Count Settings
+    app.get(
+      '/api/admin2/platform/display-settings',
+      this.authFactory('dashboard.view'),
+      (_req: Admin2Request, res: Response) => {
+        res.json({ ok: true, displaySettings: this.state.displaySettings });
+      }
+    );
+
+    app.put(
+      '/api/admin2/platform/display-settings',
+      this.authFactory('settings.manage'),
+      (req: Admin2Request, res: Response) => {
+        const body = (req.body?.displaySettings || req.body || {}) as Record<string, unknown>;
+        const next: PlatformDisplaySettings = {
+          showViewCounts: Boolean(body.showViewCounts),
+          showBreakingTicker: body.showBreakingTicker !== false,
+          showTrendingSection: body.showTrendingSection !== false,
+          showCategoryGrid: body.showCategoryGrid !== false,
+          showCommunityFeed: body.showCommunityFeed !== false,
+          updatedAt: new Date().toISOString(),
+        };
+        this.state.displaySettings = next;
+        this.saveState();
+        res.json({ ok: true, displaySettings: next });
       }
     );
 

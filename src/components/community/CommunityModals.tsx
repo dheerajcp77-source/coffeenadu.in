@@ -136,7 +136,7 @@ export const CommunityRegisterModal: React.FC<CommunityRegisterModalProps> = ({
               value={fullName}
               onChange={(e) => setFullName(e.target.value)}
               placeholder="ಉದಾ: ರಮೇಶ್ ಭಟ್"
-              className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-sm text-[#10243D] dark:text-white font-kannada focus:outline-none focus:ring-2 focus:ring-[#176B4A]"
+              className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-sm text-[#10243D] dark:text-white placeholder:text-slate-500 dark:placeholder:text-slate-400 font-kannada focus:outline-none focus:ring-2 focus:ring-[#176B4A]"
             />
           </div>
 
@@ -156,7 +156,7 @@ export const CommunityRegisterModal: React.FC<CommunityRegisterModalProps> = ({
               value={mobileNumber}
               onChange={(e) => setMobileNumber(e.target.value)}
               placeholder="ಉದಾ: 9845123456"
-              className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-sm text-[#10243D] dark:text-white focus:outline-none focus:ring-2 focus:ring-[#176B4A]"
+              className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-sm text-[#10243D] dark:text-white placeholder:text-slate-500 dark:placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-[#176B4A]"
             />
           </div>
 
@@ -427,7 +427,7 @@ export const CommunityComposerModal: React.FC<CommunityComposerModalProps> = ({
                   value={title}
                   onChange={(e) => setTitle(e.target.value)}
                   placeholder="ಉದಾ: ಕೊಪ್ಪದಲ್ಲಿ ತಾಜಾ ಕಾಫಿ ಪುಡಿ ಮಾರಾಟ / ಮನೆ ಬಾಡಿಗೆಗೆ ಇದೆ"
-                  className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-sm text-[#10243D] dark:text-white font-kannada focus:outline-none focus:ring-2 focus:ring-[#176B4A]"
+                  className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-sm text-[#10243D] dark:text-white placeholder:text-slate-500 dark:placeholder:text-slate-400 font-kannada focus:outline-none focus:ring-2 focus:ring-[#176B4A]"
                 />
               </div>
 
@@ -443,7 +443,7 @@ export const CommunityComposerModal: React.FC<CommunityComposerModalProps> = ({
                     id="comm-post-category"
                     value={category}
                     onChange={(e) => setCategory(e.target.value as CommunityCategoryId)}
-                    className="w-full px-3 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-sm text-[#10243D] dark:text-white font-kannada focus:outline-none focus:ring-2 focus:ring-[#176B4A]"
+                    className="w-full px-3 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-sm text-[#10243D] dark:text-white font-kannada focus:outline-none focus:ring-2 focus:ring-[#176B4A] [&>option]:bg-white [&>option]:text-[#10243D] dark:[&>option]:bg-slate-900 dark:[&>option]:text-white"
                   >
                     {COMMUNITY_CATEGORIES.map((cat) => (
                       <option key={cat.id} value={cat.id}>
@@ -464,7 +464,7 @@ export const CommunityComposerModal: React.FC<CommunityComposerModalProps> = ({
                     id="comm-post-location"
                     value={location}
                     onChange={(e) => setLocation(e.target.value)}
-                    className="w-full px-3 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-sm text-[#10243D] dark:text-white font-kannada focus:outline-none focus:ring-2 focus:ring-[#176B4A]"
+                    className="w-full px-3 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-sm text-[#10243D] dark:text-white font-kannada focus:outline-none focus:ring-2 focus:ring-[#176B4A] [&>option]:bg-white [&>option]:text-[#10243D] dark:[&>option]:bg-slate-900 dark:[&>option]:text-white"
                   >
                     {COMMUNITY_LOCATIONS_KN.map((loc) => (
                       <option key={loc.value} value={loc.value}>
@@ -553,7 +553,7 @@ export const CommunityComposerModal: React.FC<CommunityComposerModalProps> = ({
                       key={`${idx}-${src.slice(0, 24)}`}
                       className="relative w-20 h-20 rounded-xl overflow-hidden border border-slate-200 dark:border-slate-700 bg-slate-100 dark:bg-slate-900"
                     >
-                      <img src={src} alt={`ಫೋಟೋ ${idx + 1}`} className="w-full h-full object-cover" />
+                      <img src={src} alt={`ಫೋಟೋ ${idx + 1}`} className="w-full h-full object-contain" />
                       <button
                         type="button"
                         onClick={() => setPhotos((prev) => prev.filter((_, i) => i !== idx))}
@@ -732,11 +732,11 @@ export const CommunityReportModal: React.FC<CommunityReportModalProps> = ({ post
           ) : (
             <form onSubmit={(e) => void handleSubmit(e)} className="space-y-4">
               {error && (
-                <div className="p-2.5 rounded-lg bg-red-50 text-xs font-kannada text-red-700">
+                <div className="p-2.5 rounded-lg bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-900 text-xs font-kannada text-red-700 dark:text-red-300">
                   {error}
                 </div>
               )}
-              <p className="font-kannada text-xs text-[#5A677A] dark:text-slate-400 line-clamp-2">
+              <p className="font-kannada text-xs text-[#5A677A] dark:text-slate-300 line-clamp-2">
                 ಪ್ರಕಟಣೆ: <strong className="text-[#10243D] dark:text-white">{post.title}</strong>
               </p>
               <div className="space-y-2">
@@ -764,7 +764,7 @@ export const CommunityReportModal: React.FC<CommunityReportModalProps> = ({ post
                 value={details}
                 onChange={(e) => setDetails(e.target.value)}
                 placeholder="ಹೆಚ್ಚುವರಿ ವಿವರ (ಐಚ್ಛಿಕ)"
-                className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs font-kannada text-[#10243D] dark:text-white"
+                className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs font-kannada text-[#10243D] dark:text-white placeholder:text-slate-500 dark:placeholder:text-slate-400"
               />
               <div className="flex justify-end gap-2">
                 <button

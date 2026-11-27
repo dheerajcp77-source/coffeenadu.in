@@ -450,12 +450,12 @@ export const PlatformDirectoryPage: React.FC<PlatformDirectoryPageProps> = ({
               >
                 <div>
                   {item.imageUrl && (
-                    <div className="aspect-[16/9] w-full bg-slate-100 dark:bg-slate-900 overflow-hidden">
+                    <div className="w-full bg-[#F4F1EA] dark:bg-[#0B1714] overflow-hidden flex items-center justify-center border-b border-[#E6E1D1] dark:border-[#1E3B34]">
                       <img
                         src={item.imageUrl}
                         alt={item.title}
                         loading="lazy"
-                        className="w-full h-full object-cover"
+                        className="w-full h-auto max-h-60 object-contain"
                       />
                     </div>
                   )}
@@ -657,11 +657,13 @@ export const PlatformDirectoryPage: React.FC<PlatformDirectoryPageProps> = ({
 
             <div className="p-5 sm:p-6 space-y-4">
               {selectedItem.imageUrl && (
-                <img
-                  src={selectedItem.imageUrl}
-                  alt={selectedItem.title}
-                  className="w-full max-h-72 object-cover rounded-xl"
-                />
+                <div className="w-full rounded-xl overflow-hidden bg-[#F4F1EA] dark:bg-[#0B1714] border border-[#E6E1D1] dark:border-[#1E3B34] flex items-center justify-center">
+                  <img
+                    src={selectedItem.imageUrl}
+                    alt={selectedItem.title}
+                    className="w-full h-auto max-h-96 object-contain"
+                  />
+                </div>
               )}
 
               <div>

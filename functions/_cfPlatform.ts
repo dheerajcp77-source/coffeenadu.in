@@ -4,6 +4,9 @@
  */
 
 import {
+  DEFAULT_DISPLAY_SETTINGS,
+  DEFAULT_FEED_CATEGORIES,
+  DEFAULT_HOMEPAGE_ANNOUNCEMENT,
   DEFAULT_HOMEPAGE_SECTIONS,
   DEFAULT_MALNAD_LOCALITIES,
   DEFAULT_WEATHER_CONFIG,
@@ -14,9 +17,13 @@ import {
 } from '../src/constants/platformCatalog';
 import type {
   DirectoryModuleId,
+  FeedCategoryConfig,
+  FeedCategoryId,
+  HomepageAnnouncementConfig,
   HomepageSectionConfig,
   ListingStatus,
   LocalityOption,
+  PlatformDisplaySettings,
   PlatformListing,
   PlatformQuiz,
   PlatformReport,
@@ -34,6 +41,9 @@ import {
 interface CfPlatformState {
   localities: LocalityOption[];
   homepageSections: HomepageSectionConfig[];
+  homepageAnnouncement: HomepageAnnouncementConfig;
+  feedCategories: FeedCategoryConfig[];
+  displaySettings: PlatformDisplaySettings;
   listings: PlatformListing[];
   reports: PlatformReport[];
   quizzes: PlatformQuiz[];
@@ -59,10 +69,45 @@ const CF_PLATFORM_CACHE_KEY = 'https://coffeenadu.internal/cf-platform-state-v1'
 
 let cfState: CfPlatformState | null = null;
 
+const VALID_CF_FEED_IDS = new Set<FeedCategoryId>(DEFAULT_FEED_CATEGORIES.map((c) => c.id));
+
+function mergeCfFeedCategories(raw?: FeedCategoryConfig[]): FeedCategoryConfig[] {
+  if (!Array.isArray(raw) || raw.length === 0) {
+    return DEFAULT_FEED_CATEGORIES.map((c) => ({ ...c }));
+  }
+  const seen = new Set<FeedCategoryId>();
+  const defaultMap = new Map(DEFAULT_FEED_CATEGORIES.map((c) => [c.id, c]));
+  const merged: FeedCategoryConfig[] = [];
+  for (const item of raw) {
+    if (!item || !VALID_CF_FEED_IDS.has(item.id) || seen.has(item.id)) continue;
+    seen.add(item.id);
+    const fb = defaultMap.get(item.id)!;
+    merged.push({
+      id: item.id,
+      labelKn: item.labelKn || fb.labelKn,
+      labelEn: item.labelEn || fb.labelEn,
+      icon: item.icon || fb.icon,
+      enabled: item.id === 'all' ? true : item.enabled !== false,
+      order: item.id === 'all' ? 1 : Number.isFinite(Number(item.order)) ? Number(item.order) : merged.length + 1,
+    });
+  }
+  for (const fb of DEFAULT_FEED_CATEGORIES) {
+    if (!seen.has(fb.id)) merged.push({ ...fb, order: merged.length + 1 });
+  }
+  merged.sort((a, b) => (a.id === 'all' ? -1 : b.id === 'all' ? 1 : a.order - b.order));
+  return merged.map((c, idx) => ({ ...c, order: idx + 1 }));
+}
+
 function createInitialCfState(): CfPlatformState {
   return {
     localities: DEFAULT_MALNAD_LOCALITIES.map((l) => ({ ...l })),
     homepageSections: DEFAULT_HOMEPAGE_SECTIONS.map((s) => ({ ...s })),
+    homepageAnnouncement: {
+      ...DEFAULT_HOMEPAGE_ANNOUNCEMENT,
+      buttons: DEFAULT_HOMEPAGE_ANNOUNCEMENT.buttons.map((b) => ({ ...b })),
+    },
+    feedCategories: DEFAULT_FEED_CATEGORIES.map((c) => ({ ...c })),
+    displaySettings: { ...DEFAULT_DISPLAY_SETTINGS },
     listings: STARTER_VERIFIED_PUBLIC_LISTINGS.map((l) => ({ ...l })),
     reports: [],
     quizzes: STARTER_PLATFORM_QUIZZES.map((q) => ({ ...q })),
@@ -89,7 +134,15 @@ async function ensureCfState(): Promise<CfPlatformState> {
       const hit = await cache.match(CF_PLATFORM_CACHE_KEY);
       if (hit) {
         const parsed = (await hit.json()) as Partial<CfPlatformState>;
-        cfState = { ...createInitialCfState(), ...parsed };
+        const init = createInitialCfState();
+        cfState = {
+          ...init,
+          ...parsed,
+          feedCategories: mergeCfFeedCategories(parsed.feedCategories),
+          displaySettings: parsed.displaySettings
+            ? { ...init.displaySettings, ...parsed.displaySettings, showViewCounts: Boolean(parsed.displaySettings.showViewCounts) }
+            : init.displaySettings,
+        };
         return cfState;
       }
     }
@@ -250,6 +303,9 @@ export async function handleCfPublicPlatformRoute(
       ok: true,
       localities: state.localities.filter((l) => l.active),
       homepageSections: [...state.homepageSections].sort((a, b) => a.order - b.order),
+      homepageAnnouncement: state.homepageAnnouncement,
+      feedCategories: [...state.feedCategories].sort((a, b) => a.order - b.order),
+      displaySettings: state.displaySettings,
       moduleCounts: computeModuleCounts(state),
       featuredListings: approved.slice(0, 80),
       popularSearches,
@@ -455,6 +511,9 @@ export async function handleCfAdminPlatformRoute(
       },
       localities: state.localities,
       homepageSections: [...state.homepageSections].sort((a, b) => a.order - b.order),
+      homepageAnnouncement: state.homepageAnnouncement,
+      feedCategories: [...state.feedCategories].sort((a, b) => a.order - b.order),
+      displaySettings: state.displaySettings,
       weatherConfig: state.weatherConfig,
     });
   }
@@ -531,6 +590,61 @@ export async function handleCfAdminPlatformRoute(
         await persistCfState(state);
       }
       return jsonResp({ ok: true, sections: state.homepageSections });
+    }
+  }
+
+  if (pathname === '/api/admin2/platform/announcement') {
+    if (method === 'GET') {
+      return jsonResp({ ok: true, announcement: state.homepageAnnouncement });
+    }
+    if (method === 'PUT') {
+      const body = await readBody(request);
+      const raw = (body.announcement || body) as Partial<HomepageAnnouncementConfig>;
+      state.homepageAnnouncement = {
+        ...state.homepageAnnouncement,
+        ...raw,
+        enabled: Boolean(raw.enabled),
+        updatedAt: new Date().toISOString(),
+      };
+      await persistCfState(state);
+      return jsonResp({ ok: true, announcement: state.homepageAnnouncement });
+    }
+  }
+
+  if (pathname === '/api/admin2/platform/feed-categories') {
+    if (method === 'GET') {
+      return jsonResp({
+        ok: true,
+        feedCategories: [...state.feedCategories].sort((a, b) => a.order - b.order),
+      });
+    }
+    if (method === 'PUT') {
+      const body = await readBody(request);
+      if (Array.isArray(body.feedCategories) && body.feedCategories.length > 0) {
+        state.feedCategories = mergeCfFeedCategories(body.feedCategories as FeedCategoryConfig[]);
+        await persistCfState(state);
+      }
+      return jsonResp({ ok: true, feedCategories: state.feedCategories });
+    }
+  }
+
+  if (pathname === '/api/admin2/platform/display-settings') {
+    if (method === 'GET') {
+      return jsonResp({ ok: true, displaySettings: state.displaySettings });
+    }
+    if (method === 'PUT') {
+      const body = await readBody(request);
+      const raw = (body.displaySettings || body) as Partial<PlatformDisplaySettings>;
+      state.displaySettings = {
+        showViewCounts: Boolean(raw.showViewCounts),
+        showBreakingTicker: raw.showBreakingTicker !== false,
+        showTrendingSection: raw.showTrendingSection !== false,
+        showCategoryGrid: raw.showCategoryGrid !== false,
+        showCommunityFeed: raw.showCommunityFeed !== false,
+        updatedAt: new Date().toISOString(),
+      };
+      await persistCfState(state);
+      return jsonResp({ ok: true, displaySettings: state.displaySettings });
     }
   }
 

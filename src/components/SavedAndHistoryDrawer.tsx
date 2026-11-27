@@ -171,11 +171,12 @@ export function SavedAndHistoryDrawer({
                     onClick={() => openSnapshot(item)}
                     className="flex-1 min-w-0 flex items-start gap-3 text-left cursor-pointer"
                   >
-                    <div className="w-16 h-16 rounded-lg overflow-hidden shrink-0 bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700">
+                    <div className="relative w-16 h-16 rounded-lg overflow-hidden shrink-0 bg-[#F4F1EA] dark:bg-[#0B1714] border border-[#E3DEC9] dark:border-[#1E3B34]">
                       <NewsImage
                         src={imgSrc}
                         alt={item.titleKannada}
-                        className="w-full h-full object-cover"
+                        fitMode="contain"
+                        fillParent
                       />
                     </div>
                     <div className="min-w-0 flex-1">

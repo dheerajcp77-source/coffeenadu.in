@@ -30,7 +30,7 @@ export function NewsImage({
   watermarkApplied = false,
   fillParent = false,
 }: NewsImageProps) {
-  const effectiveFitMode: NewsImageFitMode = fitMode ?? (fillParent ? 'contain-blur' : 'natural');
+  const effectiveFitMode: NewsImageFitMode = fitMode ?? (fillParent ? 'contain' : 'natural');
   const containerRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const loadedImageRef = useRef<HTMLImageElement | null>(null);
@@ -251,7 +251,9 @@ export function NewsImage({
       className={`${wrapperLayoutClass} ${
         isNaturalMode && status === 'loading' ? 'min-h-[180px]' : ''
       } isolate overflow-hidden ${
-        effectiveFitMode === 'contain-blur' ? 'bg-slate-950' : 'bg-stone-100'
+        effectiveFitMode === 'contain-blur'
+          ? 'bg-[#14120F]'
+          : 'bg-[#F5F1E8] dark:bg-[#14120F]'
       } select-none ${className}`}
       onContextMenu={(e) => e.preventDefault()}
       onDragStart={(e) => e.preventDefault()}
