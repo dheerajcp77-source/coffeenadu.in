@@ -57,6 +57,17 @@ export async function resolveActiveAdminBearerToken(): Promise<string> {
   throw new Error('Please sign in to CoffeeNadu News Admin 2.0 first.');
 }
 
+export async function getAdmin2AuthHeaders(
+  extra: Record<string, string> = {}
+): Promise<Record<string, string>> {
+  const token = await resolveActiveAdminBearerToken();
+  return {
+    Accept: 'application/json',
+    ...extra,
+    Authorization: `Bearer ${token}`,
+  };
+}
+
 const ADMIN2_FETCH_TIMEOUT_MS = 25_000;
 
 async function admin2Fetch<T>(

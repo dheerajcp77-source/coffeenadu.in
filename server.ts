@@ -10,6 +10,8 @@ import express, { type NextFunction, type Request, type Response } from 'express
 import sharp from 'sharp';
 import { SEED_ARTICLES as PORTAL_SEED_ARTICLES } from './src/constants/seedArticles.ts';
 import { Admin2Backend } from './src/server/admin2Backend.ts';
+import { CommunityBackend } from './src/server/communityBackend.ts';
+import { PlatformBackend } from './src/server/platformBackend.ts';
 import { SheetsStorageManager } from './src/server/sheetsStorageProxy.ts';
 
 void execFile;
@@ -1443,6 +1445,12 @@ async function startServer() {
   // Mount free Google Sheets + Drive + Apps Script storage proxy, cache & view aggregator
   const sheetsStorage = new SheetsStorageManager(DATA_DIR);
   const admin2Backend = new Admin2Backend(DATA_DIR, sheetsStorage);
+  const platformBackend = new PlatformBackend(DATA_DIR, (perm) =>
+    admin2Backend.createAuthMiddleware(perm)
+  );
+  const communityBackend = new CommunityBackend(DATA_DIR, (perm) =>
+    admin2Backend.createAuthMiddleware(perm)
+  );
 
   // Record real public page traffic (anonymized daily hashes, never blocks response)
   app.use((req, _res, next) => {
@@ -1452,6 +1460,8 @@ async function startServer() {
 
   sheetsStorage.mountRoutes(app);
   admin2Backend.mountRoutes(app);
+  platformBackend.mountRoutes(app);
+  communityBackend.mountRoutes(app);
 
   // Public Bus Timings endpoint sourced from hudkoo.com with 6-hour cache
   app.get('/api/bus-timings', async (req, res) => {
@@ -3156,7 +3166,7 @@ Rules:
     res.redirect(301, `/?article=${encodeURIComponent(id)}`);
   });
 
-  app.get(['/', '/events', '/ads'], async (req, res, next) => {
+  app.get(['/', '/events', '/ads', '/community', '/community/:slug'], async (req, res, next) => {
     const articleId =
       req.path === '/' && typeof req.query.article === 'string'
         ? req.query.article.trim()
@@ -3247,6 +3257,26 @@ Rules:
         ogTitle = 'Local Advertisements — Coffeenadu News';
         ogDescription =
           'Browse Koppa Taluk local business advertisements, services, education, real estate, and offers on Coffeenadu News.';
+      } else if (req.path === '/community' || req.path === '/community/') {
+        ogUrl = `${deepLinkOrigin}/community`;
+        ogTitle = 'COFFEENADU COMMUNITY – ನಮ್ಮ ಮಲೆನಾಡು ಸಮುದಾಯ';
+        ogDescription =
+          'ಮಲೆನಾಡಿನ ಅಂಗಡಿಗಳು, ಮಾರಾಟ, ಉದ್ಯೋಗ, ಕಳೆದುಹೋದ/ಸಿಕ್ಕ ವಸ್ತು, ಕೃಷಿ ಉತ್ಪನ್ನ ಮತ್ತು ಸಾರ್ವಜನಿಕ ಮಾಹಿತಿ — ಉಚಿತವಾಗಿ ತಕ್ಷಣ ಪ್ರಕಟಿಸಿ.';
+      } else if (req.path.startsWith('/community/')) {
+        const slugCandidate = decodeURIComponent(req.path.slice('/community/'.length).replace(/\/+$/, ''));
+        if (slugCandidate && slugCandidate !== 'dashboard') {
+          const publicPost = communityBackend.getPublicPostBySlugOrId(slugCandidate);
+          ogUrl = `${deepLinkOrigin}/community/${encodeURIComponent(slugCandidate)}`;
+          if (publicPost) {
+            ogTitle = `${publicPost.title} — COFFEENADU COMMUNITY`;
+            ogDescription = `${publicPost.location} · ${publicPost.description.slice(0, 180)}`;
+            if (publicPost.photos?.[0] && publicPost.photos[0].startsWith('/api/community/media/')) {
+              ogImageUrl = `${origin}${publicPost.photos[0]}`;
+            }
+          } else {
+            ogTitle = 'COFFEENADU COMMUNITY – ನಮ್ಮ ಮಲೆನಾಡು ಸಮುದಾಯ';
+          }
+        }
       }
 
       const rawTemplate = fs.readFileSync(vite ? rootIndex : distIndex, 'utf8');

@@ -33,7 +33,9 @@ import { ArticleEndAd } from './ArticleEndAd';
 import { ArticleInlineAd } from './ArticleInlineAd';
 import { ArticleShareBar } from './ArticleShareBar';
 import { NewsImage } from './NewsImage';
+import { ArticleEcosystemEngagement } from './platform/ArticleEcosystemEngagement';
 import { WhatsAppGroupBanner } from './WhatsAppGroupBanner';
+import type { PlatformLanguage, PlatformListing, PlatformModuleId } from '../types/platform';
 
 interface ArticleDetailViewProps {
   article: NewsArticle;
@@ -50,6 +52,10 @@ interface ArticleDetailViewProps {
   onSelectArticle: (article: NewsArticle) => void;
   onSelectAd?: (ad: Advertisement) => void;
   onOpenMessageAdmin?: () => void;
+  platformLang?: PlatformLanguage;
+  platformListings?: PlatformListing[];
+  onNavigatePlatformModule?: (modId: PlatformModuleId, listingId?: string) => void;
+  onExploreAllServices?: () => void;
 }
 
 const FONT_SCALE_ORDER: ReadingFontScale[] = ['sm', 'md', 'lg', 'xl'];
@@ -76,6 +82,10 @@ export function ArticleDetailView({
   onSelectArticle,
   onSelectAd,
   onOpenMessageAdmin,
+  platformLang = 'kn',
+  platformListings = [],
+  onNavigatePlatformModule,
+  onExploreAllServices,
 }: ArticleDetailViewProps) {
   const resolvedImage = resolveArticleImage(article);
   const [scrollProgress, setScrollProgress] = useState(0);
@@ -680,6 +690,18 @@ export function ArticleDetailView({
                   </button>
                 )}
               </nav>
+            )}
+
+            {/* Post-Article Malnad Platform Discovery & Contextual Recommendations */}
+            {onNavigatePlatformModule && onExploreAllServices && (
+              <ArticleEcosystemEngagement
+                articleLocation={article.location}
+                articleCategory={article.category}
+                lang={platformLang}
+                allListings={platformListings}
+                onNavigateModule={onNavigatePlatformModule}
+                onExploreAll={onExploreAllServices}
+              />
             )}
           </div>
         </article>

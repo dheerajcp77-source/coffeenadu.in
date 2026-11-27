@@ -35,7 +35,6 @@ import { TrendingNewsSection } from './components/TrendingNewsSection';
 import { WebsiteEntryAd } from './components/WebsiteEntryAd';
 import { WhatsAppGroupBanner } from './components/WhatsAppGroupBanner';
 import {
-  NEWS_CATEGORIES,
   getKannadaLocationLabel,
   matchesSelectedLocation,
   resolveArticleImage,
@@ -99,6 +98,91 @@ import {
 } from './utils/readerPreferences';
 import { sanitizeRichTextHtml, stripRichTextToPlainText } from './utils/richText';
 import { buildArticlePublicUrl } from './utils/slug';
+import { auth } from './firebase';
+import {
+  DEFAULT_MALNAD_LOCALITIES,
+  DEFAULT_WEATHER_CONFIG,
+  PLATFORM_MODULES,
+  PLATFORM_MODULE_MAP,
+  STARTER_VERIFIED_PUBLIC_LISTINGS,
+} from './constants/platformCatalog';
+import {
+  fetchPlatformBootstrap,
+  loadSavedBundle,
+  toggleSavedListingInBundle,
+  trackPlatformEvent,
+} from './services/platformClient';
+import {
+  fetchCommunityPosts,
+  fetchCommunitySession,
+} from './services/communityClient';
+import type {
+  CommunityCategoryId,
+  CommunitySelfProfile,
+  PublicCommunityPost,
+} from './types/community';
+import type {
+  DirectoryModuleId,
+  LocalityOption,
+  PlatformLanguage,
+  PlatformListing,
+  PlatformModuleId,
+  UserSavedBundle,
+  WeatherConfig,
+  WeatherRainfallRecord,
+} from './types/platform';
+import { CoffeenaduCommunityPage } from './components/community/CoffeenaduCommunityPage';
+import {
+  CommunityComposerModal,
+  CommunityRegisterModal,
+} from './components/community/CommunityModals';
+import { HomepageCommunitySection } from './components/community/HomepageCommunitySection';
+import { PlatformAccountPage } from './components/platform/PlatformAccountPage';
+import { PlatformDirectoryPage } from './components/platform/PlatformDirectoryPage';
+import { PlatformExplorePage } from './components/platform/PlatformExplorePage';
+import { PlatformGamesPage } from './components/platform/PlatformGamesPage';
+import { PlatformHomepageTopBar } from './components/platform/PlatformHomepageSections';
+import { PlatformWeatherPage } from './components/platform/PlatformWeatherPage';
+import { SearchEverythingPage } from './components/platform/SearchEverythingPage';
+
+const PLATFORM_DIRECTORY_ROUTE_MAP: Record<string, DirectoryModuleId> = {
+  '/businesses': 'businesses',
+  '/jobs': 'jobs',
+  '/marketplace': 'marketplace',
+  '/agriculture': 'agriculture',
+  '/education': 'education',
+  '/health': 'health',
+  '/schemes': 'schemes',
+  '/tourism': 'tourism',
+  '/property': 'property',
+  '/lost-found': 'lost-found',
+  '/grievances': 'grievances',
+  '/services': 'services',
+  '/offers': 'offers',
+  '/contacts': 'contacts',
+  '/documents': 'documents',
+};
+
+function normalizeRoutePath(pathname: string): string {
+  return pathname.replace(/\/+$/, '') || '/';
+}
+
+function readPlatformItemIdFromUrl(): string | null {
+  try {
+    const id = new URLSearchParams(window.location.search).get('item');
+    return id && id.trim() ? id.trim() : null;
+  } catch {
+    return null;
+  }
+}
+
+function readSearchQFromUrl(): string {
+  try {
+    return new URLSearchParams(window.location.search).get('q') || '';
+  } catch {
+    return '';
+  }
+}
 
 function isAdminPath(pathname: string): boolean {
   const normalized = pathname.replace(/\/+$/, '') || '/';
@@ -362,9 +446,94 @@ export default function App() {
   const [siteInfoPage, setSiteInfoPage] = useState<SiteInfoPageKey | null>(null);
   const [activeMobileTab, setActiveMobileTab] = useState<MobileNavTab>('home');
 
+  // Coffeenadu Malnad Platform (22-module ecosystem) state
+  const [platformLang, setPlatformLang] = useState<PlatformLanguage>(() => {
+    try {
+      const saved = window.localStorage.getItem('coffeenadu_lang');
+      return saved === 'en' ? 'en' : 'kn';
+    } catch {
+      return 'kn';
+    }
+  });
+  const [platformLocalities, setPlatformLocalities] = useState<LocalityOption[]>(
+    DEFAULT_MALNAD_LOCALITIES
+  );
+  const [platformModuleCounts, setPlatformModuleCounts] = useState<Record<string, number>>({});
+  const [platformListings, setPlatformListings] = useState<PlatformListing[]>(
+    STARTER_VERIFIED_PUBLIC_LISTINGS
+  );
+  const [popularSearches, setPopularSearches] = useState<Array<{ term: string; count: number }>>([]);
+  const [weatherConfig, setWeatherConfig] = useState<WeatherConfig>(DEFAULT_WEATHER_CONFIG);
+  const [weatherLogs, setWeatherLogs] = useState<WeatherRainfallRecord[]>([]);
+  const [savedBundle, setSavedBundle] = useState<UserSavedBundle>(() => loadSavedBundle());
+  const [platformItemId, setPlatformItemId] = useState<string | null>(() =>
+    readPlatformItemIdFromUrl()
+  );
+  const [platformSearchInitialQ, setPlatformSearchInitialQ] = useState<string>(() =>
+    readSearchQFromUrl()
+  );
+
+  // Coffeenadu Community (simple name + mobile registration, instant publish) state
+  const [communityUser, setCommunityUser] = useState<CommunitySelfProfile | null>(null);
+  const [communityPosts, setCommunityPosts] = useState<PublicCommunityPost[]>([]);
+  const [communityInitialCategory, setCommunityInitialCategory] = useState<
+    CommunityCategoryId | 'all'
+  >('all');
+  const [homepageCommunityRegisterOpen, setHomepageCommunityRegisterOpen] = useState(false);
+  const [homepageCommunityComposerOpen, setHomepageCommunityComposerOpen] = useState(false);
+  const [pendingOpenComposerAfterRegister, setPendingOpenComposerAfterRegister] = useState(false);
+
   const recordedHistoryArticleIdRef = useRef<string | null>(null);
 
   const adminRouteActive = isAdminPath(pathname);
+
+  const refreshPlatformBootstrap = useCallback(() => {
+    fetchPlatformBootstrap()
+      .then((data) => {
+        if (data.localities?.length) setPlatformLocalities(data.localities);
+        if (data.moduleCounts) setPlatformModuleCounts(data.moduleCounts);
+        if (Array.isArray(data.featuredListings)) setPlatformListings(data.featuredListings);
+        if (Array.isArray(data.popularSearches)) setPopularSearches(data.popularSearches);
+        if (data.weatherConfig) setWeatherConfig(data.weatherConfig);
+        if (Array.isArray(data.latestWeatherLogs)) setWeatherLogs(data.latestWeatherLogs);
+      })
+      .catch(() => {
+        // Keep starter defaults gracefully if offline
+      });
+  }, []);
+
+  const refreshCommunityPublicFeed = useCallback(() => {
+    fetchCommunityPosts({ limit: 12 })
+      .then((res) => {
+        if (Array.isArray(res.posts)) setCommunityPosts(res.posts);
+      })
+      .catch(() => {
+        // Non-blocking fallback
+      });
+  }, []);
+
+  useEffect(() => {
+    if (!adminRouteActive) {
+      refreshPlatformBootstrap();
+      refreshCommunityPublicFeed();
+      fetchCommunitySession()
+        .then((res) => setCommunityUser(res.authenticated ? res.profile : null))
+        .catch(() => setCommunityUser(null));
+    }
+  }, [adminRouteActive, refreshPlatformBootstrap, refreshCommunityPublicFeed]);
+
+  const handleTogglePlatformLang = useCallback((next: PlatformLanguage) => {
+    setPlatformLang(next);
+    try {
+      window.localStorage.setItem('coffeenadu_lang', next);
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  const handleToggleSaveListing = useCallback((module: DirectoryModuleId, id: string) => {
+    setSavedBundle((prev) => toggleSavedListingInBundle(prev, module, id));
+  }, []);
 
   // Sync theme and reduced motion classes on documentElement for public routes
   useEffect(() => {
@@ -403,6 +572,8 @@ export default function App() {
       setSelectedEventId(readEventIdFromUrl());
       setSelectedAdId(readAdIdFromUrl());
       setSelectedAdPreviewToken(readAdPreviewTokenFromUrl());
+      setPlatformItemId(readPlatformItemIdFromUrl());
+      setPlatformSearchInitialQ(readSearchQFromUrl());
     };
     window.addEventListener('popstate', handlePopState);
     return () => window.removeEventListener('popstate', handlePopState);
@@ -702,10 +873,42 @@ export default function App() {
       return;
     }
 
-    const defaultDesc =
-      'Local Koppa Taluk news publishing portal featuring Kannada updates, bus timings, and programs.';
+    const normalized = normalizeRoutePath(pathname);
+    const isCommunityPathCheck =
+      normalized === '/community' ||
+      normalized === '/community/dashboard' ||
+      normalized === '/my-posts' ||
+      normalized.startsWith('/community/');
+    const matchedDirModuleId = PLATFORM_DIRECTORY_ROUTE_MAP[normalized];
+    const matchedMeta = matchedDirModuleId
+      ? PLATFORM_MODULE_MAP[matchedDirModuleId]
+      : normalized === '/weather'
+      ? PLATFORM_MODULE_MAP.weather
+      : normalized === '/games'
+      ? PLATFORM_MODULE_MAP.games
+      : normalized === '/account'
+      ? PLATFORM_MODULE_MAP.account
+      : null;
+
+    const defaultDesc = isCommunityPathCheck
+      ? 'COFFEENADU COMMUNITY – ನಮ್ಮ ಮಲೆನಾಡು ಸಮುದಾಯ. ಕೊಪ್ಪ, ಶೃಂಗೇರಿ, ಜಯಪುರ, ಬಾಳೆಹೊನ್ನೂರು ಮತ್ತು ಮಲೆನಾಡು ಜನರ ಅಂಗಡಿ, ಮಾರಾಟ, ಸೇವೆ, ಉದ್ಯೋಗ ಮತ್ತು ಸ್ಥಳೀಯ ಮಾಹಿತಿ.'
+      : matchedMeta
+      ? `${matchedMeta.shortDescEn} — Coffeenadu Malnad Digital Platform.`
+      : normalized === '/explore'
+      ? 'Explore all 22 Malnad digital platform services for Koppa, Jayapura, Hariharapura, Sringeri, Balehonnur, and N.R. Pura.'
+      : normalized === '/search'
+      ? 'Search everything across Malnad news, local businesses, jobs, marketplace, bus timings, events, and government schemes.'
+      : 'Coffeenadu — Malnad Digital Platform & Koppa Taluk local Kannada news, businesses, jobs, bus timings, and community services.';
     const defaultImage = 'https://coffeenadu.in/api/og-default-image';
-    const defaultTitle = busTimingsActiveCheck
+    const defaultTitle = isCommunityPathCheck
+      ? 'COFFEENADU COMMUNITY – ನಮ್ಮ ಮಲೆನಾಡು ಸಮುದಾಯ'
+      : matchedMeta
+      ? `${matchedMeta.titleKn} (${matchedMeta.titleEn}) — Coffeenadu`
+      : normalized === '/explore'
+      ? 'Explore Malnad Services — Coffeenadu'
+      : normalized === '/search'
+      ? 'Search Everything — Coffeenadu'
+      : busTimingsActiveCheck
       ? 'Bus Timings — Coffeenadu News'
       : eventsActiveCheck
       ? 'Programs & Events — Coffeenadu News'
@@ -713,8 +916,14 @@ export default function App() {
       ? 'Local Advertisements — Coffeenadu News'
       : chatActiveCheck
       ? 'Message Editorial Desk — Coffeenadu News'
-      : 'Coffeenadu News — Koppa Taluk Local Kannada News';
-    const canonicalRoute = busTimingsActiveCheck
+      : 'Coffeenadu — Malnad Digital Platform & Koppa Taluk Local News';
+    const canonicalRoute = isCommunityPathCheck
+      ? `https://coffeenadu.in${normalized}`
+      : matchedMeta
+      ? `https://coffeenadu.in${normalized}`
+      : normalized === '/explore' || normalized === '/search'
+      ? `https://coffeenadu.in${normalized}`
+      : busTimingsActiveCheck
       ? 'https://coffeenadu.in/bus-timings'
       : eventsActiveCheck
       ? 'https://coffeenadu.in/events'
@@ -735,6 +944,7 @@ export default function App() {
     setCanonicalHref(canonicalRoute);
   }, [
     adminRouteActive,
+    pathname,
     selectedArticle,
     busTimingsActiveCheck,
     eventsActiveCheck,
@@ -822,7 +1032,171 @@ export default function App() {
   const eventsActive = isEventsPath(pathname);
   const chatActive = isChatPath(pathname);
   const adsActive = isAdsPath(pathname);
-  const isSpecialRoute = busTimingsActive || eventsActive || chatActive || adsActive;
+  const normalizedPathname = normalizeRoutePath(pathname);
+  const isCommunityRoot = normalizedPathname === '/community';
+  const isCommunityDashboard =
+    normalizedPathname === '/community/dashboard' || normalizedPathname === '/my-posts';
+  const communityPostSlug = useMemo(() => {
+    if (
+      normalizedPathname.startsWith('/community/') &&
+      normalizedPathname !== '/community/dashboard'
+    ) {
+      const raw = normalizedPathname.slice('/community/'.length);
+      try {
+        return decodeURIComponent(raw);
+      } catch {
+        return raw;
+      }
+    }
+    return null;
+  }, [normalizedPathname]);
+  const communityActive = isCommunityRoot || isCommunityDashboard || Boolean(communityPostSlug);
+
+  const activeDirectoryModule: DirectoryModuleId | null =
+    PLATFORM_DIRECTORY_ROUTE_MAP[normalizedPathname] || null;
+  const weatherActive = normalizedPathname === '/weather';
+  const gamesActive = normalizedPathname === '/games';
+  const exploreActive = normalizedPathname === '/explore';
+  const accountActive = normalizedPathname === '/account';
+  const searchPageActive = normalizedPathname === '/search';
+  const isPlatformSubroute = Boolean(
+    communityActive ||
+      activeDirectoryModule ||
+      weatherActive ||
+      gamesActive ||
+      exploreActive ||
+      accountActive ||
+      searchPageActive
+  );
+
+  const isSpecialRoute =
+    busTimingsActive || eventsActive || chatActive || adsActive || isPlatformSubroute;
+
+  useEffect(() => {
+    if (adminRouteActive) return;
+    const activeModName =
+      (communityActive ? 'community' : null) ||
+      activeDirectoryModule ||
+      (weatherActive
+        ? 'weather'
+        : gamesActive
+          ? 'games'
+          : exploreActive
+            ? 'explore'
+            : accountActive
+              ? 'account'
+              : searchPageActive
+                ? 'search'
+                : busTimingsActive
+                  ? 'transport'
+                  : eventsActive
+                    ? 'events'
+                    : 'news');
+    trackPlatformEvent({
+      type: 'page_view',
+      module: activeModName,
+      location: selectedLocation === 'All' ? 'all' : selectedLocation,
+    });
+  }, [
+    adminRouteActive,
+    communityActive,
+    activeDirectoryModule,
+    weatherActive,
+    gamesActive,
+    exploreActive,
+    accountActive,
+    searchPageActive,
+    busTimingsActive,
+    eventsActive,
+    selectedLocation,
+  ]);
+
+  const handleOpenCommunity = (category?: CommunityCategoryId) => {
+    setSelectedArticleId(null);
+    setSelectedEventId(null);
+    setSelectedAdId(null);
+    setCommunityInitialCategory(category || 'all');
+    setActiveMobileTab('explore');
+    navigateTo('/community');
+  };
+
+  const handleOpenCommunityDashboard = () => {
+    setSelectedArticleId(null);
+    setSelectedEventId(null);
+    setSelectedAdId(null);
+    setActiveMobileTab('explore');
+    navigateTo('/community/dashboard');
+  };
+
+  const handleOpenCommunityPost = (slug: string) => {
+    setSelectedArticleId(null);
+    setSelectedEventId(null);
+    setSelectedAdId(null);
+    navigateTo(`/community/${encodeURIComponent(slug)}`);
+  };
+
+  const handleHomepageAddInformation = () => {
+    if (communityUser) {
+      setHomepageCommunityComposerOpen(true);
+    } else {
+      setPendingOpenComposerAfterRegister(true);
+      setHomepageCommunityRegisterOpen(true);
+    }
+  };
+
+  const handleNavigatePlatformModule = (modId: PlatformModuleId, listingId?: string) => {
+    setSelectedArticleId(null);
+    setSelectedEventId(null);
+    setSelectedAdId(null);
+    setPlatformItemId(listingId || null);
+
+    if (modId === 'news') {
+      handleResetHome();
+      return;
+    }
+    if (modId === 'community') {
+      handleOpenCommunity();
+      return;
+    }
+    if (modId === 'transport') {
+      setActiveMobileTab('services');
+      navigateTo('/bus-timings');
+      return;
+    }
+    if (modId === 'events') {
+      setActiveMobileTab('explore');
+      navigateTo('/events');
+      return;
+    }
+
+    const meta = PLATFORM_MODULE_MAP[modId];
+    const targetRoute = meta?.route || '/explore';
+    if (modId === 'marketplace') setActiveMobileTab('marketplace');
+    else if (modId === 'businesses' || modId === 'services') setActiveMobileTab('services');
+    else setActiveMobileTab('explore');
+
+    const fullPath = listingId
+      ? `${targetRoute}?item=${encodeURIComponent(listingId)}`
+      : targetRoute;
+    navigateTo(fullPath);
+  };
+
+  const handleOpenSearchEverything = (q?: string) => {
+    setSelectedArticleId(null);
+    setSelectedEventId(null);
+    setSelectedAdId(null);
+    setPlatformSearchInitialQ(q || '');
+    const target = q && q.trim() ? `/search?q=${encodeURIComponent(q.trim())}` : '/search';
+    navigateTo(target);
+  };
+
+  const handleExploreAllServices = () => {
+    setSelectedArticleId(null);
+    setSelectedEventId(null);
+    setSelectedAdId(null);
+    setActiveMobileTab('explore');
+    navigateTo('/explore');
+  };
 
   const handleSelectCategory = (category: FilterCategory) => {
     setActiveCategory(category);
@@ -1002,11 +1376,13 @@ export default function App() {
         <WhatsAppGroupBanner variant="top-bar" />
         <Header
           activeCategory={activeCategory}
+          activePlatformRoute={normalizedPathname}
           isBusTimingsView={busTimingsActive}
           isEventsView={eventsActive}
           isChatView={chatActive}
           isAdsView={adsActive || Boolean(selectedAdId)}
           theme={publicTheme}
+          lang={platformLang}
           bookmarkCount={bookmarks.length}
           unreadNotificationsCount={unreadNotificationsCount}
           onSelectCategory={handleSelectCategory}
@@ -1014,12 +1390,15 @@ export default function App() {
           onJumpToBusTimings={handleJumpToBusTimings}
           onJumpToEvents={handleJumpToEvents}
           onJumpToAds={handleJumpToAds}
-          onOpenSearch={() => setSearchModalOpen(true)}
+          onOpenSearch={() => handleOpenSearchEverything('')}
           onOpenSaved={() => setLibraryDrawerTab('saved')}
           onOpenNotifications={() => setNotifDrawerOpen(true)}
           onToggleTheme={() =>
             setPublicTheme((prev) => (prev === 'dark' ? 'light' : 'dark'))
           }
+          onToggleLang={handleTogglePlatformLang}
+          onNavigateModule={(modId) => handleNavigatePlatformModule(modId)}
+          onExploreAll={handleExploreAllServices}
         />
 
         {/* Breaking News Strip across homepage feed */}
@@ -1094,6 +1473,113 @@ export default function App() {
               onBackToNews={handleResetHome}
             />
           </main>
+        ) : communityActive ? (
+          <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-5 sm:py-6">
+            <CoffeenaduCommunityPage
+              activePostSlug={communityPostSlug}
+              initialDashboardOpen={isCommunityDashboard}
+              initialCategory={communityInitialCategory}
+              globalLocation={selectedLocation === 'All' ? 'all' : selectedLocation}
+              userProfile={communityUser}
+              onUserProfileChange={setCommunityUser}
+              onNavigateHome={handleResetHome}
+              onNavigateCommunityRoot={() => handleOpenCommunity()}
+              onNavigatePost={handleOpenCommunityPost}
+              onNavigateDashboard={handleOpenCommunityDashboard}
+              onPostsUpdated={setCommunityPosts}
+            />
+          </main>
+        ) : activeDirectoryModule ? (
+          <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-5 sm:py-6">
+            <PlatformDirectoryPage
+              moduleId={activeDirectoryModule}
+              lang={platformLang}
+              selectedLocation={selectedLocation === 'All' ? 'all' : selectedLocation}
+              localities={platformLocalities}
+              initialListingId={platformItemId}
+              savedListingIds={[
+                ...savedBundle.businesses,
+                ...savedBundle.jobs,
+                ...savedBundle.marketplace,
+                ...savedBundle.otherListings,
+              ]}
+              currentUserUid={auth.currentUser?.uid}
+              currentUserName={auth.currentUser?.displayName || undefined}
+              onToggleSave={handleToggleSaveListing}
+              onSelectLocation={(loc) => setSelectedLocation(loc === 'all' ? 'All' : loc)}
+              onBackHome={handleResetHome}
+              onListingsChanged={refreshPlatformBootstrap}
+            />
+          </main>
+        ) : weatherActive ? (
+          <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-5 sm:py-6">
+            <PlatformWeatherPage
+              lang={platformLang}
+              selectedLocation={selectedLocation === 'All' ? 'all' : selectedLocation}
+              localities={platformLocalities}
+              weatherConfig={weatherConfig}
+              weatherLogs={weatherLogs}
+              onSelectLocation={(loc) => setSelectedLocation(loc === 'all' ? 'All' : loc)}
+              onBackHome={handleResetHome}
+            />
+          </main>
+        ) : gamesActive ? (
+          <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-5 sm:py-6">
+            <PlatformGamesPage
+              lang={platformLang}
+              localities={platformLocalities}
+              onBackHome={handleResetHome}
+            />
+          </main>
+        ) : exploreActive ? (
+          <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-5 sm:py-6">
+            <PlatformExplorePage
+              lang={platformLang}
+              moduleCounts={platformModuleCounts}
+              articleCount={articles.length}
+              eventCount={events.length}
+              onNavigateModule={(modId) => handleNavigatePlatformModule(modId)}
+              onBackHome={handleResetHome}
+            />
+          </main>
+        ) : accountActive ? (
+          <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-5 sm:py-6">
+            <PlatformAccountPage
+              lang={platformLang}
+              articles={articles}
+              allListings={platformListings}
+              savedArticleIds={bookmarks.map((b) => b.id)}
+              savedBundle={savedBundle}
+              onRemoveSavedArticle={(id) => setBookmarks(removeBookmarkById(id))}
+              onToggleSaveListing={handleToggleSaveListing}
+              onOpenArticle={handleOpenArticle}
+              onNavigateModule={handleNavigatePlatformModule}
+              onBackHome={handleResetHome}
+            />
+          </main>
+        ) : searchPageActive ? (
+          <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-5 sm:py-6">
+            <SearchEverythingPage
+              lang={platformLang}
+              initialQuery={platformSearchInitialQ}
+              selectedLocation={selectedLocation === 'All' ? 'all' : selectedLocation}
+              localities={platformLocalities}
+              articles={articles}
+              listings={platformListings}
+              events={events.map((ev) => ({
+                id: ev.id,
+                title: stripRichTextToPlainText(ev.titleKannada),
+                location: ev.location,
+                date: ev.eventDate,
+                description: stripRichTextToPlainText(ev.descriptionKannada),
+              }))}
+              popularSearches={popularSearches}
+              onSelectLocation={(loc) => setSelectedLocation(loc === 'all' ? 'All' : loc)}
+              onOpenArticle={handleOpenArticle}
+              onNavigateModule={handleNavigatePlatformModule}
+              onBackHome={handleResetHome}
+            />
+          </main>
         ) : selectedArticleId ? (
           <div className="flex-1 bg-white dark:bg-[#0B1626]">
             {selectedArticle ? (
@@ -1113,6 +1599,10 @@ export default function App() {
                 onSelectArticle={handleOpenArticle}
                 onSelectAd={handleOpenAd}
                 onOpenMessageAdmin={handleJumpToChat}
+                platformLang={platformLang}
+                platformListings={platformListings}
+                onNavigatePlatformModule={handleNavigatePlatformModule}
+                onExploreAllServices={handleExploreAllServices}
               />
             ) : isWaitingForSelectedArticle ? (
               <ArticleLoadingSkeleton onBack={handleCloseArticle} />
@@ -1136,6 +1626,19 @@ export default function App() {
           </div>
         ) : (
           <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-5 sm:py-6 space-y-6">
+            {/* Regional Digital Platform Quick-Access Hub, Search & Locality Selector */}
+            <PlatformHomepageTopBar
+              lang={platformLang}
+              selectedLocation={selectedLocation === 'All' ? 'all' : selectedLocation}
+              localities={platformLocalities}
+              moduleCounts={platformModuleCounts}
+              onSelectLocation={(loc) => setSelectedLocation(loc === 'all' ? 'All' : loc)}
+              onToggleLang={handleTogglePlatformLang}
+              onOpenSearch={(q) => handleOpenSearchEverything(q)}
+              onNavigateModule={(modId) => handleNavigatePlatformModule(modId)}
+              onExploreAll={handleExploreAllServices}
+            />
+
             {/* Custom Top Banner Homepage Ad Slot */}
             {activeAds.length > 0 && (
               <HomepageAdSlot
@@ -1484,6 +1987,16 @@ export default function App() {
               </div>
             </div>
 
+            {/* COFFEENADU COMMUNITY – ನಮ್ಮ ಮಲೆನಾಡು ಸಮುದಾಯ (Replaced homepage community-style listings) */}
+            <HomepageCommunitySection
+              posts={communityPosts}
+              isSignedIn={Boolean(communityUser)}
+              onAddInformation={handleHomepageAddInformation}
+              onOpenCommunity={handleOpenCommunity}
+              onOpenDashboard={handleOpenCommunityDashboard}
+              onOpenPost={handleOpenCommunityPost}
+            />
+
             {activeAds.length > 0 && (
               <HomepageAdSlot
                 ads={activeAds}
@@ -1546,15 +2059,15 @@ export default function App() {
                 </div>
               </div>
 
-              <div className="flex flex-wrap items-center gap-3.5 text-xs font-medium text-[#738093] dark:text-slate-300">
-                {NEWS_CATEGORIES.map((cat) => (
+              <div className="flex flex-wrap items-center gap-x-3.5 gap-y-2 text-xs font-medium text-[#738093] dark:text-slate-300 max-w-2xl">
+                {PLATFORM_MODULES.map((mod) => (
                   <button
-                    key={cat}
+                    key={mod.id}
                     type="button"
-                    onClick={() => handleSelectCategory(cat)}
-                    className="hover:text-[#10243D] dark:hover:text-[#D9A441] transition-colors cursor-pointer whitespace-nowrap"
+                    onClick={() => handleNavigatePlatformModule(mod.id)}
+                    className="hover:text-[#176B4A] dark:hover:text-[#D9A441] transition-colors cursor-pointer whitespace-nowrap"
                   >
-                    {cat}
+                    {platformLang === 'kn' ? mod.titleKn : mod.titleEn}
                   </button>
                 ))}
                 <button
@@ -1563,20 +2076,6 @@ export default function App() {
                   className="font-semibold text-amber-800 dark:text-[#D9A441] hover:underline cursor-pointer whitespace-nowrap"
                 >
                   Local Ads
-                </button>
-                <button
-                  type="button"
-                  onClick={handleJumpToBusTimings}
-                  className="font-semibold text-[#10243D] dark:text-white hover:underline cursor-pointer whitespace-nowrap"
-                >
-                  Bus Timings
-                </button>
-                <button
-                  type="button"
-                  onClick={handleJumpToEvents}
-                  className="font-semibold text-[#176B4A] dark:text-emerald-400 hover:underline cursor-pointer whitespace-nowrap"
-                >
-                  Programs &amp; Events
                 </button>
                 <button
                   type="button"
@@ -1660,6 +2159,44 @@ export default function App() {
           onOpenLocalAds={handleJumpToAds}
         />
 
+        {/* Homepage Community Registration & Instant-Publish Submission Modals */}
+        {!communityActive && (
+          <>
+            <CommunityRegisterModal
+              open={homepageCommunityRegisterOpen}
+              onClose={() => {
+                setHomepageCommunityRegisterOpen(false);
+                setPendingOpenComposerAfterRegister(false);
+              }}
+              onRegistered={(profile) => {
+                setCommunityUser(profile);
+                setHomepageCommunityRegisterOpen(false);
+                if (pendingOpenComposerAfterRegister) {
+                  setPendingOpenComposerAfterRegister(false);
+                  setHomepageCommunityComposerOpen(true);
+                }
+              }}
+            />
+
+            <CommunityComposerModal
+              open={homepageCommunityComposerOpen}
+              authorName={communityUser?.fullName || ''}
+              defaultLocation={selectedLocation === 'All' ? 'ಕೊಪ್ಪ' : selectedLocation}
+              onClose={() => setHomepageCommunityComposerOpen(false)}
+              onSaved={(savedPost) => {
+                setCommunityPosts((prev) => [
+                  savedPost,
+                  ...prev.filter((p) => p.id !== savedPost.id),
+                ]);
+              }}
+              onOpenPost={(post) => {
+                setHomepageCommunityComposerOpen(false);
+                handleOpenCommunityPost(post.slug);
+              }}
+            />
+          </>
+        )}
+
         {/* Optional Website Entry Advertisement Overlay */}
         <WebsiteEntryAd
           ads={activeAds}
@@ -1697,52 +2234,38 @@ export default function App() {
           disabled={adsActive || Boolean(selectedAdId) || chatActive || entryOverlayActive}
         />
 
-        {/* Fixed Bottom Mobile Navigation Bar */}
+        {/* Fixed Bottom Mobile Navigation Bar: Home · Explore · Services · Marketplace · Menu */}
         <BottomMobileNav
           activeTab={activeMobileTab}
           theme={publicTheme}
+          lang={platformLang}
           bookmarkCount={bookmarks.length}
           unreadNotificationsCount={unreadNotificationsCount}
           onGoHome={() => {
             setActiveMobileTab('home');
             handleResetHome();
           }}
-          onGoLatest={() => {
-            setActiveMobileTab('latest');
-            if (isSpecialRoute || selectedArticleId || selectedAdId) {
-              navigateTo('/');
-              window.setTimeout(() => {
-                document.getElementById('latest-news-feed')?.scrollIntoView({ behavior: 'smooth' });
-              }, 120);
-            } else {
-              document.getElementById('latest-news-feed')?.scrollIntoView({ behavior: 'smooth' });
-            }
+          onGoExplore={() => {
+            setActiveMobileTab('explore');
+            handleExploreAllServices();
           }}
-          onGoTrending={() => {
-            setActiveMobileTab('trending');
-            if (isSpecialRoute || selectedArticleId || selectedAdId) {
-              navigateTo('/');
-              window.setTimeout(() => {
-                document
-                  .getElementById('trending-news-mobile')
-                  ?.scrollIntoView({ behavior: 'smooth' });
-              }, 120);
-            } else {
-              document
-                .getElementById('trending-news-mobile')
-                ?.scrollIntoView({ behavior: 'smooth' });
-            }
+          onGoServices={() => {
+            setActiveMobileTab('services');
+            handleNavigatePlatformModule('businesses');
           }}
-          onOpenSearch={() => {
-            setActiveMobileTab('search');
-            setSearchModalOpen(true);
+          onGoMarketplace={() => {
+            setActiveMobileTab('marketplace');
+            handleNavigatePlatformModule('marketplace');
           }}
+          onOpenSearch={() => handleOpenSearchEverything('')}
           onOpenSaved={() => setLibraryDrawerTab('saved')}
           onOpenHistory={() => setLibraryDrawerTab('history')}
           onOpenNotifications={() => setNotifDrawerOpen(true)}
           onToggleTheme={() =>
             setPublicTheme((prev) => (prev === 'dark' ? 'light' : 'dark'))
           }
+          onToggleLang={handleTogglePlatformLang}
+          onNavigateModule={(modId) => handleNavigatePlatformModule(modId)}
           onNavigateSection={(section) => {
             if (section === 'bus-timings') handleJumpToBusTimings();
             else if (section === 'events') handleJumpToEvents();
@@ -1757,12 +2280,12 @@ export default function App() {
             type="button"
             onClick={handleJumpToChat}
             aria-label="Message Coffeenadu Admin"
-            className="fixed bottom-20 md:bottom-4 right-4 z-30 inline-flex items-center gap-2 px-3.5 sm:px-4 py-2.5 text-xs sm:text-sm font-bold text-white bg-[#10243D] hover:bg-[#19385F] border border-[#D9A441]/60 rounded-xl shadow-lg transition-transform hover:-translate-y-0.5 cursor-pointer min-h-[44px]"
+            className="fixed bottom-20 md:bottom-4 right-3 sm:right-4 z-30 inline-flex items-center justify-center gap-2 w-11 h-11 sm:w-auto sm:h-auto sm:px-4 sm:py-2.5 text-xs sm:text-sm font-bold text-white bg-[#10243D] hover:bg-[#19385F] border border-[#D9A441]/60 rounded-full sm:rounded-xl shadow-lg transition-transform hover:-translate-y-0.5 cursor-pointer min-h-[44px]"
           >
             <MessageSquare className="w-4 h-4 text-[#D9A441] shrink-0" aria-hidden="true" />
-            <span className="font-kannada whitespace-nowrap">Message · ಸಂದೇಶ</span>
+            <span className="hidden sm:inline font-kannada whitespace-nowrap">Message · ಸಂದೇಶ</span>
             {readerThread?.unreadByReader && (
-              <span className="ml-1 px-1.5 py-0.5 text-[10px] font-extrabold bg-[#D9A441] text-[#10243D] rounded">
+              <span className="hidden sm:inline ml-1 px-1.5 py-0.5 text-[10px] font-extrabold bg-[#D9A441] text-[#10243D] rounded">
                 Reply
               </span>
             )}

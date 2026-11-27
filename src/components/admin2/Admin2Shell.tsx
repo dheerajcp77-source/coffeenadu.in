@@ -5,22 +5,27 @@ import {
   BarChart3,
   Bell,
   CalendarDays,
+  CheckSquare,
   ChevronRight,
+  Compass,
   Cpu,
   Database,
   ExternalLink,
   FilePlus2,
   FolderArchive,
+  Gamepad2,
   Globe,
   Image as ImageIcon,
   Inbox,
   LayoutDashboard,
+  LayoutTemplate,
   LogOut,
   Megaphone,
   Menu,
   Moon,
   Newspaper,
   Power,
+  Search,
   Settings,
   ShieldCheck,
   Sparkles,
@@ -36,38 +41,51 @@ import type { Admin2SessionUser, AdminPermission, AdminSectionId } from '../../t
 export interface AdminNavItem {
   id: AdminSectionId;
   label: string;
-  group: 'Editorial' | 'Media & Audience' | 'Growth & Automation' | 'System & Security';
+  description: string;
+  group:
+    | 'Editorial'
+    | 'Platform Ecosystem'
+    | 'Media & Audience'
+    | 'Growth & Automation'
+    | 'System & Security';
   icon: ComponentType<{ className?: string }>;
   requiredPermission?: AdminPermission;
 }
 
 export const ADMIN2_NAV_ITEMS: AdminNavItem[] = [
-  { id: 'dashboard', label: 'Dashboard Overview', group: 'Editorial', icon: LayoutDashboard, requiredPermission: 'dashboard.view' },
-  { id: 'news', label: 'News Management', group: 'Editorial', icon: Newspaper, requiredPermission: 'dashboard.view' },
-  { id: 'add-article', label: 'Add New Article', group: 'Editorial', icon: FilePlus2, requiredPermission: 'news.create' },
-  { id: 'ads', label: 'Local Advertisements', group: 'Editorial', icon: Megaphone, requiredPermission: 'ads.manage' },
-  { id: 'add-ad', label: 'Add Advertisement', group: 'Editorial', icon: BadgePlus, requiredPermission: 'ads.manage' },
-  { id: 'calendar', label: 'Publishing Calendar', group: 'Editorial', icon: CalendarDays, requiredPermission: 'dashboard.view' },
-  { id: 'ai-studio', label: 'AI News Studio', group: 'Editorial', icon: Sparkles, requiredPermission: 'ai.use' },
+  { id: 'dashboard', label: 'Dashboard Overview', description: 'Live visitors, articles, ads & platform metrics', group: 'Editorial', icon: LayoutDashboard, requiredPermission: 'dashboard.view' },
+  { id: 'news', label: 'News Management', description: 'Published articles, drafts, breaking news & views', group: 'Editorial', icon: Newspaper, requiredPermission: 'dashboard.view' },
+  { id: 'add-article', label: 'Add New Article', description: 'Publish Kannada & English news stories', group: 'Editorial', icon: FilePlus2, requiredPermission: 'news.create' },
+  { id: 'ads', label: 'Local Advertisements', description: 'Manage banner slots, sponsors, clicks & schedules', group: 'Editorial', icon: Megaphone, requiredPermission: 'ads.manage' },
+  { id: 'add-ad', label: 'Add Advertisement', description: 'Create a new local ad placement campaign', group: 'Editorial', icon: BadgePlus, requiredPermission: 'ads.manage' },
+  { id: 'calendar', label: 'Publishing Calendar', description: 'Schedule programs, festivals & upcoming events', group: 'Editorial', icon: CalendarDays, requiredPermission: 'dashboard.view' },
+  { id: 'ai-studio', label: 'AI News Studio', description: 'Editorial drafting & summarization assistant', group: 'Editorial', icon: Sparkles, requiredPermission: 'ai.use' },
 
-  { id: 'media', label: 'Media Centre', group: 'Media & Audience', icon: ImageIcon, requiredPermission: 'media.manage' },
-  { id: 'messaging', label: 'Messaging Centre', group: 'Media & Audience', icon: Inbox, requiredPermission: 'messaging.manage' },
-  { id: 'notifications', label: 'Notification Centre', group: 'Media & Audience', icon: Bell, requiredPermission: 'dashboard.view' },
+  { id: 'platform-hub', label: 'Malnad Services & Listings', description: 'Businesses, Jobs, Marketplace, Agri, Health, Schemes, Tourism, Weather & more', group: 'Platform Ecosystem', icon: Compass, requiredPermission: 'dashboard.view' },
+  { id: 'community-users', label: 'Community Users', description: 'Private registered mobile numbers, user accounts, live posts & reports', group: 'Platform Ecosystem', icon: Users, requiredPermission: 'dashboard.view' },
+  { id: 'platform-moderation', label: 'Submissions & Reports', description: 'Approve or reject user submissions & resolve reports', group: 'Platform Ecosystem', icon: CheckSquare, requiredPermission: 'news.edit' },
+  { id: 'platform-homepage', label: 'Homepage & Localities', description: 'Reorder homepage sections, toggle modules & manage villages', group: 'Platform Ecosystem', icon: LayoutTemplate, requiredPermission: 'settings.manage' },
+  { id: 'platform-games', label: 'Games & Quizzes', description: 'Create Malnad/Kannada quizzes & manage leaderboard', group: 'Platform Ecosystem', icon: Gamepad2, requiredPermission: 'news.create' },
 
-  { id: 'analytics', label: 'Analytics Centre', group: 'Growth & Automation', icon: BarChart3, requiredPermission: 'analytics.view' },
-  { id: 'seo', label: 'SEO Management', group: 'Growth & Automation', icon: Globe, requiredPermission: 'seo.manage' },
-  { id: 'automations', label: 'Automation Centre', group: 'Growth & Automation', icon: Cpu, requiredPermission: 'automations.manage' },
+  { id: 'media', label: 'Media Centre', description: 'Manage uploaded photos, watermarks & folders', group: 'Media & Audience', icon: ImageIcon, requiredPermission: 'media.manage' },
+  { id: 'messaging', label: 'Messaging Centre', description: 'Reply to reader messages & support chat', group: 'Media & Audience', icon: Inbox, requiredPermission: 'messaging.manage' },
+  { id: 'notifications', label: 'Notification Centre', description: 'Admin alerts & delivery preferences', group: 'Media & Audience', icon: Bell, requiredPermission: 'dashboard.view' },
 
-  { id: 'administrators', label: 'Administrator Management', group: 'System & Security', icon: Users, requiredPermission: 'admins.manage' },
-  { id: 'storage', label: 'Storage Manager', group: 'System & Security', icon: Database, requiredPermission: 'storage.manage' },
-  { id: 'backups', label: 'Backup and Restore', group: 'System & Security', icon: FolderArchive, requiredPermission: 'backups.manage' },
-  { id: 'security', label: 'Security and Audit Logs', group: 'System & Security', icon: ShieldCheck, requiredPermission: 'security.view' },
-  { id: 'settings', label: 'Website Settings', group: 'System & Security', icon: Settings, requiredPermission: 'settings.manage' },
-  { id: 'health', label: 'System Health', group: 'System & Security', icon: Activity, requiredPermission: 'dashboard.view' },
+  { id: 'analytics', label: 'Analytics Centre', description: 'Visitors, WhatsApp shares, searches & device stats', group: 'Growth & Automation', icon: BarChart3, requiredPermission: 'analytics.view' },
+  { id: 'seo', label: 'SEO Management', description: 'Metadata, slugs, sitemaps & indexing health', group: 'Growth & Automation', icon: Globe, requiredPermission: 'seo.manage' },
+  { id: 'automations', label: 'Automation Centre', description: 'Scheduled syncs & editorial automations', group: 'Growth & Automation', icon: Cpu, requiredPermission: 'automations.manage' },
+
+  { id: 'administrators', label: 'Administrator Management', description: 'Manage admin roles, accounts & permissions', group: 'System & Security', icon: Users, requiredPermission: 'admins.manage' },
+  { id: 'storage', label: 'Storage Manager', description: 'Google Sheets, Drive & Apps Script connection', group: 'System & Security', icon: Database, requiredPermission: 'storage.manage' },
+  { id: 'backups', label: 'Backup and Restore', description: 'Snapshots, Drive backups & JSON/CSV export', group: 'System & Security', icon: FolderArchive, requiredPermission: 'backups.manage' },
+  { id: 'security', label: 'Security and Audit Logs', description: 'Login history, active sessions & audit trail', group: 'System & Security', icon: ShieldCheck, requiredPermission: 'security.view' },
+  { id: 'settings', label: 'Website Settings', description: 'Site branding, contacts & global toggles', group: 'System & Security', icon: Settings, requiredPermission: 'settings.manage' },
+  { id: 'health', label: 'System Health', description: 'Server status, cache health & diagnostics', group: 'System & Security', icon: Activity, requiredPermission: 'dashboard.view' },
 ];
 
 const NAV_GROUPS: Array<AdminNavItem['group']> = [
   'Editorial',
+  'Platform Ecosystem',
   'Media & Audience',
   'Growth & Automation',
   'System & Security',
@@ -107,6 +125,7 @@ export function Admin2Shell({
   children,
 }: Admin2ShellProps) {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [navSearch, setNavSearch] = useState('');
 
   const hasPermission = (perm?: AdminPermission) => {
     if (!perm) return true;
@@ -148,10 +167,32 @@ export function Admin2Shell({
         </button>
       </div>
 
+      {/* Sidebar Search Filter */}
+      <div className="px-3 pt-3">
+        <div className="relative">
+          <Search className="h-3.5 w-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+          <input
+            type="search"
+            value={navSearch}
+            onChange={(e) => setNavSearch(e.target.value)}
+            placeholder="Find module or setting..."
+            className="w-full rounded-lg bg-white/5 border border-white/10 pl-8 pr-2.5 py-1.5 text-xs text-white placeholder:text-slate-400 focus:outline-none focus:border-amber-300/60"
+          />
+        </div>
+      </div>
+
       {/* Scrollable Navigation Groups */}
-      <nav className="flex-1 overflow-y-auto px-3 py-4 space-y-5" aria-label="Admin 2.0 Navigation">
+      <nav className="flex-1 overflow-y-auto px-3 py-3 space-y-5" aria-label="Admin 2.0 Navigation">
         {NAV_GROUPS.map((group) => {
-          const items = ADMIN2_NAV_ITEMS.filter((item) => item.group === group);
+          const q = navSearch.trim().toLowerCase();
+          const items = ADMIN2_NAV_ITEMS.filter(
+            (item) =>
+              item.group === group &&
+              (!q ||
+                item.label.toLowerCase().includes(q) ||
+                item.description.toLowerCase().includes(q))
+          );
+          if (items.length === 0) return null;
           return (
             <div key={group}>
               <p className="mb-1.5 px-2.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-400/80">
@@ -175,7 +216,7 @@ export function Admin2Shell({
                         type="button"
                         disabled={!allowed}
                         onClick={() => handleNavClick(item.id)}
-                        title={!allowed ? 'Requires elevated role permission' : item.label}
+                        title={!allowed ? 'Requires elevated role permission' : item.description}
                         className={`group flex w-full items-center justify-between gap-2.5 rounded-lg px-2.5 py-2 text-left text-[13px] font-medium transition-colors ${
                           isActive
                             ? 'bg-[#17335C] text-white shadow-xs ring-1 ring-white/10'

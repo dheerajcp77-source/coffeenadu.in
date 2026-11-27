@@ -92,6 +92,10 @@ import { AdminArticleModal, type AdminArticlePayload } from './AdminArticleModal
 import { AdminEventModal } from './AdminEventModal';
 import { AdminStorageManager } from './AdminStorageManager';
 import { Admin2LoginView } from './admin2/Admin2LoginView';
+import { Admin2CommunityUsersSection } from './admin2/Admin2CommunityUsersSection';
+import { Admin2GamesSection } from './admin2/Admin2GamesSection';
+import { Admin2HomepageBuilderSection } from './admin2/Admin2HomepageBuilderSection';
+import { Admin2PlatformSection } from './admin2/Admin2PlatformSection';
 import { Admin2Shell } from './admin2/Admin2Shell';
 import { Admin2DashboardSection } from './admin2/Admin2DashboardSection';
 import { Admin2NewsSection } from './admin2/Admin2NewsSection';
@@ -1361,6 +1365,21 @@ export function AdminPanel({ articles, onNavigateHome }: AdminPanelProps) {
             />
           </div>
         );
+
+      case 'platform-hub':
+        return <Admin2PlatformSection initialMode="hub" />;
+
+      case 'community-users':
+        return <Admin2CommunityUsersSection darkMode={darkMode} />;
+
+      case 'platform-moderation':
+        return <Admin2PlatformSection initialMode="moderation" />;
+
+      case 'platform-homepage':
+        return <Admin2HomepageBuilderSection />;
+
+      case 'platform-games':
+        return <Admin2GamesSection />;
 
       case 'security':
         return <Admin2SecuritySection />;

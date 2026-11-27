@@ -5,6 +5,7 @@ import type { NewsArticle } from '../types/news';
 import { buildKannadaArticleShareText, SHARE_PROMO_FOOTER } from '../utils/newsHelpers';
 import { stripRichTextToPlainText } from '../utils/richText';
 import { buildArticlePublicUrl } from '../utils/slug';
+import { trackPlatformEvent } from '../services/platformClient';
 
 export { SHARE_PROMO_FOOTER };
 
@@ -107,7 +108,10 @@ export function ArticleShareBar({
           href={whatsappHref}
           target="_blank"
           rel="noopener noreferrer"
-          onClick={stopProp}
+          onClick={(e) => {
+            stopProp(e);
+            trackPlatformEvent({ type: 'whatsapp_share', module: 'news' });
+          }}
           aria-label="Share on WhatsApp"
           className={`inline-flex items-center gap-1 px-2.5 py-1.5 text-[11px] font-semibold rounded-md transition-colors whitespace-nowrap ${
             isDark
@@ -222,6 +226,7 @@ export function ArticleShareBar({
         href={whatsappHref}
         target="_blank"
         rel="noopener noreferrer"
+        onClick={() => trackPlatformEvent({ type: 'whatsapp_share', module: 'news' })}
         className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-white bg-[#176B4A] hover:bg-[#13593D] rounded-lg transition-colors min-h-[40px]"
       >
         <WhatsAppIcon className="w-4 h-4 shrink-0" />

@@ -8,6 +8,8 @@
  */
 
 import firebaseConfig from '../firebase-applet-config.json';
+import { handleCfAdminPlatformRoute, handleCfPublicPlatformRoute } from './_cfPlatform';
+import { handleCfCommunityApi } from './_cfCommunity';
 
 export interface PagesEnv {
   BACKEND_ORIGIN?: string;
@@ -58,6 +60,27 @@ const RESERVED_ARTICLE_SLUGS = new Set([
   'assets',
   'index',
   'login',
+  'businesses',
+  'jobs',
+  'marketplace',
+  'agriculture',
+  'education',
+  'health',
+  'schemes',
+  'tourism',
+  'property',
+  'community',
+  'lost-found',
+  'grievances',
+  'services',
+  'weather',
+  'games',
+  'offers',
+  'contacts',
+  'documents',
+  'account',
+  'explore',
+  'search',
 ]);
 
 const ROLE_DEFAULT_PERMISSIONS: Record<string, string[]> = {
@@ -2541,6 +2564,16 @@ export async function handleApiDirectOnCloudflare(
     );
   }
 
+  if (pathname.startsWith('/api/platform/')) {
+    const platformResp = await handleCfPublicPlatformRoute(request, url);
+    if (platformResp) return platformResp;
+  }
+
+  if (pathname.startsWith('/api/community/')) {
+    const communityResp = await handleCfCommunityApi(request, url, async () => ({ ok: false }));
+    if (communityResp) return communityResp;
+  }
+
   // ============================================================================
   // 7. PROTECTED ADMIN ROUTES (/api/storage/admin/* and /api/admin2/*)
   // ============================================================================
@@ -2551,6 +2584,19 @@ export async function handleApiDirectOnCloudflare(
       return authResult.errorResponse;
     }
     const admin = authResult.admin;
+
+    if (pathname.startsWith('/api/admin2/platform/')) {
+      const adminPlatformResp = await handleCfAdminPlatformRoute(request, url, admin.email);
+      if (adminPlatformResp) return adminPlatformResp;
+    }
+
+    if (pathname.startsWith('/api/admin2/community/')) {
+      const adminCommunityResp = await handleCfCommunityApi(request, url, async () => ({
+        ok: true,
+        email: admin.email,
+      }));
+      if (adminCommunityResp) return adminCommunityResp;
+    }
 
     // Allow verified admin requests to supply X-Apps-Script-Url and X-Apps-Script-Secret headers
     const hdrAppsScriptUrl = (request.headers.get('x-apps-script-url') || '').trim();

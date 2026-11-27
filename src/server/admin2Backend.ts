@@ -1552,6 +1552,10 @@ export class Admin2Backend {
     };
   }
 
+  public createAuthMiddleware(requiredPermission?: AdminPermission) {
+    return this.requireAuth(requiredPermission);
+  }
+
   private toPublicAccount(acc: Admin2AccountRecord): Admin2AccountPublic {
     const activeSessions = this.state.sessions.filter(
       (s) => s.accountId === acc.id && s.expiresAt > Date.now()
@@ -2214,7 +2218,33 @@ export class Admin2Backend {
         news = [];
       }
 
-      const staticUrls = ['/', '/ads', '/events', '/bus-timings', '/chat'].map(
+      const staticUrls = [
+        '/',
+        '/ads',
+        '/events',
+        '/bus-timings',
+        '/chat',
+        '/explore',
+        '/search',
+        '/businesses',
+        '/jobs',
+        '/marketplace',
+        '/agriculture',
+        '/education',
+        '/health',
+        '/schemes',
+        '/tourism',
+        '/property',
+        '/community',
+        '/lost-found',
+        '/grievances',
+        '/services',
+        '/weather',
+        '/games',
+        '/offers',
+        '/contacts',
+        '/documents',
+      ].map(
         (p) =>
           `  <url>\n    <loc>${baseUrl}${p}</loc>\n    <lastmod>${todayIso}</lastmod>\n    <changefreq>${p === '/' ? 'hourly' : 'daily'}</changefreq>\n    <priority>${p === '/' ? '1.0' : '0.8'}</priority>\n  </url>`
       );
