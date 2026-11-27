@@ -135,6 +135,13 @@ export function Admin2DashboardSection({
       onClick: () => onNavigateSection('news'),
     },
     {
+      label: 'Total News Views',
+      value: data.traffic.totalSheetViews,
+      sub: `${data.traffic.todayPageViews.toLocaleString('en-IN')} today · ${data.traffic.totalPageViews14d.toLocaleString('en-IN')} (14d) · Admin only`,
+      icon: Eye,
+      onClick: () => onNavigateSection('analytics'),
+    },
+    {
       label: 'Daily Readers',
       value: data.traffic.todayVisitors,
       sub: 'Unique daily visitors recorded',
@@ -340,10 +347,10 @@ export function Admin2DashboardSection({
           <div className="mb-4 flex items-center justify-between">
             <div>
               <h3 className="text-sm font-bold text-slate-900 dark:text-white">
-                Highlighted Live Stories
+                Top Viewed Stories (Admin Only)
               </h3>
               <p className="text-xs text-slate-500 dark:text-slate-400">
-                Active stories published across Malnad categories.
+                Historical + live view totals across published Malnad stories.
               </p>
             </div>
             <button
@@ -373,6 +380,10 @@ export function Admin2DashboardSection({
                       </p>
                     </div>
                   </div>
+                  <span className="inline-flex shrink-0 items-center gap-1 rounded-md bg-slate-100 px-2 py-0.5 text-[11px] font-bold tabular-nums text-slate-800 dark:bg-slate-800 dark:text-amber-300">
+                    <Eye className="h-3 w-3 text-slate-400 dark:text-amber-400/80" />
+                    {(Number(art.views) || 0).toLocaleString('en-IN')}
+                  </span>
                 </div>
               ))}
             </div>

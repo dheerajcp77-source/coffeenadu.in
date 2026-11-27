@@ -3,6 +3,7 @@ import {
   CheckCircle2,
   CloudRain,
   Download,
+  Eye,
   Flag,
   Plus,
   RefreshCw,
@@ -34,6 +35,7 @@ import type {
   WeatherRainfallRecord,
 } from '../../types/platform';
 import { getAdmin2AuthHeaders } from '../../services/admin2Client';
+import { formatAdminViewCount, sumViewCounts } from '../../utils/viewCounts';
 
 interface Admin2PlatformSectionProps {
   initialMode?: 'hub' | 'moderation';
@@ -265,10 +267,20 @@ export const Admin2PlatformSection: React.FC<Admin2PlatformSectionProps> = ({
 
       {/* KPI Strip */}
       {analytics && (
-        <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-3">
+        <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3">
+          <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-3.5">
+            <div className="text-[11px] font-semibold text-slate-500 flex items-center gap-1">
+              <Eye className="w-3 h-3 text-amber-600 dark:text-amber-400" />
+              <span>Listing Views</span>
+            </div>
+            <div className="text-xl font-extrabold text-slate-900 dark:text-amber-300 tabular-nums mt-0.5">
+              {formatAdminViewCount(sumViewCounts(listings.map((item) => item.views)))}
+            </div>
+            <div className="text-[10px] text-slate-400">Sales &amp; directories (Admin)</div>
+          </div>
           <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-3.5">
             <div className="text-[11px] font-semibold text-slate-500">Unique Visitors</div>
-            <div className="text-xl font-extrabold text-slate-900 dark:text-white mt-0.5">
+            <div className="text-xl font-extrabold text-slate-900 dark:text-white mt-0.5 tabular-nums">
               {analytics.totalUniqueVisitors}
             </div>
             <div className="text-[10px] text-slate-400">
@@ -277,35 +289,35 @@ export const Admin2PlatformSection: React.FC<Admin2PlatformSectionProps> = ({
           </div>
           <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-3.5">
             <div className="text-[11px] font-semibold text-slate-500">Pending Approval</div>
-            <div className="text-xl font-extrabold text-amber-600 dark:text-amber-400 mt-0.5">
+            <div className="text-xl font-extrabold text-amber-600 dark:text-amber-400 mt-0.5 tabular-nums">
               {analytics.pendingSubmissionsCount}
             </div>
             <div className="text-[10px] text-slate-400">User submissions</div>
           </div>
           <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-3.5">
             <div className="text-[11px] font-semibold text-slate-500">Open Reports</div>
-            <div className="text-xl font-extrabold text-rose-600 dark:text-rose-400 mt-0.5">
+            <div className="text-xl font-extrabold text-rose-600 dark:text-rose-400 mt-0.5 tabular-nums">
               {analytics.openReportsCount}
             </div>
             <div className="text-[10px] text-slate-400">Needs review</div>
           </div>
           <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-3.5">
             <div className="text-[11px] font-semibold text-slate-500">Call / WA Enquiries</div>
-            <div className="text-xl font-extrabold text-emerald-700 dark:text-emerald-400 mt-0.5">
+            <div className="text-xl font-extrabold text-emerald-700 dark:text-emerald-400 mt-0.5 tabular-nums">
               {analytics.totalEnquiries}
             </div>
             <div className="text-[10px] text-slate-400">Direct clicks tracked</div>
           </div>
           <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-3.5">
             <div className="text-[11px] font-semibold text-slate-500">WhatsApp Shares</div>
-            <div className="text-xl font-extrabold text-slate-900 dark:text-white mt-0.5">
+            <div className="text-xl font-extrabold text-slate-900 dark:text-white mt-0.5 tabular-nums">
               {analytics.totalWhatsappShares}
             </div>
             <div className="text-[10px] text-slate-400">Platform shares</div>
           </div>
           <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-3.5">
             <div className="text-[11px] font-semibold text-slate-500">Quiz Attempts</div>
-            <div className="text-xl font-extrabold text-slate-900 dark:text-white mt-0.5">
+            <div className="text-xl font-extrabold text-slate-900 dark:text-white mt-0.5 tabular-nums">
               {analytics.quizAttemptsCount}
             </div>
             <div className="text-[10px] text-slate-400">Malnad quizzes</div>
@@ -441,7 +453,11 @@ export const Admin2PlatformSection: React.FC<Admin2PlatformSectionProps> = ({
                     <p className="text-xs text-slate-500 dark:text-slate-400 line-clamp-1">
                       {item.summary}
                     </p>
-                    <div className="text-[11px] text-slate-400 flex flex-wrap gap-3">
+                    <div className="text-[11px] text-slate-400 flex flex-wrap items-center gap-3">
+                      <span className="inline-flex items-center gap-1 font-bold tabular-nums text-slate-800 dark:text-amber-300">
+                        <Eye className="w-3.5 h-3.5 text-slate-400 dark:text-amber-400/80" />
+                        Views: {formatAdminViewCount(item.views)}
+                      </span>
                       {item.phone && <span>Phone: {item.phone}</span>}
                       <span>Calls: {item.callClicks}</span>
                       <span>WhatsApp: {item.whatsappClicks}</span>
@@ -701,53 +717,92 @@ export const Admin2PlatformSection: React.FC<Admin2PlatformSectionProps> = ({
 
       {/* Platform Analytics Tab */}
       {tab === 'analytics' && analytics && (
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
-          <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 space-y-2">
-            <h3 className="font-bold text-sm text-slate-900 dark:text-white">Most-Used Search Terms</h3>
-            {analytics.topSearchTerms.length === 0 ? (
-              <p className="text-slate-500">No search queries recorded yet.</p>
+        <div className="space-y-4">
+          <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 space-y-2.5 text-xs">
+            <div className="flex items-center justify-between">
+              <h3 className="font-bold text-sm text-slate-900 dark:text-white flex items-center gap-1.5">
+                <Eye className="w-4 h-4 text-amber-600 dark:text-amber-400" />
+                <span>Top Viewed Listings — Sales, Shops, Jobs &amp; Directories (Admin Only)</span>
+              </h3>
+              <span className="text-[11px] font-semibold tabular-nums text-slate-500">
+                Total Views: {formatAdminViewCount(sumViewCounts(listings.map((item) => item.views)))}
+              </span>
+            </div>
+            {listings.length === 0 ? (
+              <p className="text-slate-500">No platform listings found yet.</p>
             ) : (
-              analytics.topSearchTerms.map((s) => (
-                <div key={s.term} className="flex justify-between py-1 border-b border-slate-100 dark:border-slate-800">
-                  <span className="font-medium">{s.term}</span>
-                  <span className="font-bold">{s.count}</span>
-                </div>
-              ))
+              <div className="divide-y divide-slate-100 dark:divide-slate-800">
+                {[...listings]
+                  .sort((a, b) => (Number(b.views) || 0) - (Number(a.views) || 0))
+                  .slice(0, 10)
+                  .map((item) => (
+                    <div key={item.id} className="flex items-center justify-between gap-3 py-2">
+                      <div className="min-w-0">
+                        <p className="font-kannada font-semibold text-slate-900 dark:text-white truncate">
+                          {item.title}
+                        </p>
+                        <p className="text-[11px] text-slate-500">
+                          {PLATFORM_MODULE_MAP[item.module]?.titleEn || item.module} · {item.location} · Calls: {item.callClicks} · WhatsApp: {item.whatsappClicks}
+                        </p>
+                      </div>
+                      <span className="inline-flex shrink-0 items-center gap-1 font-bold tabular-nums text-slate-900 dark:text-amber-300">
+                        <Eye className="w-3.5 h-3.5 text-slate-400" />
+                        {formatAdminViewCount(item.views)}
+                      </span>
+                    </div>
+                  ))}
+              </div>
             )}
           </div>
 
-          <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 space-y-2">
-            <h3 className="font-bold text-sm text-slate-900 dark:text-white">Popular Platform Sections</h3>
-            {analytics.popularSections.length === 0 ? (
-              <p className="text-slate-500">No section visits recorded yet.</p>
-            ) : (
-              analytics.popularSections.map((s) => (
-                <div key={s.module} className="flex justify-between py-1 border-b border-slate-100 dark:border-slate-800">
-                  <span className="font-medium capitalize">{s.module}</span>
-                  <span className="font-bold">{s.visits}</span>
-                </div>
-              ))
-            )}
-          </div>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
+            <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 space-y-2">
+              <h3 className="font-bold text-sm text-slate-900 dark:text-white">Most-Used Search Terms</h3>
+              {analytics.topSearchTerms.length === 0 ? (
+                <p className="text-slate-500">No search queries recorded yet.</p>
+              ) : (
+                analytics.topSearchTerms.map((s) => (
+                  <div key={s.term} className="flex justify-between py-1 border-b border-slate-100 dark:border-slate-800">
+                    <span className="font-medium">{s.term}</span>
+                    <span className="font-bold">{s.count}</span>
+                  </div>
+                ))
+              )}
+            </div>
 
-          <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 space-y-3">
-            <h3 className="font-bold text-sm text-slate-900 dark:text-white">Device & Locality Split</h3>
-            <div className="flex justify-between">
-              <span>Mobile Traffic Events</span>
-              <strong>{analytics.deviceBreakdown.mobile}</strong>
+            <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 space-y-2">
+              <h3 className="font-bold text-sm text-slate-900 dark:text-white">Popular Platform Sections</h3>
+              {analytics.popularSections.length === 0 ? (
+                <p className="text-slate-500">No section visits recorded yet.</p>
+              ) : (
+                analytics.popularSections.map((s) => (
+                  <div key={s.module} className="flex justify-between py-1 border-b border-slate-100 dark:border-slate-800">
+                    <span className="font-medium capitalize">{s.module}</span>
+                    <span className="font-bold">{s.visits}</span>
+                  </div>
+                ))
+              )}
             </div>
-            <div className="flex justify-between">
-              <span>Desktop Traffic Events</span>
-              <strong>{analytics.deviceBreakdown.desktop}</strong>
-            </div>
-            <div className="pt-2 border-t border-slate-100 dark:border-slate-800 space-y-1">
-              <div className="font-semibold text-slate-500">Top Localities</div>
-              {analytics.locationActivity.map((l) => (
-                <div key={l.location} className="flex justify-between">
-                  <span>{l.location}</span>
-                  <strong>{l.count}</strong>
-                </div>
-              ))}
+
+            <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 space-y-3">
+              <h3 className="font-bold text-sm text-slate-900 dark:text-white">Device &amp; Locality Split</h3>
+              <div className="flex justify-between">
+                <span>Mobile Traffic Events</span>
+                <strong>{analytics.deviceBreakdown.mobile}</strong>
+              </div>
+              <div className="flex justify-between">
+                <span>Desktop Traffic Events</span>
+                <strong>{analytics.deviceBreakdown.desktop}</strong>
+              </div>
+              <div className="pt-2 border-t border-slate-100 dark:border-slate-800 space-y-1">
+                <div className="font-semibold text-slate-500">Top Localities</div>
+                {analytics.locationActivity.map((l) => (
+                  <div key={l.location} className="flex justify-between">
+                    <span>{l.location}</span>
+                    <strong>{l.count}</strong>
+                  </div>
+                ))}
+              </div>
             </div>
           </div>
         </div>

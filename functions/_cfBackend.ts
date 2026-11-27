@@ -1851,9 +1851,15 @@ function buildCfAdminAdsPayload() {
   const todayYmd = new Date().toISOString().slice(0, 10);
   const enriched = cfAdsList.map((ad) => {
     const effectiveStatus = computeCfEffectiveStatus(ad, todayYmd);
-    const ctrPct = ad.impressions > 0 ? Math.round((ad.clicks / ad.impressions) * 1000) / 10 : 0;
+    const mergedViews = Math.max(
+      Number((ad as { views?: number }).views) || 0,
+      Number(ad.impressions) || 0
+    );
+    const ctrPct = mergedViews > 0 ? Math.round((ad.clicks / mergedViews) * 1000) / 10 : 0;
     return {
       ...ad,
+      views: mergedViews,
+      impressions: mergedViews,
       effectiveStatus,
       ctrPct,
     };
@@ -1922,6 +1928,8 @@ function stripMarkup(raw: unknown): string {
     .trim();
 }
 
+const cfLiveArticleViewsMap: Record<string, number> = {};
+
 function buildAnalyticsFromNews(news: SheetsNewsItem[], days = 14, publicOrigin = CANONICAL_PUBLIC_ORIGIN) {
   const safeDays = Math.min(90, Math.max(7, Number(days) || 14));
   const dailySeries: Array<{
@@ -1946,7 +1954,10 @@ function buildAnalyticsFromNews(news: SheetsNewsItem[], days = 14, publicOrigin 
 
   const topArticles = news
     .map((item) => {
-      const views = Number(item.views) || 0;
+      const views = Math.max(
+        Number(item.views) || 0,
+        Number(cfLiveArticleViewsMap[item.newsId]) || 0
+      );
       totalSheetArticleViews += views;
       const cat = item.category || 'Local';
       const c = catCounts.get(cat) || { articles: 0, views: 0 };
@@ -2255,8 +2266,15 @@ export async function handleApiDirectOnCloudflare(
       return jsonErrorResponse(400, 'Invalid or missing id');
     }
     const baselineRaw = Number(body.baselineViews);
-    const views =
-      Number.isFinite(baselineRaw) && baselineRaw >= 0 ? Math.floor(baselineRaw) + 1 : 1;
+    const prevTracked = entityType === 'article' ? Number(cfLiveArticleViewsMap[id]) || 0 : 0;
+    const baseViews = Math.max(
+      prevTracked,
+      Number.isFinite(baselineRaw) && baselineRaw >= 0 ? Math.floor(baselineRaw) : 0
+    );
+    const views = baseViews + 1;
+    if (entityType === 'article') {
+      cfLiveArticleViewsMap[id] = views;
+    }
 
     if (appsScriptCfg.configured) {
       const flushTask = callAppsScriptPost(
@@ -2280,18 +2298,19 @@ export async function handleApiDirectOnCloudflare(
   }
 
   if (pathname === '/api/articles/views' && method === 'GET') {
+    const viewsById: Record<string, number> = { ...cfLiveArticleViewsMap };
     if (!appsScriptCfg.configured) {
-      return jsonResponse({ ok: true, viewsById: {} });
+      return jsonResponse({ ok: true, viewsById });
     }
     try {
       const news = await fetchAllPublishedNewsDirect(env, false);
-      const viewsById: Record<string, number> = {};
       for (const item of news) {
-        viewsById[item.newsId] = Number(item.views) || 0;
+        const sheetViews = Number(item.views) || 0;
+        viewsById[item.newsId] = Math.max(viewsById[item.newsId] || 0, sheetViews);
       }
       return jsonResponse({ ok: true, viewsById });
     } catch {
-      return jsonResponse({ ok: true, viewsById: {} });
+      return jsonResponse({ ok: true, viewsById });
     }
   }
 

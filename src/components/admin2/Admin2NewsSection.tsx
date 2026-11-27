@@ -47,6 +47,11 @@ import {
 } from '../../utils/featuredLead';
 import { sanitizeRichTextHtml, stripRichTextToPlainText } from '../../utils/richText';
 import { buildArticlePublicUrl } from '../../utils/slug';
+import {
+  formatAdminViewCount,
+  resolveArticleViewCount,
+  sumViewCounts,
+} from '../../utils/viewCounts';
 
 interface Admin2NewsSectionProps {
   articles: NewsArticle[];
@@ -84,6 +89,8 @@ export function Admin2NewsSection({
   const [searchQuery, setSearchQuery] = useState('');
   const [categoryFilter, setCategoryFilter] = useState<FilterCategory>('All');
   const [languageFilter, setLanguageFilter] = useState<'All' | 'Kannada' | 'English' | 'Bilingual'>('All');
+  const [sortBy, setSortBy] = useState<'latest' | 'views'>('latest');
+  const [viewsById, setViewsById] = useState<Record<string, number>>({});
 
   const [drafts, setDrafts] = useState<Admin2ManagedDraft[]>([]);
   const [overlays, setOverlays] = useState<Record<string, ArticleCmsOverlay>>({});
@@ -130,10 +137,18 @@ export function Admin2NewsSection({
   const loadCms = async () => {
     setLoadingCms(true);
     try {
-      const res = await fetchAdmin2CmsState();
+      const [res, viewsResp] = await Promise.all([
+        fetchAdmin2CmsState(),
+        fetch('/api/articles/views', { headers: { Accept: 'application/json' }, cache: 'no-store' })
+          .then((r) => (r.ok ? r.json() : null))
+          .catch(() => null),
+      ]);
       setDrafts(res.drafts || []);
       setOverlays(res.overlays || {});
       setArchivedSnapshots(res.archivedSnapshots || []);
+      if (viewsResp && typeof viewsResp === 'object' && viewsResp.viewsById) {
+        setViewsById(viewsResp.viewsById as Record<string, number>);
+      }
     } catch (err) {
       setErrorMsg(err instanceof Error ? err.message : 'Unable to load CMS draft & archive state.');
     } finally {
@@ -148,9 +163,17 @@ export function Admin2NewsSection({
   const draftItems = useMemo(() => drafts.filter((d) => d.status === 'draft'), [drafts]);
   const scheduledItems = useMemo(() => drafts.filter((d) => d.status === 'scheduled'), [drafts]);
 
+  const getArticleViews = (article: NewsArticle): number =>
+    resolveArticleViewCount(article.viewCount, viewsById, article.id);
+
+  const totalPublishedViews = useMemo(
+    () => sumViewCounts(articles.map((a) => resolveArticleViewCount(a.viewCount, viewsById, a.id))),
+    [articles, viewsById]
+  );
+
   const filteredPublished = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
-    return articles.filter((a) => {
+    const list = articles.filter((a) => {
       if (categoryFilter !== 'All' && a.category !== categoryFilter) return false;
       const lang = overlays[a.id]?.language || 'Kannada';
       if (languageFilter !== 'All' && lang !== languageFilter) return false;
@@ -158,7 +181,15 @@ export function Admin2NewsSection({
       const hay = `${stripRichTextToPlainText(a.titleKannada)} ${stripRichTextToPlainText(a.summaryKannada)} ${a.id} ${a.location} ${a.reporter}`.toLowerCase();
       return hay.includes(q);
     });
-  }, [articles, categoryFilter, languageFilter, overlays, searchQuery]);
+    if (sortBy === 'views') {
+      return [...list].sort(
+        (a, b) =>
+          resolveArticleViewCount(b.viewCount, viewsById, b.id) -
+          resolveArticleViewCount(a.viewCount, viewsById, a.id)
+      );
+    }
+    return list;
+  }, [articles, categoryFilter, languageFilter, overlays, searchQuery, sortBy, viewsById]);
 
   const openQuickDraftModal = (existing?: Admin2ManagedDraft) => {
     if (existing) {
@@ -460,6 +491,21 @@ export function Admin2NewsSection({
               <option value="English">English</option>
               <option value="Bilingual">Bilingual</option>
             </select>
+
+            <select
+              value={sortBy}
+              onChange={(e) => setSortBy(e.target.value as 'latest' | 'views')}
+              aria-label="Sort published articles"
+              className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs text-slate-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200"
+            >
+              <option value="latest">Sort: Latest First</option>
+              <option value="views">Sort: Most Viewed (Admin)</option>
+            </select>
+
+            <div className="inline-flex items-center gap-1.5 rounded-lg border border-amber-300/60 bg-amber-50/80 px-2.5 py-1.5 text-xs font-semibold text-amber-900 tabular-nums dark:border-amber-700/50 dark:bg-amber-950/30 dark:text-amber-300">
+              <Eye className="h-3.5 w-3.5" />
+              <span>Total News Views: {formatAdminViewCount(totalPublishedViews)}</span>
+            </div>
           </div>
 
           {selectedIds.size > 0 && canArchive && (
@@ -499,6 +545,7 @@ export function Admin2NewsSection({
                   <th className="px-3 py-3">Article &amp; Slug</th>
                   <th className="px-3 py-3">Category / Lang</th>
                   <th className="px-3 py-3">Published</th>
+                  <th className="px-3 py-3 text-right">Views (Admin)</th>
                   <th className="px-3 py-3 text-right">Actions</th>
                 </tr>
               </thead>
@@ -632,6 +679,15 @@ export function Admin2NewsSection({
                             Lead ends {formatLeadExpiryDateTime(article.featuredUntil)}
                           </p>
                         )}
+                      </td>
+                      <td className="px-3 py-3 align-top text-right tabular-nums whitespace-nowrap">
+                        <span
+                          className="inline-flex items-center gap-1 font-bold text-slate-900 dark:text-amber-300"
+                          title="Admin-only historical + live views count"
+                        >
+                          <Eye className="h-3.5 w-3.5 text-slate-400 dark:text-amber-400/80" />
+                          {formatAdminViewCount(getArticleViews(article))}
+                        </span>
                       </td>
                       <td className="px-3 py-3 align-top text-right">
                         <div className="inline-flex flex-wrap items-center justify-end gap-1">
@@ -846,8 +902,15 @@ export function Admin2NewsSection({
                     {stripRichTextToPlainText(String(snap.titleKannada || snap.id))}
                   </p>
                   <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
-                    ID: <span className="font-mono">{snap.id}</span> · Archived by{' '}
-                    {String(snap.archivedBy || 'admin')} on{' '}
+                    ID: <span className="font-mono">{snap.id}</span> ·{' '}
+                    <span className="inline-flex items-center gap-1 font-semibold tabular-nums text-slate-700 dark:text-amber-300">
+                      <Eye className="h-3 w-3" />
+                      {formatAdminViewCount(
+                        resolveArticleViewCount(snap.viewCount ?? snap.views, viewsById, snap.id)
+                      )}{' '}
+                      views
+                    </span>{' '}
+                    · Archived by {String(snap.archivedBy || 'admin')} on{' '}
                     {snap.archivedAt ? new Date(String(snap.archivedAt)).toLocaleString('en-IN') : ''}
                   </p>
                 </div>

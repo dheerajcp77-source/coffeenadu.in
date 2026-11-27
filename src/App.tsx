@@ -1826,9 +1826,9 @@ export default function App() {
                     feedCategories={feedCategories}
                     selectedLocation={selectedLocation}
                     searchQuery={searchQuery}
-                    sort={displaySettings.showViewCounts ? feedSort : 'latest'}
+                    sort="latest"
                     onSortChange={setFeedSort}
-                    showViewCounts={displaySettings.showViewCounts}
+                    showViewCounts={false}
                     onResetFilters={handleResetHome}
                     onAddInfoClick={handleHomepageAddInformation}
                     onOpenArticle={handleOpenArticle}

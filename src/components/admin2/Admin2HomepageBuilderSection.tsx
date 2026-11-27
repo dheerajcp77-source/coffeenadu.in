@@ -258,24 +258,17 @@ export const Admin2HomepageBuilderSection: React.FC = () => {
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 text-xs">
-          <label className="flex items-start gap-2.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-950/60 p-3 cursor-pointer">
-            <input
-              type="checkbox"
-              checked={displaySettings.showViewCounts}
-              onChange={(e) =>
-                setDisplaySettings((prev) => ({ ...prev, showViewCounts: e.target.checked }))
-              }
-              className="mt-0.5 w-4 h-4 accent-[#14452F]"
-            />
+          <div className="flex items-start gap-2.5 rounded-xl border border-amber-300/60 dark:border-amber-700/50 bg-amber-50/70 dark:bg-amber-950/30 p-3">
+            <EyeOff className="mt-0.5 w-4 h-4 text-amber-700 dark:text-amber-400 shrink-0" />
             <div>
               <div className="font-bold text-slate-900 dark:text-white">
-                Show View Counts (Default: Hidden)
+                Public View Counts: Strictly Hidden (Admin-Only)
               </div>
-              <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                Keep unchecked to hide all view counts cleanly across the website.
+              <p className="text-[11px] text-slate-600 dark:text-slate-300">
+                View counts are never shown to public visitors. All historical and live counts for News, Ads, Community Posts, and Sales/Listings are visible only inside this Admin Panel.
               </p>
             </div>
-          </label>
+          </div>
 
           <label className="flex items-start gap-2.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-950/60 p-3 cursor-pointer">
             <input

@@ -61,6 +61,7 @@ import {
   type AdvertisementPayload,
   type AdvertisementStats,
 } from '../../types/ads';
+import { formatAdminViewCount, resolveAdViewCount } from '../../utils/viewCounts';
 import {
   buildAdKannadaShareMessage,
   buildAdPublicUrl,
@@ -580,7 +581,10 @@ export function Admin2AdsSection({
     let totalImpressions = 0;
     let totalClicks = 0;
     for (const ad of ads) {
-      totalImpressions += Number(ad.views) || 0;
+      totalImpressions += resolveAdViewCount(
+        ad.views,
+        (ad as Advertisement & { impressions?: number }).impressions
+      );
       totalClicks += Number(ad.clicks) || 0;
     }
     return { totalImpressions, totalClicks };
@@ -749,6 +753,18 @@ export function Admin2AdsSection({
                       {bestPerformingAd.title}
                     </h3>
                     <div className="flex flex-wrap gap-4 text-xs text-slate-600 dark:text-slate-300 tabular-nums">
+                      <span className="inline-flex items-center gap-1">
+                        <Eye className="h-3.5 w-3.5 text-slate-400" />
+                        <strong>
+                          {formatAdminViewCount(
+                            resolveAdViewCount(
+                              bestPerformingAd.views,
+                              (bestPerformingAd as Advertisement & { impressions?: number }).impressions
+                            )
+                          )}
+                        </strong>{' '}
+                        views
+                      </span>
                       <span>
                         <strong>{bestPerformingAd.clicks.toLocaleString('en-IN')}</strong> clicks
                       </span>
@@ -960,6 +976,7 @@ export function Admin2AdsSection({
                     <th className="py-3 px-3">Advertiser</th>
                     <th className="py-3 px-3">Status</th>
                     <th className="py-3 px-3">Placements</th>
+                    <th className="py-3 px-3 text-right">Views</th>
                     <th className="py-3 px-3 text-right">Clicks</th>
                     <th className="py-3 px-4 text-right">Actions</th>
                   </tr>
@@ -1028,6 +1045,17 @@ export function Admin2AdsSection({
                           ) : (
                             <span className="text-[11px] text-slate-400">Directory Only</span>
                           )}
+                        </td>
+                        <td className="py-3 px-3 text-right tabular-nums font-bold text-slate-900 dark:text-amber-300 whitespace-nowrap">
+                          <span className="inline-flex items-center gap-1" title="Admin-only historical + live ad views">
+                            <Eye className="h-3.5 w-3.5 text-slate-400 dark:text-amber-400/80" />
+                            {formatAdminViewCount(
+                              resolveAdViewCount(
+                                ad.views,
+                                (ad as Advertisement & { impressions?: number }).impressions
+                              )
+                            )}
+                          </span>
                         </td>
                         <td className="py-3 px-3 text-right tabular-nums font-semibold text-slate-800 dark:text-slate-200">
                           {ad.clicks.toLocaleString('en-IN')}
@@ -1741,7 +1769,8 @@ export function Admin2AdsSection({
                         {analyticsData.bestPerformingAd.adNumber} · {analyticsData.bestPerformingAd.title}
                       </p>
                       <p className="text-xs text-slate-500 tabular-nums">
-                        {analyticsData.bestPerformingAd.clicks.toLocaleString('en-IN')} clicks
+                        {analyticsData.bestPerformingAd.impressions.toLocaleString('en-IN')} views ·{' '}
+                        {analyticsData.bestPerformingAd.clicks.toLocaleString('en-IN')} clicks ({analyticsData.bestPerformingAd.ctrPct.toFixed(1)}% CTR)
                       </p>
                     </div>
                   )}

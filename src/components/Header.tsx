@@ -114,8 +114,8 @@ export function Header({
   return (
     <header className="sticky top-0 z-40 bg-[#FBF9F5]/95 dark:bg-[#151310]/95 backdrop-blur-md border-b border-[#E7DFCE] dark:border-[#2E2922] shadow-[0_1px_12px_rgba(28,25,23,0.06)]">
       <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 min-h-16 py-2 flex items-center justify-between gap-2 sm:gap-3">
-        {/* Zone 1: Brand wordmark + Developed by Dheeraj */}
-        <div className="flex flex-col items-start min-w-0 shrink-0">
+        {/* Zone 1: Brand wordmark */}
+        <div className="flex items-center min-w-0 shrink-0">
           <button
             type="button"
             onClick={() => {
@@ -127,9 +127,6 @@ export function Header({
             <CoffeeCupLogo className="w-8 h-8 sm:w-9 sm:h-9 shrink-0" />
             <span>Coffeenadu News</span>
           </button>
-          <span className="pl-10 sm:pl-11 -mt-0.5 text-[10px] sm:text-[11px] font-semibold tracking-wide text-[#7D7265] dark:text-[#A89F91] leading-tight whitespace-nowrap">
-            Developed by Dheeraj
-          </span>
         </div>
 
         {/* Zone 2: Clean, De-duplicated Desktop Navigation */}

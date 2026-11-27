@@ -36,6 +36,7 @@ import {
   setAdminCommunityUserStatus,
 } from '../../services/communityClient';
 import { getAdmin2AuthHeaders } from '../../services/admin2Client';
+import { formatAdminViewCount, sumViewCounts } from '../../utils/viewCounts';
 
 interface Admin2CommunityUsersSectionProps {
   darkMode: boolean;
@@ -267,29 +268,32 @@ export const Admin2CommunityUsersSection: React.FC<Admin2CommunityUsersSectionPr
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-4 pt-4 border-t border-slate-200/70 dark:border-slate-800">
           <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-950/60 border border-slate-200/70 dark:border-slate-800">
             <p className="text-[11px] font-semibold text-slate-500">Registered Users</p>
-            <p className="text-xl font-extrabold mt-0.5">{totals.totalUsers}</p>
+            <p className="text-xl font-extrabold mt-0.5 tabular-nums">{totals.totalUsers}</p>
             <p className="text-[11px] text-emerald-600 dark:text-emerald-400">
               {totals.activeUsers} active · {totals.suspendedUsers} suspended
             </p>
           </div>
           <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-950/60 border border-slate-200/70 dark:border-slate-800">
             <p className="text-[11px] font-semibold text-slate-500">Total Submissions</p>
-            <p className="text-xl font-extrabold mt-0.5">{totals.totalPosts}</p>
+            <p className="text-xl font-extrabold mt-0.5 tabular-nums">{totals.totalPosts}</p>
             <p className="text-[11px] text-slate-500">{totals.publishedPosts} live published</p>
           </div>
           <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-950/60 border border-slate-200/70 dark:border-slate-800">
-            <p className="text-[11px] font-semibold text-slate-500">Open User Reports</p>
-            <p className="text-xl font-extrabold mt-0.5 text-red-600 dark:text-red-400">
-              {totals.openReports}
+            <p className="text-[11px] font-semibold text-slate-500 flex items-center gap-1">
+              <Eye className="w-3 h-3 text-amber-600 dark:text-amber-400" />
+              <span>Total Post Views (Admin)</span>
             </p>
-            <p className="text-[11px] text-slate-500">Post-publish moderation</p>
+            <p className="text-xl font-extrabold mt-0.5 tabular-nums text-slate-900 dark:text-amber-300">
+              {formatAdminViewCount(sumViewCounts(posts.map((p) => p.viewsCount)))}
+            </p>
+            <p className="text-[11px] text-slate-500">Sales, shops &amp; community posts</p>
           </div>
           <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-950/60 border border-slate-200/70 dark:border-slate-800">
-            <p className="text-[11px] font-semibold text-slate-500">Publish Mode</p>
-            <p className="text-sm font-extrabold text-emerald-600 dark:text-emerald-400 mt-1">
-              Immediate Live
+            <p className="text-[11px] font-semibold text-slate-500">Open User Reports</p>
+            <p className="text-xl font-extrabold mt-0.5 tabular-nums text-red-600 dark:text-red-400">
+              {totals.openReports}
             </p>
-            <p className="text-[11px] text-slate-500">No approval gate</p>
+            <p className="text-[11px] text-slate-500">Immediate live · post-moderation</p>
           </div>
         </div>
       </div>
@@ -540,9 +544,15 @@ export const Admin2CommunityUsersSection: React.FC<Admin2CommunityUsersSectionPr
                       <p className="font-kannada text-xs text-slate-500 line-clamp-2">
                         {post.description}
                       </p>
-                      <p className="text-[11px] font-mono text-slate-400">
-                        /community/{post.slug} · {new Date(post.createdAt).toLocaleString()}
-                      </p>
+                      <div className="flex flex-wrap items-center gap-3 text-[11px] text-slate-400">
+                        <span className="inline-flex items-center gap-1 font-bold tabular-nums text-slate-800 dark:text-amber-300">
+                          <Eye className="w-3.5 h-3.5 text-slate-400 dark:text-amber-400/80" />
+                          {formatAdminViewCount(post.viewsCount)} views
+                        </span>
+                        <span className="font-mono">
+                          /community/{post.slug} · {new Date(post.createdAt).toLocaleString()}
+                        </span>
+                      </div>
                     </div>
 
                     <div className="flex flex-wrap items-center gap-1.5 shrink-0">
@@ -719,9 +729,15 @@ export const Admin2CommunityUsersSection: React.FC<Admin2CommunityUsersSectionPr
                     className="p-3.5 rounded-xl border border-slate-200 dark:border-slate-800 flex flex-wrap items-center justify-between gap-2"
                   >
                     <div className="min-w-0">
-                      <div className="text-[11px] font-kannada text-slate-500">
-                        {COMMUNITY_CATEGORY_MAP[p.category]?.labelKn} · {p.location} ·{' '}
-                        {new Date(p.createdAt).toLocaleDateString()} · Status: <strong>{p.status}</strong>
+                      <div className="text-[11px] font-kannada text-slate-500 flex flex-wrap items-center gap-2">
+                        <span>
+                          {COMMUNITY_CATEGORY_MAP[p.category]?.labelKn} · {p.location} ·{' '}
+                          {new Date(p.createdAt).toLocaleDateString()} · Status: <strong>{p.status}</strong>
+                        </span>
+                        <span className="inline-flex items-center gap-1 font-sans font-bold tabular-nums text-slate-800 dark:text-amber-300">
+                          <Eye className="w-3 h-3 text-slate-400" />
+                          {formatAdminViewCount(p.viewsCount)} views
+                        </span>
                       </div>
                       <p className="font-kannada text-sm font-bold">{p.title}</p>
                     </div>
