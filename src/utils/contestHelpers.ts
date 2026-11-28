@@ -308,13 +308,104 @@ export function detectSuspiciousTrafficPattern(params: {
 }
 
 /**
+ * Returns the genuine 24-hour unique organic eligible views for an entry.
+ */
+export function getGenuineEligibleViews(
+  record: Partial<
+    Pick<
+      ContestEntryRecord,
+      'eligibleViews' | 'genuineEligibleViews' | 'genuine_eligible_views'
+    >
+  >
+): number {
+  const raw =
+    record.genuine_eligible_views ??
+    record.genuineEligibleViews ??
+    record.eligibleViews ??
+    0;
+  return Math.max(0, Math.floor(Number(raw) || 0));
+}
+
+/**
+ * Returns the Super Admin manual score adjustment (integer, defaults to 0).
+ */
+export function getManualScoreAdjustment(
+  record: Partial<
+    Pick<ContestEntryRecord, 'manualScoreAdjustment' | 'manual_score_adjustment'>
+  >
+): number {
+  const raw = record.manual_score_adjustment ?? record.manualScoreAdjustment ?? 0;
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) ? Math.trunc(parsed) : 0;
+}
+
+/**
+ * Calculates:
+ * competition_display_score = Math.max(0, genuine_eligible_views + manual_score_adjustment)
+ * Prevents negative scores.
+ */
+export function computeCompetitionDisplayScore(
+  genuineEligibleViews: number,
+  manualScoreAdjustment: number
+): number {
+  const genuine = Math.max(0, Math.floor(Number(genuineEligibleViews) || 0));
+  const adjustment = Number.isFinite(Number(manualScoreAdjustment))
+    ? Math.trunc(Number(manualScoreAdjustment))
+    : 0;
+  return Math.max(0, genuine + adjustment);
+}
+
+/**
+ * Returns the final competition display score for an entry.
+ */
+export function getEntryCompetitionDisplayScore(
+  record: Partial<
+    Pick<
+      ContestEntryRecord,
+      | 'eligibleViews'
+      | 'genuineEligibleViews'
+      | 'genuine_eligible_views'
+      | 'manualScoreAdjustment'
+      | 'manual_score_adjustment'
+    >
+  >
+): number {
+  return computeCompetitionDisplayScore(
+    getGenuineEligibleViews(record),
+    getManualScoreAdjustment(record)
+  );
+}
+
+/**
+ * Synchronizes genuine_eligible_views, manual_score_adjustment, and competition_display_score
+ * fields on a ContestEntryRecord in-place while preserving genuine organic eligibleViews.
+ */
+export function normalizeEntryScoreFields(record: ContestEntryRecord): ContestEntryRecord {
+  const genuine = Math.max(0, Math.floor(Number(record.eligibleViews) || 0));
+  const adjustment = getManualScoreAdjustment(record);
+  const displayScore = computeCompetitionDisplayScore(genuine, adjustment);
+
+  record.eligibleViews = genuine;
+  record.genuineEligibleViews = genuine;
+  record.genuine_eligible_views = genuine;
+  record.manualScoreAdjustment = adjustment;
+  record.manual_score_adjustment = adjustment;
+  record.competitionDisplayScore = displayScore;
+  record.competition_display_score = displayScore;
+  return record;
+}
+
+/**
  * Strictly sanitizes a ContestEntryRecord for public APIs.
- * NEVER exposes contributorUserId, mobile numbers, or moderation internals.
+ * NEVER exposes contributorUserId, mobile numbers, manual score adjustment internals, or moderation internals.
+ * Public `eligibleViews` and `competitionDisplayScore` reflect `competition_display_score`.
  */
 export function toPublicContestEntry(
   record: ContestEntryRecord,
   rank?: number
 ): PublicContestEntry {
+  const displayScore = getEntryCompetitionDisplayScore(record);
+  const rawTotalViews = Math.max(0, Math.floor(Number(record.totalPageViews) || 0));
   return {
     id: record.id,
     postId: record.postId,
@@ -326,8 +417,10 @@ export function toPublicContestEntry(
     location: record.location,
     thumbnailUrl: record.thumbnailUrl || undefined,
     publishedAt: record.publishedAt,
-    eligibleViews: Math.max(0, Math.floor(Number(record.eligibleViews) || 0)),
-    totalPageViews: Math.max(0, Math.floor(Number(record.totalPageViews) || 0)),
+    eligibleViews: displayScore,
+    competitionDisplayScore: displayScore,
+    competition_display_score: displayScore,
+    totalPageViews: Math.max(rawTotalViews, displayScore),
     ...(typeof rank === 'number' ? { rank } : {}),
   };
 }
@@ -353,14 +446,14 @@ export function toPublicContestWinner(record: ContestWinnerRecord): PublicContes
 }
 
 /**
- * Ranks eligible contest entries by eligibleViews DESC, then earliest publishedAt ASC
+ * Ranks eligible contest entries by competition_display_score DESC, then earliest publishedAt ASC
  * (fair tie-breaking for earlier original reporting).
  */
 export function rankEligibleContestEntries(entries: ContestEntryRecord[]): PublicContestEntry[] {
   return entries
     .filter((entry) => entry.eligibility === 'eligible')
     .sort((a, b) => {
-      const diff = (Number(b.eligibleViews) || 0) - (Number(a.eligibleViews) || 0);
+      const diff = getEntryCompetitionDisplayScore(b) - getEntryCompetitionDisplayScore(a);
       if (diff !== 0) return diff;
       return Date.parse(a.publishedAt || '0') - Date.parse(b.publishedAt || '0');
     })

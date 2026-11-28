@@ -89,7 +89,18 @@ export interface ContestEntryRecord {
   disqualifiedBy?: string;
   disqualifiedAt?: string;
   totalPageViews: number;
+  /** Genuine 24-hour unique organic eligible views (never overwritten by manual score edits). */
   eligibleViews: number;
+  genuineEligibleViews?: number;
+  genuine_eligible_views?: number;
+  /** Super Admin manual score adjustment (integer, default 0). */
+  manualScoreAdjustment?: number;
+  manual_score_adjustment?: number;
+  /** Final competition display score = Math.max(0, genuine_eligible_views + manual_score_adjustment). */
+  competitionDisplayScore?: number;
+  competition_display_score?: number;
+  manualScoreUpdatedBy?: string;
+  manualScoreUpdatedAt?: string;
   suspiciousBlockedViews: number;
   suspiciousFlagged: boolean;
   lastViewedAt?: string;
@@ -99,7 +110,8 @@ export interface ContestEntryRecord {
 
 /**
  * Strictly sanitized public contest entry.
- * NEVER includes contributorUserId, mobile numbers, visitor hashes, or IP data.
+ * NEVER includes contributorUserId, mobile numbers, visitor hashes, IP data, or manual adjustment internals.
+ * `eligibleViews` and `competitionDisplayScore` reflect the final `competition_display_score`.
  */
 export interface PublicContestEntry {
   id: string;
@@ -113,6 +125,8 @@ export interface PublicContestEntry {
   thumbnailUrl?: string;
   publishedAt: string;
   eligibleViews: number;
+  competitionDisplayScore?: number;
+  competition_display_score?: number;
   totalPageViews: number;
   rank?: number;
 }
@@ -121,6 +135,14 @@ export interface AdminContestEntryView extends ContestEntryRecord {
   contributorMobileNumber: string; // Admin-only reference
   postStatus: string;
   openAlertsCount: number;
+  genuineEligibleViews: number;
+  genuine_eligible_views: number;
+  manualScoreAdjustment: number;
+  manual_score_adjustment: number;
+  competitionDisplayScore: number;
+  competition_display_score: number;
+  currentRank?: number | null;
+  genuineRank?: number | null;
 }
 
 export interface ContestSuspiciousAlert {
@@ -195,6 +217,8 @@ export interface ContestAdminOverview {
     disqualifiedEntries: number;
     totalPageViews: number;
     totalEligibleViews: number;
+    totalCompetitionDisplayScore?: number;
+    manuallyAdjustedEntries?: number;
     suspiciousBlockedViews: number;
     openAlerts: number;
   };
@@ -215,5 +239,7 @@ export interface ContestViewRecordResult {
     | 'month_closed'
     | 'disqualified';
   eligibleViews: number;
+  competitionDisplayScore?: number;
+  competition_display_score?: number;
   totalPageViews: number;
 }

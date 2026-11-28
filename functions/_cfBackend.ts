@@ -234,7 +234,7 @@ export function isDeadUpstreamHtmlResponse(resp: Response): boolean {
   if (resp.status === 404 && contentType.includes('text/html')) {
     return true;
   }
-  if (resp.status >= 500 && !contentType.includes('json')) {
+  if (resp.status >= 500) {
     return true;
   }
   return false;
@@ -760,9 +760,13 @@ async function fetchAppsScriptNewsWithEdgeCache(
     }
   }
 
+  const filteredItems = Array.isArray(raw.items)
+    ? raw.items.filter((it) => !String(it?.newsId || '').startsWith('cn_sys_'))
+    : [];
+
   return {
     ok: true,
-    items: Array.isArray(raw.items) ? raw.items : [],
+    items: filteredItems,
     total: Number(raw.total) || 0,
     page: Number(raw.page) || params.page,
     limit: Number(raw.limit) || params.limit,

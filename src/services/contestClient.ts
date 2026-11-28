@@ -196,6 +196,76 @@ export async function updateAdminContestEntryEligibility(
   }
 }
 
+export interface UpdateAdminContestEntryScorePayload {
+  competitionDisplayScore?: number;
+  competition_display_score?: number;
+  manualScoreAdjustment?: number;
+  manual_score_adjustment?: number;
+  delta?: number;
+  reset?: boolean;
+}
+
+export async function updateAdminContestEntryScore(
+  entryId: string,
+  payload: UpdateAdminContestEntryScorePayload
+): Promise<{
+  ok: boolean;
+  entry: {
+    id: string;
+    genuineEligibleViews: number;
+    genuine_eligible_views: number;
+    manualScoreAdjustment: number;
+    manual_score_adjustment: number;
+    competitionDisplayScore: number;
+    competition_display_score: number;
+  };
+}> {
+  const resp = await fetch(
+    `/api/admin2/contest/entries/${encodeURIComponent(entryId)}/score`,
+    {
+      method: 'PATCH',
+      credentials: 'include',
+      headers: await buildAdminHeaders(true),
+      body: JSON.stringify(payload),
+    }
+  );
+  const data = await readJsonSafe<{
+    ok: boolean;
+    entry: {
+      id: string;
+      genuineEligibleViews: number;
+      genuine_eligible_views: number;
+      manualScoreAdjustment: number;
+      manual_score_adjustment: number;
+      competitionDisplayScore: number;
+      competition_display_score: number;
+    };
+  }>(resp);
+  if (!resp.ok || !data.ok) {
+    throw new Error(data.error || 'Failed to update competition display score.');
+  }
+  return data;
+}
+
+export async function resetAdminContestMonthScores(
+  monthKey: string
+): Promise<{ ok: boolean; resetCount: number }> {
+  const resp = await fetch(
+    `/api/admin2/contest/months/${encodeURIComponent(monthKey)}/reset-scores`,
+    {
+      method: 'POST',
+      credentials: 'include',
+      headers: await buildAdminHeaders(true),
+      body: JSON.stringify({}),
+    }
+  );
+  const data = await readJsonSafe<{ ok: boolean; resetCount: number }>(resp);
+  if (!resp.ok || !data.ok) {
+    throw new Error(data.error || 'Failed to restore original genuine-view rankings.');
+  }
+  return data;
+}
+
 export async function reviewAdminContestAlert(
   alertId: string,
   status: 'open' | 'investigated' | 'dismissed',

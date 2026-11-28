@@ -26,15 +26,20 @@ import {
   CONTEST_PUBLIC_URL,
   CONTEST_TARGET_AREA,
   ROLLING_VIEW_WINDOW_MS,
+  computeCompetitionDisplayScore,
   createDefaultContestPrizes,
   createInitialContestMonthRecord,
   detectSuspiciousTrafficPattern,
+  getEntryCompetitionDisplayScore,
+  getGenuineEligibleViews,
   getIstMonthBounds,
+  getManualScoreAdjustment,
   getNextIstMonthKey,
   isContestMonthOpen,
   isEligibleRolling24hVisit,
   isLikelyBotUserAgent,
   normalizeContestPrizes,
+  normalizeEntryScoreFields,
   rankEligibleContestEntries,
   toPublicContestEntry,
   toPublicContestWinner,
@@ -172,7 +177,7 @@ function syncMonthEntriesWithPosts(state: CfSharedCommunityContestState, monthKe
     .map((entry) => {
       const post = postMap.get(entry.postId);
       if (post) syncContestEntriesWithPost(state, post);
-      return entry;
+      return normalizeEntryScoreFields(entry);
     });
 }
 
@@ -184,15 +189,30 @@ function buildAdminOverviewPayload(
   const selectedMonth =
     (requestedMonthKey && state.months.find((m) => m.monthKey === requestedMonthKey)) ||
     activeMonth;
-  const monthEntries = syncMonthEntriesWithPosts(state, selectedMonth.monthKey).sort((a, b) => {
+  const rawMonthEntries = syncMonthEntriesWithPosts(state, selectedMonth.monthKey);
+
+  const genuineEligibleSorted = [...rawMonthEntries]
+    .filter((e) => e.eligibility === 'eligible')
+    .sort((a, b) => {
+      const diff = getGenuineEligibleViews(b) - getGenuineEligibleViews(a);
+      if (diff !== 0) return diff;
+      return Date.parse(a.publishedAt || '0') - Date.parse(b.publishedAt || '0');
+    });
+  const genuineRankMap = new Map<string, number>();
+  genuineEligibleSorted.forEach((e, idx) => genuineRankMap.set(e.id, idx + 1));
+
+  const monthEntries = [...rawMonthEntries].sort((a, b) => {
     if (a.eligibility !== b.eligibility) {
       return a.eligibility === 'eligible' ? -1 : 1;
     }
-    if (b.eligibleViews !== a.eligibleViews) {
-      return b.eligibleViews - a.eligibleViews;
-    }
-    return Date.parse(b.publishedAt) - Date.parse(a.publishedAt);
+    const diff = getEntryCompetitionDisplayScore(b) - getEntryCompetitionDisplayScore(a);
+    if (diff !== 0) return diff;
+    return Date.parse(a.publishedAt || '0') - Date.parse(b.publishedAt || '0');
   });
+
+  const displayEligibleSorted = monthEntries.filter((e) => e.eligibility === 'eligible');
+  const currentRankMap = new Map<string, number>();
+  displayEligibleSorted.forEach((e, idx) => currentRankMap.set(e.id, idx + 1));
 
   const entryIds = new Set(monthEntries.map((e) => e.id));
   const alerts = state.alerts.filter(
@@ -201,12 +221,26 @@ function buildAdminOverviewPayload(
   const userMap = new Map(state.users.map((u) => [u.id, u]));
   const postMap = new Map(state.posts.map((p) => [p.id, p]));
 
-  const entries: AdminContestEntryView[] = monthEntries.map((e) => ({
-    ...e,
-    contributorMobileNumber: userMap.get(e.contributorUserId)?.mobileNumber || '',
-    postStatus: postMap.get(e.postId)?.status || 'published',
-    openAlertsCount: alerts.filter((a) => a.entryId === e.id && a.status === 'open').length,
-  }));
+  const entries: AdminContestEntryView[] = monthEntries.map((e) => {
+    normalizeEntryScoreFields(e);
+    const genuine = getGenuineEligibleViews(e);
+    const adjustment = getManualScoreAdjustment(e);
+    const displayScore = computeCompetitionDisplayScore(genuine, adjustment);
+    return {
+      ...e,
+      genuineEligibleViews: genuine,
+      genuine_eligible_views: genuine,
+      manualScoreAdjustment: adjustment,
+      manual_score_adjustment: adjustment,
+      competitionDisplayScore: displayScore,
+      competition_display_score: displayScore,
+      currentRank: currentRankMap.get(e.id) ?? null,
+      genuineRank: genuineRankMap.get(e.id) ?? null,
+      contributorMobileNumber: userMap.get(e.contributorUserId)?.mobileNumber || '',
+      postStatus: postMap.get(e.postId)?.status || 'published',
+      openAlertsCount: alerts.filter((a) => a.entryId === e.id && a.status === 'open').length,
+    };
+  });
 
   return {
     activeMonthKey: activeMonth.monthKey,
@@ -220,7 +254,12 @@ function buildAdminOverviewPayload(
       eligibleEntries: entries.filter((e) => e.eligibility === 'eligible').length,
       disqualifiedEntries: entries.filter((e) => e.eligibility === 'disqualified').length,
       totalPageViews: entries.reduce((s, e) => s + (e.totalPageViews || 0), 0),
-      totalEligibleViews: entries.reduce((s, e) => s + (e.eligibleViews || 0), 0),
+      totalEligibleViews: entries.reduce((s, e) => s + (e.genuineEligibleViews || 0), 0),
+      totalCompetitionDisplayScore: entries.reduce(
+        (s, e) => s + (e.competitionDisplayScore || 0),
+        0
+      ),
+      manuallyAdjustedEntries: entries.filter((e) => e.manualScoreAdjustment !== 0).length,
       suspiciousBlockedViews: entries.reduce((s, e) => s + (e.suspiciousBlockedViews || 0), 0),
       openAlerts: alerts.filter((a) => a.status === 'open').length,
     },
@@ -352,8 +391,10 @@ export async function handleCfContestApi(
       countedEligible: boolean,
       countedReason: ContestViewRecordResult['countedReason'],
       setCookie?: string
-    ) =>
-      jsonResp(
+    ) => {
+      normalizeEntryScoreFields(entry);
+      const displayScore = getEntryCompetitionDisplayScore(entry);
+      return jsonResp(
         {
           ok: true,
           entryId: entry.id,
@@ -361,12 +402,15 @@ export async function handleCfContestApi(
           competitionMonth: entry.competitionMonth,
           countedEligible,
           countedReason,
-          eligibleViews: entry.eligibleViews,
-          totalPageViews: entry.totalPageViews,
+          eligibleViews: displayScore,
+          competitionDisplayScore: displayScore,
+          competition_display_score: displayScore,
+          totalPageViews: Math.max(entry.totalPageViews, displayScore),
         },
         200,
         setCookie ? { 'set-cookie': setCookie } : undefined
       );
+    };
 
     if (
       url.searchParams.get('preview') === '1' ||
@@ -489,6 +533,14 @@ export async function handleCfContestApi(
     }
 
     entry.eligibleViews += 1;
+    normalizeEntryScoreFields(entry);
+    if (linkedPost) {
+      linkedPost.viewsCount = Math.max(
+        linkedPost.viewsCount || 0,
+        entry.totalPageViews,
+        getEntryCompetitionDisplayScore(entry)
+      );
+    }
     let bucketsDelta;
     if (bucket) {
       bucket.lastEligibleAtMs = nowMs;
@@ -851,6 +903,203 @@ export async function handleCfContestApi(
       return jsonResp({ ok: true, entry });
     }
 
+    const scoreMatch = pathname.match(/^\/api\/admin2\/contest\/entries\/([^/]+)\/score$/);
+    if (scoreMatch && method === 'PATCH') {
+      const targetKey = decodeURIComponent(scoreMatch[1]).trim();
+      const entry = state.entries.find(
+        (e) => e.id === targetKey || e.postId === targetKey || e.slug === targetKey
+      );
+      if (!entry) return jsonResp({ ok: false, error: 'Contest entry not found.' }, 404);
+      const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
+
+      normalizeEntryScoreFields(entry);
+      const genuine = getGenuineEligibleViews(entry);
+      const previousAdjustment = getManualScoreAdjustment(entry);
+      const previousDisplayScore = computeCompetitionDisplayScore(genuine, previousAdjustment);
+
+      let nextAdjustment = previousAdjustment;
+      let isReset = false;
+
+      if (body.reset === true) {
+        nextAdjustment = 0;
+        isReset = true;
+      } else if (
+        body.competitionDisplayScore !== undefined ||
+        body.competition_display_score !== undefined
+      ) {
+        const rawTarget = Number(
+          body.competitionDisplayScore ?? body.competition_display_score
+        );
+        if (!Number.isFinite(rawTarget) || rawTarget < 0) {
+          return jsonResp(
+            { ok: false, error: 'Competition display score must be a non-negative integer.' },
+            400
+          );
+        }
+        nextAdjustment = Math.max(0, Math.floor(rawTarget)) - genuine;
+      } else if (
+        body.manualScoreAdjustment !== undefined ||
+        body.manual_score_adjustment !== undefined
+      ) {
+        const rawAdj = Number(
+          body.manualScoreAdjustment ?? body.manual_score_adjustment
+        );
+        if (!Number.isFinite(rawAdj)) {
+          return jsonResp(
+            { ok: false, error: 'Manual score adjustment must be a valid integer.' },
+            400
+          );
+        }
+        if (genuine + Math.trunc(rawAdj) < 0) {
+          return jsonResp(
+            { ok: false, error: 'Final competition display score cannot be negative.' },
+            400
+          );
+        }
+        nextAdjustment = Math.trunc(rawAdj);
+      } else if (body.delta !== undefined) {
+        const rawDelta = Number(body.delta);
+        if (!Number.isFinite(rawDelta)) {
+          return jsonResp({ ok: false, error: 'Score delta must be a valid integer.' }, 400);
+        }
+        const nextDisplay = Math.max(0, previousDisplayScore + Math.trunc(rawDelta));
+        nextAdjustment = nextDisplay - genuine;
+      } else {
+        return jsonResp(
+          {
+            ok: false,
+            error:
+              'Provide competitionDisplayScore, manualScoreAdjustment, delta, or reset: true.',
+          },
+          400
+        );
+      }
+
+      const nowIso = new Date().toISOString();
+      entry.manualScoreAdjustment = nextAdjustment;
+      entry.manual_score_adjustment = nextAdjustment;
+      entry.manualScoreUpdatedBy = actor;
+      entry.manualScoreUpdatedAt = nowIso;
+      entry.updatedAt = nowIso;
+      normalizeEntryScoreFields(entry);
+
+      const nextDisplayScore = getEntryCompetitionDisplayScore(entry);
+      const linkedPost = state.posts.find((p) => p.id === entry.postId);
+      if (linkedPost) {
+        linkedPost.viewsCount = Math.max(
+          linkedPost.viewsCount || 0,
+          entry.totalPageViews,
+          nextDisplayScore
+        );
+      }
+
+      const auditLog = {
+        id: makeId('caud'),
+        timestamp: nowIso,
+        actorEmail: actor,
+        action: isReset ? 'entry.score_reset' : 'entry.score_adjust',
+        competitionMonth: entry.competitionMonth,
+        targetId: entry.id,
+        details: `${
+          isReset ? 'Reset manual score adjustment' : 'Updated competition display score'
+        } for "${entry.title}" (${entry.contributorName}): genuine_eligible_views=${genuine}, manual_score_adjustment ${
+          previousAdjustment >= 0 ? `+${previousAdjustment}` : previousAdjustment
+        } -> ${
+          nextAdjustment >= 0 ? `+${nextAdjustment}` : nextAdjustment
+        }, competition_display_score ${previousDisplayScore} -> ${nextDisplayScore}`,
+      };
+      state.auditLogs.unshift(auditLog);
+
+      try {
+        await persistSharedCommunityContestDelta(
+          env,
+          state,
+          { contestEntry: entry, post: linkedPost, contestAuditLog: auditLog },
+          { adminEmail: actor }
+        );
+      } catch (err) {
+        return jsonResp(
+          {
+            ok: false,
+            error:
+              err instanceof Error
+                ? err.message
+                : 'Failed to save manual score adjustment to storage.',
+          },
+          502
+        );
+      }
+
+      return jsonResp({
+        ok: true,
+        entry,
+        previous: {
+          genuineEligibleViews: genuine,
+          manualScoreAdjustment: previousAdjustment,
+          competitionDisplayScore: previousDisplayScore,
+        },
+        updated: {
+          genuineEligibleViews: genuine,
+          manualScoreAdjustment: nextAdjustment,
+          competitionDisplayScore: nextDisplayScore,
+        },
+      });
+    }
+
+    const resetMonthScoresMatch = pathname.match(
+      /^\/api\/admin2\/contest\/months\/([^/]+)\/reset-scores$/
+    );
+    if (resetMonthScoresMatch && method === 'POST') {
+      const monthKey = decodeURIComponent(resetMonthScoresMatch[1]).trim();
+      const monthEntries = state.entries.filter((e) => e.competitionMonth === monthKey);
+      const nowIso = new Date().toISOString();
+      let resetCount = 0;
+
+      for (const entry of monthEntries) {
+        if (getManualScoreAdjustment(entry) !== 0) {
+          entry.manualScoreAdjustment = 0;
+          entry.manual_score_adjustment = 0;
+          entry.manualScoreUpdatedBy = actor;
+          entry.manualScoreUpdatedAt = nowIso;
+          entry.updatedAt = nowIso;
+          normalizeEntryScoreFields(entry);
+          resetCount += 1;
+        }
+      }
+
+      const auditLog = {
+        id: makeId('caud'),
+        timestamp: nowIso,
+        actorEmail: actor,
+        action: 'month.scores_reset',
+        competitionMonth: monthKey,
+        details: `Restored all ${resetCount} manually adjusted article(s) in ${monthKey} to genuine-view rankings.`,
+      };
+      state.auditLogs.unshift(auditLog);
+
+      try {
+        await persistSharedCommunityContestDelta(
+          env,
+          state,
+          { contestAuditLog: auditLog },
+          { adminEmail: actor }
+        );
+      } catch (err) {
+        return jsonResp(
+          {
+            ok: false,
+            error:
+              err instanceof Error
+                ? err.message
+                : 'Failed to restore genuine-view rankings.',
+          },
+          502
+        );
+      }
+
+      return jsonResp({ ok: true, resetCount });
+    }
+
     const alertMatch = pathname.match(/^\/api\/admin2\/contest\/alerts\/([^/]+)$/);
     if (alertMatch && method === 'PATCH') {
       const alert = state.alerts.find((a) => a.id === decodeURIComponent(alertMatch[1]));
@@ -1001,7 +1250,7 @@ export async function handleCfContestApi(
           articleTitle: entry.title,
           contributorName: entry.contributorName,
           contributorMobileNumber: userMap.get(entry.contributorUserId)?.mobileNumber || '',
-          eligibleViews: entry.eligibleViews,
+          eligibleViews: getEntryCompetitionDisplayScore(entry),
           selectionNote: cleanSingleLine(item.selectionNote, 240) || undefined,
           paymentStatus:
             item.paymentStatus === 'paid'
@@ -1073,7 +1322,7 @@ export async function handleCfContestApi(
             articleTitle: rawEntry.title,
             contributorName: rawEntry.contributorName,
             contributorMobileNumber: userMap.get(rawEntry.contributorUserId)?.mobileNumber || '',
-            eligibleViews: rawEntry.eligibleViews,
+            eligibleViews: getEntryCompetitionDisplayScore(rawEntry),
             paymentStatus: 'pending',
             selectedBy: actor,
             selectedAt: nowIso,

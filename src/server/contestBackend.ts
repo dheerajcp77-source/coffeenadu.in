@@ -26,17 +26,22 @@ import {
   CONTEST_PUBLIC_URL,
   CONTEST_TARGET_AREA,
   ROLLING_VIEW_WINDOW_MS,
+  computeCompetitionDisplayScore,
   createDefaultContestPrizes,
   createDefaultMonthRecord,
   createInitialContestMonthRecord,
   detectSuspiciousTrafficPattern,
+  getEntryCompetitionDisplayScore,
+  getGenuineEligibleViews,
   getIstMonthBounds,
   getIstMonthKey,
+  getManualScoreAdjustment,
   getNextIstMonthKey,
   isContestMonthOpen,
   isEligibleRolling24hVisit,
   isLikelyBotUserAgent,
   normalizeContestPrizes,
+  normalizeEntryScoreFields,
   rankEligibleContestEntries,
   toPublicContestEntry,
   toPublicContestWinner,
@@ -397,7 +402,7 @@ export class ContestBackend {
     if (dirty) {
       entry.updatedAt = new Date().toISOString();
     }
-    return entry;
+    return normalizeEntryScoreFields(entry);
   }
 
   private getEntriesForMonth(monthKey: string): ContestEntryRecord[] {
@@ -471,15 +476,32 @@ export class ContestBackend {
         this.state.months.find((m) => m.monthKey === requestedMonthKey)) ||
       activeMonth;
 
-    const monthEntries = this.getEntriesForMonth(selectedMonth.monthKey).sort((a, b) => {
+    const rawMonthEntries = this.getEntriesForMonth(selectedMonth.monthKey);
+
+    // Compute organic genuine-view ranks among eligible entries
+    const genuineEligibleSorted = [...rawMonthEntries]
+      .filter((e) => e.eligibility === 'eligible')
+      .sort((a, b) => {
+        const diff = getGenuineEligibleViews(b) - getGenuineEligibleViews(a);
+        if (diff !== 0) return diff;
+        return Date.parse(a.publishedAt || '0') - Date.parse(b.publishedAt || '0');
+      });
+    const genuineRankMap = new Map<string, number>();
+    genuineEligibleSorted.forEach((e, idx) => genuineRankMap.set(e.id, idx + 1));
+
+    // Sort by active competition_display_score DESC, then earliest publishedAt ASC
+    const monthEntries = [...rawMonthEntries].sort((a, b) => {
       if (a.eligibility !== b.eligibility) {
         return a.eligibility === 'eligible' ? -1 : 1;
       }
-      if (b.eligibleViews !== a.eligibleViews) {
-        return b.eligibleViews - a.eligibleViews;
-      }
-      return Date.parse(b.publishedAt) - Date.parse(a.publishedAt);
+      const diff = getEntryCompetitionDisplayScore(b) - getEntryCompetitionDisplayScore(a);
+      if (diff !== 0) return diff;
+      return Date.parse(a.publishedAt || '0') - Date.parse(b.publishedAt || '0');
     });
+
+    const displayEligibleSorted = monthEntries.filter((e) => e.eligibility === 'eligible');
+    const currentRankMap = new Map<string, number>();
+    displayEligibleSorted.forEach((e, idx) => currentRankMap.set(e.id, idx + 1));
 
     const monthEntryIds = new Set(monthEntries.map((e) => e.id));
     const alerts = this.state.alerts.filter(
@@ -487,12 +509,24 @@ export class ContestBackend {
     );
 
     const entriesWithMobile: AdminContestEntryView[] = monthEntries.map((entry) => {
+      normalizeEntryScoreFields(entry);
       const post = this.communityBackend.getInternalPostByIdOrSlug(entry.postId);
       const openAlertsCount = alerts.filter(
         (a) => a.entryId === entry.id && a.status === 'open'
       ).length;
+      const genuine = getGenuineEligibleViews(entry);
+      const adjustment = getManualScoreAdjustment(entry);
+      const displayScore = computeCompetitionDisplayScore(genuine, adjustment);
       return {
         ...entry,
+        genuineEligibleViews: genuine,
+        genuine_eligible_views: genuine,
+        manualScoreAdjustment: adjustment,
+        manual_score_adjustment: adjustment,
+        competitionDisplayScore: displayScore,
+        competition_display_score: displayScore,
+        currentRank: currentRankMap.get(entry.id) ?? null,
+        genuineRank: genuineRankMap.get(entry.id) ?? null,
         contributorMobileNumber: this.communityBackend.getPrivateMobileByUserId(
           entry.contributorUserId
         ),
@@ -505,7 +539,17 @@ export class ContestBackend {
     const disqualifiedEntries = entriesWithMobile.filter(
       (e) => e.eligibility === 'disqualified'
     ).length;
-    const totalEligibleViews = entriesWithMobile.reduce((s, e) => s + (e.eligibleViews || 0), 0);
+    const totalEligibleViews = entriesWithMobile.reduce(
+      (s, e) => s + (e.genuineEligibleViews || 0),
+      0
+    );
+    const totalCompetitionDisplayScore = entriesWithMobile.reduce(
+      (s, e) => s + (e.competitionDisplayScore || 0),
+      0
+    );
+    const manuallyAdjustedEntries = entriesWithMobile.filter(
+      (e) => e.manualScoreAdjustment !== 0
+    ).length;
     const totalPageViews = entriesWithMobile.reduce((s, e) => s + (e.totalPageViews || 0), 0);
     const suspiciousBlockedViews = entriesWithMobile.reduce(
       (s, e) => s + (e.suspiciousBlockedViews || 0),
@@ -530,6 +574,8 @@ export class ContestBackend {
         disqualifiedEntries,
         totalPageViews,
         totalEligibleViews,
+        totalCompetitionDisplayScore,
+        manuallyAdjustedEntries,
         suspiciousBlockedViews,
         openAlerts,
       },
@@ -629,6 +675,8 @@ export class ContestBackend {
         countedEligible: boolean,
         countedReason: ContestViewRecordResult['countedReason']
       ) => {
+        normalizeEntryScoreFields(entry);
+        const displayScore = getEntryCompetitionDisplayScore(entry);
         const payload: ContestViewRecordResult = {
           ok: true,
           entryId: entry.id,
@@ -636,8 +684,10 @@ export class ContestBackend {
           competitionMonth: entry.competitionMonth,
           countedEligible,
           countedReason,
-          eligibleViews: entry.eligibleViews,
-          totalPageViews: entry.totalPageViews,
+          eligibleViews: displayScore,
+          competitionDisplayScore: displayScore,
+          competition_display_score: displayScore,
+          totalPageViews: Math.max(entry.totalPageViews, displayScore),
         };
         res.json(payload);
       };
@@ -769,6 +819,11 @@ export class ContestBackend {
 
       // Eligible unique view!
       entry.eligibleViews = (entry.eligibleViews || 0) + 1;
+      normalizeEntryScoreFields(entry);
+      this.communityBackend.syncContestPostTotalViews(
+        entry.postId,
+        Math.max(entry.totalPageViews, getEntryCompetitionDisplayScore(entry))
+      );
       if (existingBucket) {
         existingBucket.lastEligibleAtMs = nowMs;
         existingBucket.hitCount += 1;
@@ -1009,6 +1064,191 @@ export class ContestBackend {
     );
 
     app.patch(
+      '/api/admin2/contest/entries/:id/score',
+      this.authFactory('news.edit'),
+      (req, res) => {
+        try {
+          const targetKey = decodeURIComponent(String(req.params.id || '')).trim();
+          const entry = this.state.entries.find(
+            (e) => e.id === targetKey || e.postId === targetKey || e.slug === targetKey
+          );
+          if (!entry) {
+            res.status(404).json({ ok: false, error: 'Contest entry not found.' });
+            return;
+          }
+
+          normalizeEntryScoreFields(entry);
+          const genuine = getGenuineEligibleViews(entry);
+          const previousAdjustment = getManualScoreAdjustment(entry);
+          const previousDisplayScore = computeCompetitionDisplayScore(genuine, previousAdjustment);
+
+          let nextAdjustment = previousAdjustment;
+          let isReset = false;
+
+          if (req.body?.reset === true) {
+            nextAdjustment = 0;
+            isReset = true;
+          } else if (
+            req.body?.competitionDisplayScore !== undefined ||
+            req.body?.competition_display_score !== undefined
+          ) {
+            const rawTarget = Number(
+              req.body?.competitionDisplayScore ?? req.body?.competition_display_score
+            );
+            if (!Number.isFinite(rawTarget) || rawTarget < 0) {
+              res.status(400).json({
+                ok: false,
+                error: 'Competition display score must be a non-negative integer.',
+              });
+              return;
+            }
+            const targetDisplay = Math.max(0, Math.floor(rawTarget));
+            nextAdjustment = targetDisplay - genuine;
+          } else if (
+            req.body?.manualScoreAdjustment !== undefined ||
+            req.body?.manual_score_adjustment !== undefined
+          ) {
+            const rawAdj = Number(
+              req.body?.manualScoreAdjustment ?? req.body?.manual_score_adjustment
+            );
+            if (!Number.isFinite(rawAdj)) {
+              res.status(400).json({
+                ok: false,
+                error: 'Manual score adjustment must be a valid integer.',
+              });
+              return;
+            }
+            if (genuine + Math.trunc(rawAdj) < 0) {
+              res.status(400).json({
+                ok: false,
+                error: 'Final competition display score cannot be negative.',
+              });
+              return;
+            }
+            nextAdjustment = Math.trunc(rawAdj);
+          } else if (req.body?.delta !== undefined) {
+            const rawDelta = Number(req.body.delta);
+            if (!Number.isFinite(rawDelta)) {
+              res.status(400).json({
+                ok: false,
+                error: 'Score delta must be a valid integer.',
+              });
+              return;
+            }
+            const nextDisplay = Math.max(0, previousDisplayScore + Math.trunc(rawDelta));
+            nextAdjustment = nextDisplay - genuine;
+          } else {
+            res.status(400).json({
+              ok: false,
+              error:
+                'Provide competitionDisplayScore, manualScoreAdjustment, delta, or reset: true.',
+            });
+            return;
+          }
+
+          const actor = this.getAdminActorEmail(req);
+          const nowIso = new Date().toISOString();
+          entry.manualScoreAdjustment = nextAdjustment;
+          entry.manual_score_adjustment = nextAdjustment;
+          entry.manualScoreUpdatedBy = actor;
+          entry.manualScoreUpdatedAt = nowIso;
+          entry.updatedAt = nowIso;
+          normalizeEntryScoreFields(entry);
+
+          const nextDisplayScore = getEntryCompetitionDisplayScore(entry);
+          this.communityBackend.syncContestPostTotalViews(
+            entry.postId,
+            Math.max(entry.totalPageViews, nextDisplayScore)
+          );
+
+          this.appendAuditLog(
+            actor,
+            isReset ? 'entry.score_reset' : 'entry.score_adjust',
+            `${
+              isReset ? 'Reset manual score adjustment' : 'Updated competition display score'
+            } for "${entry.title}" (${entry.contributorName}): genuine_eligible_views=${genuine}, manual_score_adjustment ${
+              previousAdjustment >= 0 ? `+${previousAdjustment}` : previousAdjustment
+            } -> ${
+              nextAdjustment >= 0 ? `+${nextAdjustment}` : nextAdjustment
+            }, competition_display_score ${previousDisplayScore} -> ${nextDisplayScore}`,
+            entry.competitionMonth,
+            entry.id
+          );
+          this.persistState();
+
+          res.json({
+            ok: true,
+            entry,
+            previous: {
+              genuineEligibleViews: genuine,
+              manualScoreAdjustment: previousAdjustment,
+              competitionDisplayScore: previousDisplayScore,
+            },
+            updated: {
+              genuineEligibleViews: genuine,
+              manualScoreAdjustment: nextAdjustment,
+              competitionDisplayScore: nextDisplayScore,
+            },
+          });
+        } catch (err) {
+          console.error('[ContestBackend] manual score update failed:', err);
+          if (!res.headersSent) {
+            res.status(500).json({
+              ok: false,
+              error:
+                err instanceof Error ? err.message : 'Failed to update competition display score.',
+            });
+          }
+        }
+      }
+    );
+
+    app.post(
+      '/api/admin2/contest/months/:monthKey/reset-scores',
+      this.authFactory('news.edit'),
+      (req, res) => {
+        try {
+          const monthKey = String(req.params.monthKey || '').trim();
+          const monthEntries = this.state.entries.filter(
+            (e) => e.competitionMonth === monthKey
+          );
+          const actor = this.getAdminActorEmail(req);
+          const nowIso = new Date().toISOString();
+          let resetCount = 0;
+
+          for (const entry of monthEntries) {
+            if (getManualScoreAdjustment(entry) !== 0) {
+              entry.manualScoreAdjustment = 0;
+              entry.manual_score_adjustment = 0;
+              entry.manualScoreUpdatedBy = actor;
+              entry.manualScoreUpdatedAt = nowIso;
+              entry.updatedAt = nowIso;
+              normalizeEntryScoreFields(entry);
+              resetCount += 1;
+            }
+          }
+
+          this.appendAuditLog(
+            actor,
+            'month.scores_reset',
+            `Restored all ${resetCount} manually adjusted article(s) in ${monthKey} to genuine-view rankings.`,
+            monthKey
+          );
+          this.persistState();
+          res.json({ ok: true, resetCount });
+        } catch (err) {
+          console.error('[ContestBackend] reset month scores failed:', err);
+          if (!res.headersSent) {
+            res.status(500).json({
+              ok: false,
+              error: 'Failed to restore genuine-view rankings.',
+            });
+          }
+        }
+      }
+    );
+
+    app.patch(
       '/api/admin2/contest/alerts/:id',
       this.authFactory('security.view'),
       (req, res) => {
@@ -1162,7 +1402,7 @@ export class ContestBackend {
             contributorMobileNumber: this.communityBackend.getPrivateMobileByUserId(
               entry.contributorUserId
             ),
-            eligibleViews: entry.eligibleViews,
+            eligibleViews: getEntryCompetitionDisplayScore(entry),
             selectionNote: cleanSingleLine(item?.selectionNote, 240) || undefined,
             paymentStatus,
             paymentDate: cleanSingleLine(item?.paymentDate, 40) || undefined,
@@ -1231,7 +1471,7 @@ export class ContestBackend {
               contributorMobileNumber: this.communityBackend.getPrivateMobileByUserId(
                 rawEntry.contributorUserId
               ),
-              eligibleViews: rawEntry.eligibleViews,
+              eligibleViews: getEntryCompetitionDisplayScore(rawEntry),
               paymentStatus: 'pending',
               selectedBy: actor,
               selectedAt: nowIso,

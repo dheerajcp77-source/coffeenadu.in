@@ -6,6 +6,7 @@ import {
   Calendar,
   CheckCircle2,
   Download,
+  Edit3,
   ExternalLink,
   Eye,
   EyeOff,
@@ -15,9 +16,12 @@ import {
   Phone,
   PlusCircle,
   RefreshCw,
+  RotateCcw,
   Save,
+  Search,
   Settings,
   ShieldAlert,
+  Sliders,
   Sparkles,
   Trophy,
 } from 'lucide-react';
@@ -26,10 +30,12 @@ import {
   fetchAdminContestOverview,
   finalizeAdminContestMonth,
   openNextAdminContestMonth,
+  resetAdminContestMonthScores,
   reviewAdminContestAlert,
   saveAdminContestWinners,
   toggleAdminContestWinnersPublished,
   updateAdminContestEntryEligibility,
+  updateAdminContestEntryScore,
   updateAdminContestMonthConfig,
   type AdminWinnerSelectionInput,
 } from '../../services/contestClient';
@@ -45,7 +51,7 @@ interface Admin2ContestSectionProps {
   darkMode: boolean;
 }
 
-type AdminContestTab = 'entries' | 'winners' | 'alerts' | 'settings' | 'audit';
+type AdminContestTab = 'entries' | 'views' | 'winners' | 'alerts' | 'settings' | 'audit';
 
 interface WinnerDraftRow {
   rank: 1 | 2 | 3 | 4 | 5;
@@ -87,6 +93,11 @@ export const Admin2ContestSection: React.FC<Admin2ContestSectionProps> = ({ dark
   const [disqualifyHidePost, setDisqualifyHidePost] = useState(false);
   const [disqualifyModalError, setDisqualifyModalError] = useState('');
 
+  const [viewSearchQuery, setViewSearchQuery] = useState('');
+  const [scoreEditTarget, setScoreEditTarget] = useState<AdminContestEntryView | null>(null);
+  const [scoreEditDisplayValue, setScoreEditDisplayValue] = useState<string>('0');
+  const [scoreEditModalError, setScoreEditModalError] = useState('');
+
   const [winnerDrafts, setWinnerDrafts] = useState<WinnerDraftRow[]>([]);
 
   const [startsLocal, setStartsLocal] = useState('');
@@ -109,7 +120,11 @@ export const Admin2ContestSection: React.FC<Admin2ContestSectionProps> = ({ dark
 
       const eligibleRanked = data.entries
         .filter((e) => e.eligibility === 'eligible')
-        .sort((a, b) => b.eligibleViews - a.eligibleViews);
+        .sort(
+          (a, b) =>
+            (b.competitionDisplayScore ?? b.eligibleViews) -
+            (a.competitionDisplayScore ?? a.eligibleViews)
+        );
 
       const drafts: WinnerDraftRow[] = ([1, 2, 3, 4, 5] as const).map((rank) => {
         const existing = data.selectedMonth.winners.find((w) => w.rank === rank);
@@ -219,6 +234,82 @@ export const Admin2ContestSection: React.FC<Admin2ContestSectionProps> = ({ dark
       nextStatus === 'published'
         ? `Published "${entry.title}" to the Community Feed.`
         : `Unpublished "${entry.title}" from the public Community Feed.`
+    );
+  };
+
+  const openScoreEditDialog = (entry: AdminContestEntryView) => {
+    const currentDisplay =
+      entry.competitionDisplayScore ?? entry.eligibleViews ?? 0;
+    setScoreEditTarget(entry);
+    setScoreEditDisplayValue(String(Math.max(0, currentDisplay)));
+    setScoreEditModalError('');
+  };
+
+  const handleSaveManualScore = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!scoreEditTarget) return;
+    const parsedDisplay = Number(scoreEditDisplayValue);
+    if (!Number.isFinite(parsedDisplay) || parsedDisplay < 0) {
+      setScoreEditModalError('Competition display score must be a non-negative integer (0 or more).');
+      return;
+    }
+    const cleanDisplayScore = Math.floor(parsedDisplay);
+    setScoreEditModalError('');
+    setBusy(true);
+    setError('');
+    setFeedback('');
+    try {
+      const targetTitle = scoreEditTarget.title;
+      await updateAdminContestEntryScore(scoreEditTarget.id, {
+        competitionDisplayScore: cleanDisplayScore,
+      });
+      setScoreEditTarget(null);
+      setFeedback(
+        `Updated competition display score for "${targetTitle}" to ${cleanDisplayScore.toLocaleString(
+          'en-IN'
+        )} and recalculated public leaderboard rankings.`
+      );
+      await loadData(selectedMonthKey || undefined);
+      notifyPublicDataMutated();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Failed to update score.';
+      setScoreEditModalError(msg);
+      setError(msg);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleQuickAdjustEntryScore = async (
+    entry: AdminContestEntryView,
+    delta: number
+  ) => {
+    await runAction(
+      async () => {
+        await updateAdminContestEntryScore(entry.id, { delta });
+      },
+      `Adjusted "${entry.title}" display score by ${delta > 0 ? `+${delta}` : delta} and synced public leaderboard.`
+    );
+  };
+
+  const handleResetEntryScore = async (entry: AdminContestEntryView) => {
+    await runAction(
+      async () => {
+        await updateAdminContestEntryScore(entry.id, { reset: true });
+      },
+      `Reset manual score adjustment for "${entry.title}" back to genuine eligible views (${(
+        entry.genuineEligibleViews ?? entry.eligibleViews
+      ).toLocaleString('en-IN')}).`
+    );
+  };
+
+  const handleResetAllMonthScores = async () => {
+    if (!overview) return;
+    await runAction(
+      async () => {
+        await resetAdminContestMonthScores(overview.selectedMonth.monthKey);
+      },
+      `Restored all articles in ${overview.selectedMonth.displayLabelEn} to their original genuine-view rankings.`
     );
   };
 
@@ -455,6 +546,15 @@ export const Admin2ContestSection: React.FC<Admin2ContestSectionProps> = ({ dark
       <div className="flex flex-wrap gap-2 border-b border-slate-200 pb-2 dark:border-slate-800">
         {[
           { id: 'entries' as const, label: 'Rankings & Entries', icon: Trophy },
+          {
+            id: 'views' as const,
+            label: `View Management${
+              (overview?.summary.manuallyAdjustedEntries ?? 0) > 0
+                ? ` (${overview?.summary.manuallyAdjustedEntries} adjusted)`
+                : ''
+            }`,
+            icon: Sliders,
+          },
           { id: 'winners' as const, label: 'Winners & ₹500 Payouts', icon: Award },
           {
             id: 'alerts' as const,
@@ -470,6 +570,7 @@ export const Admin2ContestSection: React.FC<Admin2ContestSectionProps> = ({ dark
             <button
               key={tab.id}
               type="button"
+              data-testid={`contest-tab-${tab.id}`}
               onClick={() => setActiveTab(tab.id)}
               className={`inline-flex items-center gap-1.5 rounded-lg px-3.5 py-2 text-xs font-bold transition ${
                 active
@@ -519,7 +620,8 @@ export const Admin2ContestSection: React.FC<Admin2ContestSectionProps> = ({ dark
                     <th className="px-4 py-3 font-bold">Rank</th>
                     <th className="px-4 py-3 font-bold">Article & Location</th>
                     <th className="px-4 py-3 font-bold">Contributor (Private Mobile)</th>
-                    <th className="px-4 py-3 font-bold text-right">Eligible Views</th>
+                    <th className="px-4 py-3 font-bold text-right">Displayed Score</th>
+                    <th className="px-4 py-3 font-bold text-right">Genuine Views</th>
                     <th className="px-4 py-3 font-bold text-right">Total Views</th>
                     <th className="px-4 py-3 font-bold text-right">Blocked</th>
                     <th className="px-4 py-3 font-bold">Status</th>
@@ -529,10 +631,13 @@ export const Admin2ContestSection: React.FC<Admin2ContestSectionProps> = ({ dark
                 <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
                   {overview.entries.map((entry, idx) => {
                     const isEligible = entry.eligibility === 'eligible';
+                    const genuineViews = entry.genuineEligibleViews ?? entry.eligibleViews;
+                    const manualAdj = entry.manualScoreAdjustment ?? 0;
+                    const displayScore = entry.competitionDisplayScore ?? entry.eligibleViews;
                     return (
                       <tr key={entry.id} className="align-top">
                         <td className="px-4 py-3 font-mono font-bold tabular-nums">
-                          {isEligible ? `#${idx + 1}` : '—'}
+                          {isEligible ? `#${entry.currentRank ?? idx + 1}` : '—'}
                         </td>
                         <td className="max-w-xs px-4 py-3">
                           <a
@@ -560,7 +665,15 @@ export const Admin2ContestSection: React.FC<Admin2ContestSectionProps> = ({ dark
                           </p>
                         </td>
                         <td className="px-4 py-3 text-right font-mono text-sm font-extrabold tabular-nums text-emerald-700 dark:text-emerald-400">
-                          {entry.eligibleViews.toLocaleString('en-IN')}
+                          <div>{displayScore.toLocaleString('en-IN')}</div>
+                          {manualAdj !== 0 && (
+                            <span className="inline-block rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-bold text-amber-900 dark:bg-amber-950/60 dark:text-amber-300">
+                              {manualAdj > 0 ? `+${manualAdj}` : manualAdj} adj
+                            </span>
+                          )}
+                        </td>
+                        <td className="px-4 py-3 text-right font-mono tabular-nums">
+                          {genuineViews.toLocaleString('en-IN')}
                         </td>
                         <td className="px-4 py-3 text-right font-mono tabular-nums">
                           {entry.totalPageViews.toLocaleString('en-IN')}
@@ -797,6 +910,486 @@ export const Admin2ContestSection: React.FC<Admin2ContestSectionProps> = ({ dark
                     className="rounded-lg bg-red-600 px-4 py-2 text-xs font-bold text-white hover:bg-red-700 disabled:opacity-60"
                   >
                     {busy ? 'Disqualifying...' : 'Confirm Disqualify'}
+                  </button>
+                </div>
+              </form>
+            </div>
+          )}
+        </div>
+      )}
+
+      {activeTab === 'views' && overview && (
+        <div className={`overflow-hidden rounded-xl border ${cardBg}`}>
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 px-5 py-4 dark:border-slate-800">
+            <div>
+              <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-emerald-600 dark:text-emerald-400">
+                <Sliders className="h-3.5 w-3.5" />
+                <span>Super Admin Manual View Score Management</span>
+              </div>
+              <h3 className="mt-0.5 font-serif text-base font-bold">
+                Competition Display Score & Leaderboard Ranking Control —{' '}
+                {overview.selectedMonth.displayLabelEn}
+              </h3>
+              <p className={`mt-0.5 text-xs ${mutedText}`}>
+                Formula:{' '}
+                <code className="font-mono font-bold">
+                  competition_display_score = genuine_eligible_views + manual_score_adjustment
+                </code>{' '}
+                (minimum 0). Genuine eligible views are preserved independently and never
+                overwritten.
+              </p>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="relative">
+                <Search className="pointer-events-none absolute left-3 top-2.5 h-3.5 w-3.5 text-slate-400" />
+                <input
+                  type="text"
+                  data-testid="view-mgmt-search-input"
+                  value={viewSearchQuery}
+                  onChange={(e) => setViewSearchQuery(e.target.value)}
+                  placeholder="Search contributor, title, location..."
+                  className={`w-64 rounded-lg border py-1.5 pl-8 pr-3 text-xs ${inputClass}`}
+                />
+              </div>
+
+              {(overview.summary.manuallyAdjustedEntries ?? 0) > 0 && (
+                <button
+                  type="button"
+                  disabled={busy}
+                  data-testid="view-mgmt-restore-all-btn"
+                  onClick={() => void handleResetAllMonthScores()}
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-amber-400 bg-amber-50 px-3 py-1.5 text-xs font-bold text-amber-950 hover:bg-amber-100 dark:border-amber-700 dark:bg-amber-950/60 dark:text-amber-200"
+                >
+                  <RotateCcw className="h-3.5 w-3.5" />
+                  <span>Restore Original Genuine-View Ranking</span>
+                </button>
+              )}
+            </div>
+          </div>
+
+          <div
+            className={`grid gap-3 border-b border-slate-200 px-5 py-3 text-xs sm:grid-cols-3 dark:border-slate-800 ${
+              darkMode ? 'bg-slate-950/40' : 'bg-slate-50/70'
+            }`}
+          >
+            <div>
+              <span className={mutedText}>Total Genuine Eligible Views:</span>{' '}
+              <strong className="font-mono">
+                {overview.summary.totalEligibleViews.toLocaleString('en-IN')}
+              </strong>
+            </div>
+            <div>
+              <span className={mutedText}>Total Competition Display Score:</span>{' '}
+              <strong className="font-mono text-emerald-700 dark:text-emerald-400">
+                {(
+                  overview.summary.totalCompetitionDisplayScore ??
+                  overview.summary.totalEligibleViews
+                ).toLocaleString('en-IN')}
+              </strong>
+            </div>
+            <div>
+              <span className={mutedText}>Manually Adjusted Articles:</span>{' '}
+              <strong className="font-mono">
+                {overview.summary.manuallyAdjustedEntries ?? 0}
+              </strong>
+            </div>
+          </div>
+
+          {(() => {
+            const q = viewSearchQuery.trim().toLowerCase();
+            const filteredEntries = overview.entries.filter((entry) => {
+              if (!q) return true;
+              return (
+                entry.title.toLowerCase().includes(q) ||
+                entry.contributorName.toLowerCase().includes(q) ||
+                entry.location.toLowerCase().includes(q) ||
+                entry.id.toLowerCase().includes(q)
+              );
+            });
+
+            if (filteredEntries.length === 0) {
+              return (
+                <div className="p-8 text-center text-sm text-slate-500">
+                  No matching contest articles found.
+                </div>
+              );
+            }
+
+            return (
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs" data-testid="view-mgmt-table">
+                  <thead
+                    className={
+                      darkMode ? 'bg-slate-950/70 text-slate-300' : 'bg-slate-50 text-slate-600'
+                    }
+                  >
+                    <tr>
+                      <th className="px-4 py-3 font-bold">Current Ranking</th>
+                      <th className="px-4 py-3 font-bold">Contributor Name</th>
+                      <th className="px-4 py-3 font-bold">Article Title</th>
+                      <th className="px-4 py-3 font-bold text-right">Genuine Eligible Views</th>
+                      <th className="px-4 py-3 font-bold text-right">Manual Adjustment</th>
+                      <th className="px-4 py-3 font-bold text-right">Final Displayed Score</th>
+                      <th className="px-4 py-3 font-bold text-right">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
+                    {filteredEntries.map((entry, idx) => {
+                      const isEligible = entry.eligibility === 'eligible';
+                      const genuine = entry.genuineEligibleViews ?? entry.eligibleViews;
+                      const manualAdj = entry.manualScoreAdjustment ?? 0;
+                      const finalScore = entry.competitionDisplayScore ?? entry.eligibleViews;
+                      const currentRank = isEligible ? entry.currentRank ?? idx + 1 : null;
+                      const genuineRank = isEligible ? entry.genuineRank ?? null : null;
+
+                      return (
+                        <tr
+                          key={entry.id}
+                          data-testid={`view-mgmt-row-${entry.id}`}
+                          className="align-top"
+                        >
+                          <td className="px-4 py-3 font-mono font-bold tabular-nums">
+                            {currentRank ? (
+                              <div className="flex flex-col items-start gap-0.5">
+                                <span
+                                  className={`inline-flex items-center rounded px-2 py-0.5 text-xs font-extrabold ${
+                                    currentRank <= 4
+                                      ? 'bg-amber-100 text-amber-950 dark:bg-amber-950/70 dark:text-amber-300'
+                                      : 'bg-emerald-100 text-emerald-900 dark:bg-emerald-950/60 dark:text-emerald-200'
+                                  }`}
+                                >
+                                  #{currentRank}
+                                </span>
+                                {genuineRank && genuineRank !== currentRank && (
+                                  <span className={`text-[10px] font-normal ${mutedText}`}>
+                                    Genuine #{genuineRank}
+                                  </span>
+                                )}
+                              </div>
+                            ) : (
+                              <span className="text-red-500">Disqualified</span>
+                            )}
+                          </td>
+
+                          <td className="px-4 py-3">
+                            <p className="font-bold">{entry.contributorName}</p>
+                            <p className="mt-0.5 inline-flex items-center gap-1 font-mono text-[11px] font-semibold text-emerald-700 dark:text-emerald-400">
+                              <Phone className="h-3 w-3" />
+                              <span>{entry.contributorMobileNumber || 'Not available'}</span>
+                            </p>
+                          </td>
+
+                          <td className="max-w-xs px-4 py-3">
+                            <a
+                              href={`/community/${encodeURIComponent(entry.slug)}?preview=1`}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="font-bold hover:underline"
+                            >
+                              {entry.title}
+                            </a>
+                            <p className={`mt-0.5 text-[11px] ${mutedText}`}>
+                              {entry.location} · {new Date(entry.publishedAt).toLocaleDateString('en-IN')}
+                            </p>
+                          </td>
+
+                          <td
+                            className="px-4 py-3 text-right font-mono text-sm font-bold tabular-nums"
+                            data-testid={`view-mgmt-genuine-${entry.id}`}
+                          >
+                            {genuine.toLocaleString('en-IN')}
+                          </td>
+
+                          <td
+                            className="px-4 py-3 text-right font-mono text-sm font-bold tabular-nums"
+                            data-testid={`view-mgmt-adjustment-${entry.id}`}
+                          >
+                            <span
+                              className={
+                                manualAdj > 0
+                                  ? 'text-emerald-600 dark:text-emerald-400'
+                                  : manualAdj < 0
+                                  ? 'text-amber-600 dark:text-amber-400'
+                                  : mutedText
+                              }
+                            >
+                              {manualAdj > 0 ? `+${manualAdj.toLocaleString('en-IN')}` : manualAdj.toLocaleString('en-IN')}
+                            </span>
+                            {entry.manualScoreUpdatedBy && manualAdj !== 0 && (
+                              <p className={`text-[10px] font-sans font-normal ${mutedText}`}>
+                                by {entry.manualScoreUpdatedBy}
+                              </p>
+                            )}
+                          </td>
+
+                          <td
+                            className="px-4 py-3 text-right font-mono text-base font-extrabold tabular-nums text-emerald-700 dark:text-emerald-400"
+                            data-testid={`view-mgmt-final-${entry.id}`}
+                          >
+                            {finalScore.toLocaleString('en-IN')}
+                          </td>
+
+                          <td className="px-4 py-3 text-right">
+                            <div className="flex flex-wrap items-center justify-end gap-1.5">
+                              <button
+                                type="button"
+                                disabled={busy || finalScore <= 0}
+                                data-testid={`view-mgmt-dec10-btn-${entry.id}`}
+                                onClick={() => void handleQuickAdjustEntryScore(entry, -10)}
+                                className={`rounded border px-2 py-1 font-mono text-[11px] font-bold ${inputClass} hover:opacity-80 disabled:opacity-40`}
+                                title="Decrease displayed score by 10"
+                              >
+                                -10
+                              </button>
+                              <button
+                                type="button"
+                                disabled={busy}
+                                data-testid={`view-mgmt-inc10-btn-${entry.id}`}
+                                onClick={() => void handleQuickAdjustEntryScore(entry, 10)}
+                                className={`rounded border px-2 py-1 font-mono text-[11px] font-bold ${inputClass} hover:opacity-80`}
+                                title="Increase displayed score by 10"
+                              >
+                                +10
+                              </button>
+                              <button
+                                type="button"
+                                disabled={busy}
+                                data-testid={`view-mgmt-edit-btn-${entry.id}`}
+                                onClick={() => openScoreEditDialog(entry)}
+                                className="inline-flex items-center gap-1 rounded bg-[#0F3928] px-2.5 py-1 text-[11px] font-bold text-white hover:bg-[#144B35]"
+                              >
+                                <Edit3 className="h-3 w-3" />
+                                <span>Edit</span>
+                              </button>
+                              {manualAdj !== 0 && (
+                                <button
+                                  type="button"
+                                  disabled={busy}
+                                  data-testid={`view-mgmt-reset-btn-${entry.id}`}
+                                  onClick={() => void handleResetEntryScore(entry)}
+                                  className="inline-flex items-center gap-1 rounded border border-amber-400 bg-amber-50 px-2 py-1 text-[11px] font-bold text-amber-950 hover:bg-amber-100 dark:border-amber-700 dark:bg-amber-950/50 dark:text-amber-200"
+                                  title="Reset manual adjustment to 0"
+                                >
+                                  <RotateCcw className="h-3 w-3" />
+                                  <span>Reset</span>
+                                </button>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            );
+          })()}
+
+          {scoreEditTarget && (
+            <div
+              className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/65 p-4 backdrop-blur-xs"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="score-edit-modal-title"
+              data-testid="view-mgmt-edit-modal"
+            >
+              <form
+                onSubmit={handleSaveManualScore}
+                className={`w-full max-w-lg rounded-xl border p-5 shadow-2xl ${cardBg}`}
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-[11px] font-bold uppercase tracking-wider text-emerald-600 dark:text-emerald-400">
+                      Super Admin View Management · Audit Logged
+                    </p>
+                    <h3 id="score-edit-modal-title" className="mt-0.5 text-base font-bold">
+                      Edit Competition Display Score
+                    </h3>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setScoreEditTarget(null);
+                      setScoreEditModalError('');
+                    }}
+                    className={`rounded-lg border px-2.5 py-1 text-xs font-semibold ${inputClass}`}
+                  >
+                    Close
+                  </button>
+                </div>
+
+                <div
+                  className={`mt-3 rounded-lg border p-3 text-xs ${
+                    darkMode ? 'border-slate-800 bg-slate-950/60' : 'border-slate-200 bg-slate-50'
+                  }`}
+                >
+                  <p className="font-bold">{scoreEditTarget.title}</p>
+                  <p className={`mt-0.5 text-[11px] ${mutedText}`}>
+                    Contributor: <strong>{scoreEditTarget.contributorName}</strong> ·{' '}
+                    {scoreEditTarget.location}
+                  </p>
+                </div>
+
+                {(() => {
+                  const genuine =
+                    scoreEditTarget.genuineEligibleViews ?? scoreEditTarget.eligibleViews ?? 0;
+                  const parsedDisplay = Math.max(0, Math.floor(Number(scoreEditDisplayValue) || 0));
+                  const computedAdjustment = parsedDisplay - genuine;
+
+                  return (
+                    <div className="mt-4 space-y-4">
+                      <div className="grid grid-cols-3 gap-2.5 text-center">
+                        <div
+                          className={`rounded-lg border p-2.5 ${
+                            darkMode
+                              ? 'border-slate-800 bg-slate-950/60'
+                              : 'border-slate-200 bg-slate-50'
+                          }`}
+                        >
+                          <p className={`text-[10px] font-bold uppercase ${mutedText}`}>
+                            Genuine Views
+                          </p>
+                          <p
+                            className="mt-1 font-mono text-base font-extrabold"
+                            data-testid="view-mgmt-modal-genuine"
+                          >
+                            {genuine.toLocaleString('en-IN')}
+                          </p>
+                        </div>
+
+                        <div
+                          className={`rounded-lg border p-2.5 ${
+                            darkMode
+                              ? 'border-slate-800 bg-slate-950/60'
+                              : 'border-slate-200 bg-slate-50'
+                          }`}
+                        >
+                          <p className={`text-[10px] font-bold uppercase ${mutedText}`}>
+                            Manual Adjustment
+                          </p>
+                          <p
+                            className={`mt-1 font-mono text-base font-extrabold ${
+                              computedAdjustment > 0
+                                ? 'text-emerald-600 dark:text-emerald-400'
+                                : computedAdjustment < 0
+                                ? 'text-amber-600 dark:text-amber-400'
+                                : ''
+                            }`}
+                            data-testid="view-mgmt-modal-adjustment"
+                          >
+                            {computedAdjustment > 0
+                              ? `+${computedAdjustment.toLocaleString('en-IN')}`
+                              : computedAdjustment.toLocaleString('en-IN')}
+                          </p>
+                        </div>
+
+                        <div
+                          className={`rounded-lg border p-2.5 ${
+                            darkMode
+                              ? 'border-emerald-800/60 bg-emerald-950/30'
+                              : 'border-emerald-300 bg-emerald-50/70'
+                          }`}
+                        >
+                          <p className="text-[10px] font-bold uppercase text-emerald-800 dark:text-emerald-300">
+                            Final Display Score
+                          </p>
+                          <p
+                            className="mt-1 font-mono text-base font-extrabold text-emerald-700 dark:text-emerald-400"
+                            data-testid="view-mgmt-modal-final"
+                          >
+                            {parsedDisplay.toLocaleString('en-IN')}
+                          </p>
+                        </div>
+                      </div>
+
+                      <div>
+                        <label
+                          htmlFor="view-mgmt-display-score-input"
+                          className="mb-1 block text-xs font-bold"
+                        >
+                          Competition Display Score (Public Leaderboard & Article Views) *
+                        </label>
+                        <input
+                          id="view-mgmt-display-score-input"
+                          data-testid="view-mgmt-display-score-input"
+                          type="number"
+                          min={0}
+                          step={1}
+                          required
+                          value={scoreEditDisplayValue}
+                          onChange={(e) => {
+                            setScoreEditDisplayValue(e.target.value);
+                            if (scoreEditModalError) setScoreEditModalError('');
+                          }}
+                          className={`w-full rounded-lg border px-3 py-2 font-mono text-sm font-bold ${inputClass}`}
+                        />
+                      </div>
+
+                      <div>
+                        <p className="mb-1.5 text-xs font-bold">
+                          Quick Increase / Decrease Displayed Score:
+                        </p>
+                        <div className="flex flex-wrap gap-1.5">
+                          {[-100, -50, -10, -1, 1, 10, 50, 100, 250].map((step) => (
+                            <button
+                              key={step}
+                              type="button"
+                              onClick={() => {
+                                const nextVal = Math.max(0, parsedDisplay + step);
+                                setScoreEditDisplayValue(String(nextVal));
+                                setScoreEditModalError('');
+                              }}
+                              className={`rounded-md border px-2.5 py-1 font-mono text-xs font-bold transition ${inputClass} hover:opacity-80`}
+                            >
+                              {step > 0 ? `+${step}` : step}
+                            </button>
+                          ))}
+                          <button
+                            type="button"
+                            data-testid="view-mgmt-modal-reset-btn"
+                            onClick={() => {
+                              setScoreEditDisplayValue(String(genuine));
+                              setScoreEditModalError('');
+                            }}
+                            className="inline-flex items-center gap-1 rounded-md border border-amber-400 bg-amber-50 px-2.5 py-1 text-xs font-bold text-amber-950 hover:bg-amber-100 dark:border-amber-700 dark:bg-amber-950/60 dark:text-amber-200"
+                          >
+                            <RotateCcw className="h-3 w-3" />
+                            <span>Reset to Genuine ({genuine})</span>
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })()}
+
+                {scoreEditModalError && (
+                  <p className="mt-3 rounded-lg border border-red-300 bg-red-50 px-3 py-2 text-xs font-semibold text-red-700 dark:border-red-800 dark:bg-red-950/50 dark:text-red-200">
+                    {scoreEditModalError}
+                  </p>
+                )}
+
+                <div className="mt-5 flex items-center justify-end gap-2">
+                  <button
+                    type="button"
+                    disabled={busy}
+                    data-testid="view-mgmt-cancel-btn"
+                    onClick={() => {
+                      setScoreEditTarget(null);
+                      setScoreEditModalError('');
+                    }}
+                    className={`rounded-lg border px-3.5 py-2 text-xs font-semibold ${inputClass}`}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={busy}
+                    data-testid="view-mgmt-save-btn"
+                    className="inline-flex items-center gap-1.5 rounded-lg bg-[#0F3928] px-4 py-2 text-xs font-bold text-white hover:bg-[#144B35] disabled:opacity-60"
+                  >
+                    <Save className="h-3.5 w-3.5" />
+                    <span>{busy ? 'Saving...' : 'Save Score & Sync Leaderboard'}</span>
                   </button>
                 </div>
               </form>

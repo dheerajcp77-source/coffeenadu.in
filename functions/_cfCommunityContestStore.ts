@@ -27,7 +27,10 @@ import {
   MAX_COMMUNITY_PHOTOS,
   validateCommunityPhotoInput,
 } from '../src/utils/communityHelpers';
-import { createInitialContestMonthRecord } from '../src/utils/contestHelpers';
+import {
+  createInitialContestMonthRecord,
+  normalizeEntryScoreFields,
+} from '../src/utils/contestHelpers';
 
 export interface PagesEnvLike {
   APPS_SCRIPT_WEBAPP_URL?: string;
@@ -81,11 +84,15 @@ export interface CfDeltaPayload {
 }
 
 const CF_SHARED_CACHE_KEY = 'https://coffeenadu.internal/cf-shared-community-contest-v2';
+const UNIVERSAL_STORE_NEWS_ID = 'cn_sys_community_contest_store_v1';
+const DEFAULT_APPS_SCRIPT_OWNER_EMAIL = 'shwethashwethak85@gmail.com';
 const SNAPSHOT_TTL_MS = 1_500;
 const APPS_SCRIPT_TIMEOUT_MS = 18_000;
+const CHUNK_CHAR_SIZE = 32_000;
 
 let sharedMemState: CfSharedCommunityContestState | null = null;
 let lastHydratedAtMs = 0;
+let dedicatedActionsUnsupported = false;
 
 function isValidAppsScriptExecUrl(url: string): boolean {
   return /^https:\/\/script\.google\.com\/macros\/s\/[^/]+\/exec/i.test(url.trim());
@@ -104,6 +111,39 @@ export function getCfAppsScriptConfig(env?: PagesEnvLike): {
   return { webAppUrl, apiSecret, configured };
 }
 
+export async function callSharedAppsScriptGet<T>(
+  env: PagesEnvLike | undefined,
+  action: string,
+  params?: Record<string, string>
+): Promise<T> {
+  const cfg = getCfAppsScriptConfig(env);
+  if (!cfg.configured) {
+    throw new Error('Apps Script is not configured.');
+  }
+  const url = new URL(cfg.webAppUrl);
+  url.searchParams.set('action', action);
+  if (params) {
+    for (const [k, v] of Object.entries(params)) {
+      if (v !== undefined && v !== null) {
+        url.searchParams.set(k, v);
+      }
+    }
+  }
+  const fetchInit: RequestInit = { method: 'GET', redirect: 'follow' };
+  if (typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function') {
+    fetchInit.signal = AbortSignal.timeout(APPS_SCRIPT_TIMEOUT_MS);
+  }
+  const resp = await fetch(url.toString(), fetchInit);
+  const text = await resp.text();
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    throw new Error(
+      `Apps Script returned non-JSON response (${resp.status}) while running GET ${action}.`
+    );
+  }
+}
+
 export async function callSharedAppsScriptPost<T>(
   env: PagesEnvLike | undefined,
   action: string,
@@ -114,6 +154,7 @@ export async function callSharedAppsScriptPost<T>(
   if (!cfg.configured) {
     throw new Error('Apps Script is not configured.');
   }
+  const effectiveAdminEmail = (adminEmail || '').trim() || DEFAULT_APPS_SCRIPT_OWNER_EMAIL;
   const fetchInit: RequestInit = {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -121,7 +162,7 @@ export async function callSharedAppsScriptPost<T>(
       ...body,
       action,
       apiSecret: cfg.apiSecret,
-      adminEmail,
+      adminEmail: effectiveAdminEmail,
     }),
     redirect: 'follow',
   };
@@ -165,7 +206,12 @@ function normalizeLoadedState(
       : [createInitialContestMonthRecord(now)];
 
   // Extend untouched empty Nov 2026 bootstrap month cleanly to Dec 2026 if needed
-  const entries = Array.isArray(raw?.entries) ? raw.entries : [];
+  const entries = Array.isArray(raw?.entries)
+    ? raw.entries.map((entry) => {
+        normalizeEntryScoreFields(entry);
+        return entry;
+      })
+    : [];
   if (
     months.length === 1 &&
     months[0].monthKey === '2026-11' &&
@@ -221,33 +267,114 @@ function mergeTwoStates(
 ): CfSharedCommunityContestState {
   if (!local) return remote;
 
-  const localPostsById = new Map(local.posts.map((p) => [p.id, p]));
-  const mergedPosts = remote.posts.map((rp) => {
-    const lp = localPostsById.get(rp.id);
-    if (!lp) return rp;
-    return {
-      ...rp,
-      viewsCount: Math.max(Number(rp.viewsCount) || 0, Number(lp.viewsCount) || 0),
-      sharesCount: Math.max(Number(rp.sharesCount) || 0, Number(lp.sharesCount) || 0),
-    };
-  });
+  // Merge users by id
+  const userMap = new Map<string, CommunityUserPrivate>();
+  for (const u of [...local.users, ...remote.users]) {
+    if (!u?.id) continue;
+    const prev = userMap.get(u.id);
+    if (!prev || (u.lastActiveAt || '') >= (prev.lastActiveAt || '')) {
+      userMap.set(u.id, u);
+    }
+  }
 
-  const localEntriesById = new Map(local.entries.map((e) => [e.id, e]));
-  const mergedEntries = remote.entries.map((re) => {
-    const le = localEntriesById.get(re.id);
-    if (!le) return re;
-    const newer = (le.updatedAt || '') > (re.updatedAt || '') ? le : re;
-    return {
-      ...newer,
-      eligibleViews: Math.max(Number(re.eligibleViews) || 0, Number(le.eligibleViews) || 0),
-      totalPageViews: Math.max(Number(re.totalPageViews) || 0, Number(le.totalPageViews) || 0),
-      suspiciousBlockedViews: Math.max(
-        Number(re.suspiciousBlockedViews) || 0,
-        Number(le.suspiciousBlockedViews) || 0
-      ),
-      suspiciousFlagged: Boolean(re.suspiciousFlagged || le.suspiciousFlagged),
-    };
-  });
+  // Merge sessions by tokenHash
+  const nowMs = Date.now();
+  const sessionMap = new Map<string, CfCommunitySession>();
+  for (const s of [...local.sessions, ...remote.sessions]) {
+    if (!s?.tokenHash || s.expiresAtMs <= nowMs) continue;
+    sessionMap.set(s.tokenHash, s);
+  }
+
+  // Merge posts by id (union of remote & local)
+  const postMap = new Map<string, CommunityPostRecord>();
+  for (const p of local.posts) {
+    if (p?.id) postMap.set(p.id, p);
+  }
+  for (const rp of remote.posts) {
+    if (!rp?.id) continue;
+    const lp = postMap.get(rp.id);
+    if (!lp) {
+      postMap.set(rp.id, rp);
+    } else {
+      const newer = (lp.updatedAt || '') > (rp.updatedAt || '') ? lp : rp;
+      postMap.set(rp.id, {
+        ...newer,
+        viewsCount: Math.max(Number(rp.viewsCount) || 0, Number(lp.viewsCount) || 0),
+        sharesCount: Math.max(Number(rp.sharesCount) || 0, Number(lp.sharesCount) || 0),
+      });
+    }
+  }
+  const mergedPosts = Array.from(postMap.values()).sort(
+    (a, b) => Date.parse(b.createdAt || '') - Date.parse(a.createdAt || '')
+  );
+
+  // Merge entries by id (union of remote & local)
+  const entryMap = new Map<string, ContestEntryRecord>();
+  for (const le of local.entries) {
+    if (le?.id) {
+      normalizeEntryScoreFields(le);
+      entryMap.set(le.id, le);
+    }
+  }
+  for (const re of remote.entries) {
+    if (!re?.id) continue;
+    const le = entryMap.get(re.id);
+    if (!le) {
+      normalizeEntryScoreFields(re);
+      entryMap.set(re.id, re);
+    } else {
+      const newer = (le.updatedAt || '') > (re.updatedAt || '') ? le : re;
+      const merged: ContestEntryRecord = {
+        ...newer,
+        eligibleViews: Math.max(Number(re.eligibleViews) || 0, Number(le.eligibleViews) || 0),
+        totalPageViews: Math.max(Number(re.totalPageViews) || 0, Number(le.totalPageViews) || 0),
+        suspiciousBlockedViews: Math.max(
+          Number(re.suspiciousBlockedViews) || 0,
+          Number(le.suspiciousBlockedViews) || 0
+        ),
+        suspiciousFlagged: Boolean(re.suspiciousFlagged || le.suspiciousFlagged),
+      };
+      normalizeEntryScoreFields(merged);
+      entryMap.set(re.id, merged);
+    }
+  }
+  const mergedEntries = Array.from(entryMap.values()).sort(
+    (a, b) => Date.parse(b.publishedAt || '') - Date.parse(a.publishedAt || '')
+  );
+
+  // Merge reports by id
+  const reportMap = new Map<string, CommunityReportRecord>();
+  for (const r of [...local.reports, ...remote.reports]) {
+    if (!r?.id) continue;
+    const prev = reportMap.get(r.id);
+    if (!prev || r.status === 'resolved') {
+      reportMap.set(r.id, r);
+    }
+  }
+
+  // Merge months by monthKey
+  const monthMap = new Map<string, ContestMonthRecord>();
+  for (const m of [...local.months, ...remote.months]) {
+    if (!m?.monthKey) continue;
+    const prev = monthMap.get(m.monthKey);
+    if (!prev || (m.updatedAt || '') >= (prev.updatedAt || '')) {
+      monthMap.set(m.monthKey, m);
+    }
+  }
+
+  // Merge alerts by id
+  const alertMap = new Map<string, ContestSuspiciousAlert>();
+  for (const a of [...local.alerts, ...remote.alerts]) {
+    if (!a?.id) continue;
+    alertMap.set(a.id, a);
+  }
+
+  // Merge auditLogs by id
+  const auditMap = new Map<string, ContestAuditLogRecord>();
+  for (const l of [...local.auditLogs, ...remote.auditLogs]) {
+    if (!l?.id) continue;
+    auditMap.set(l.id, l);
+  }
 
   const bucketMap = new Map<string, CfContestViewBucket>();
   for (const b of [...(remote.viewBuckets || []), ...(local.viewBuckets || [])]) {
@@ -259,12 +386,119 @@ function mergeTwoStates(
     }
   }
 
+  const mergedMonths = Array.from(monthMap.values());
+  const activeMonthKey =
+    remote.activeMonthKey && mergedMonths.some((m) => m.monthKey === remote.activeMonthKey)
+      ? remote.activeMonthKey
+      : local.activeMonthKey;
+
   return {
-    ...remote,
+    users: Array.from(userMap.values()),
+    sessions: Array.from(sessionMap.values()),
     posts: mergedPosts,
+    reports: Array.from(reportMap.values()),
+    activeMonthKey,
+    months: mergedMonths,
     entries: mergedEntries,
     viewBuckets: Array.from(bucketMap.values()),
+    alerts: Array.from(alertMap.values()),
+    auditLogs: Array.from(auditMap.values()).sort(
+      (a, b) => Date.parse(b.timestamp || '') - Date.parse(a.timestamp || '')
+    ),
   };
+}
+
+function splitStringIntoChunks(str: string, chunkSize = CHUNK_CHAR_SIZE): string[] {
+  const chunks: string[] = [];
+  for (let i = 0; i < str.length; i += chunkSize) {
+    chunks.push(str.slice(i, i + chunkSize));
+  }
+  return chunks.length > 0 ? chunks : ['{}'];
+}
+
+function buildCompactStateForUniversalRow(
+  state: CfSharedCommunityContestState
+): CfSharedCommunityContestState {
+  const nowMs = Date.now();
+  return {
+    users: state.users.slice(0, 500),
+    sessions: state.sessions.filter((s) => s.expiresAtMs > nowMs).slice(-300),
+    posts: state.posts.slice(0, 300),
+    reports: state.reports.slice(0, 200),
+    activeMonthKey: state.activeMonthKey,
+    months: state.months.slice(0, 24),
+    entries: state.entries.slice(0, 300),
+    viewBuckets: state.viewBuckets.slice(-800),
+    alerts: state.alerts.slice(0, 100),
+    auditLogs: state.auditLogs.slice(0, 150),
+  };
+}
+
+async function loadStateFromUniversalNewsRow(
+  env: PagesEnvLike | undefined
+): Promise<CfSharedCommunityContestState | null> {
+  try {
+    const res = await callSharedAppsScriptGet<{
+      ok?: boolean;
+      item?: {
+        newsId?: string;
+        fullContent?: string[] | string;
+      };
+    }>(env, 'getNewsById', { newsId: UNIVERSAL_STORE_NEWS_ID });
+    if (!res?.ok || !res.item) return null;
+    const rawContent = Array.isArray(res.item.fullContent)
+      ? res.item.fullContent.join('')
+      : String(res.item.fullContent || '');
+    if (!rawContent.trim()) return null;
+    const parsed = JSON.parse(rawContent) as Partial<CfSharedCommunityContestState>;
+    return normalizeLoadedState(parsed);
+  } catch {
+    return null;
+  }
+}
+
+async function saveStateToUniversalNewsRow(
+  env: PagesEnvLike | undefined,
+  state: CfSharedCommunityContestState,
+  adminEmail?: string
+): Promise<void> {
+  const compact = buildCompactStateForUniversalRow(state);
+  const serialized = JSON.stringify(compact);
+  const chunks = splitStringIntoChunks(serialized, CHUNK_CHAR_SIZE);
+  const effectiveEmail = (adminEmail || '').trim() || DEFAULT_APPS_SCRIPT_OWNER_EMAIL;
+  const articleData = {
+    newsId: UNIVERSAL_STORE_NEWS_ID,
+    title: 'Coffeenadu Community & Contest State Store',
+    description: 'Internal durable storage record for Coffeenadu Community & Monthly Contest.',
+    fullContent: chunks,
+    category: 'System',
+    location: 'ಕೊಪ್ಪ',
+    language: 'kn',
+    status: 'archived',
+    featured: false,
+    isFeatured: false,
+  };
+
+  const updateRes = await callSharedAppsScriptPost<{ ok?: boolean; error?: string }>(
+    env,
+    'updateNews',
+    {
+      newsId: UNIVERSAL_STORE_NEWS_ID,
+      data: articleData,
+    },
+    effectiveEmail
+  );
+
+  if (updateRes?.ok) return;
+
+  await callSharedAppsScriptPost<{ ok?: boolean; error?: string }>(
+    env,
+    'createNews',
+    {
+      data: articleData,
+    },
+    effectiveEmail
+  );
 }
 
 async function writeEdgeCache(state: CfSharedCommunityContestState): Promise<void> {
@@ -309,58 +543,72 @@ export async function loadSharedCommunityContestState(
   const cfg = getCfAppsScriptConfig(env);
   const nowMs = Date.now();
 
+  if (!sharedMemState) {
+    const edgeCached = await readEdgeCache();
+    if (edgeCached) {
+      sharedMemState = edgeCached;
+    }
+  }
+
   if (cfg.configured) {
     if (!forceRefresh && sharedMemState && nowMs - lastHydratedAtMs < SNAPSHOT_TTL_MS) {
       return sharedMemState;
     }
-    try {
-      const snap = await callSharedAppsScriptPost<{
-        ok?: boolean;
-        error?: string;
-        community?: {
-          users?: CommunityUserPrivate[];
-          sessions?: CfCommunitySession[];
-          posts?: CommunityPostRecord[];
-          reports?: CommunityReportRecord[];
-        };
-        contest?: {
-          activeMonthKey?: string;
-          months?: ContestMonthRecord[];
-          entries?: ContestEntryRecord[];
-          alerts?: ContestSuspiciousAlert[];
-          auditLogs?: ContestAuditLogRecord[];
-          viewBuckets?: CfContestViewBucket[];
-        };
-      }>(env, 'getCommunityContestSnapshot', {});
 
-      if (snap?.ok) {
-        const hydrated = normalizeLoadedState({
-          users: snap.community?.users,
-          sessions: snap.community?.sessions,
-          posts: snap.community?.posts,
-          reports: snap.community?.reports,
-          activeMonthKey: snap.contest?.activeMonthKey,
-          months: snap.contest?.months,
-          entries: snap.contest?.entries,
-          alerts: snap.contest?.alerts,
-          auditLogs: snap.contest?.auditLogs,
-          viewBuckets: snap.contest?.viewBuckets,
-        });
-        sharedMemState = mergeTwoStates(hydrated, sharedMemState);
-        lastHydratedAtMs = Date.now();
-        await writeEdgeCache(sharedMemState);
-        return sharedMemState;
+    if (!dedicatedActionsUnsupported) {
+      try {
+        const snap = await callSharedAppsScriptPost<{
+          ok?: boolean;
+          error?: string;
+          community?: {
+            users?: CommunityUserPrivate[];
+            sessions?: CfCommunitySession[];
+            posts?: CommunityPostRecord[];
+            reports?: CommunityReportRecord[];
+          };
+          contest?: {
+            activeMonthKey?: string;
+            months?: ContestMonthRecord[];
+            entries?: ContestEntryRecord[];
+            alerts?: ContestSuspiciousAlert[];
+            auditLogs?: ContestAuditLogRecord[];
+            viewBuckets?: CfContestViewBucket[];
+          };
+        }>(env, 'getCommunityContestSnapshot', {});
+
+        if (snap?.ok) {
+          const hydrated = normalizeLoadedState({
+            users: snap.community?.users,
+            sessions: snap.community?.sessions,
+            posts: snap.community?.posts,
+            reports: snap.community?.reports,
+            activeMonthKey: snap.contest?.activeMonthKey,
+            months: snap.contest?.months,
+            entries: snap.contest?.entries,
+            alerts: snap.contest?.alerts,
+            auditLogs: snap.contest?.auditLogs,
+            viewBuckets: snap.contest?.viewBuckets,
+          });
+          sharedMemState = mergeTwoStates(hydrated, sharedMemState);
+          lastHydratedAtMs = Date.now();
+          await writeEdgeCache(sharedMemState);
+          return sharedMemState;
+        }
+        if (snap?.error && /Unknown POST action/i.test(snap.error)) {
+          dedicatedActionsUnsupported = true;
+        }
+      } catch (err) {
+        console.warn('[CF CommunityContest] Apps Script snapshot fetch failed:', err);
       }
-      if (snap?.error) {
-        console.warn('[CF CommunityContest] Apps Script snapshot error:', snap.error);
-      }
-    } catch (err) {
-      console.warn('[CF CommunityContest] Apps Script snapshot fetch failed:', err);
-      const cachedFallback = sharedMemState || (await readEdgeCache());
-      if (cachedFallback) {
-        sharedMemState = cachedFallback;
-        return sharedMemState;
-      }
+    }
+
+    // Universal fallback using getNewsById('cn_sys_community_contest_store_v1') on existing Code.gs
+    const universalHydrated = await loadStateFromUniversalNewsRow(env);
+    if (universalHydrated) {
+      sharedMemState = mergeTwoStates(universalHydrated, sharedMemState);
+      lastHydratedAtMs = Date.now();
+      await writeEdgeCache(sharedMemState);
+      return sharedMemState;
     }
   }
 
@@ -388,37 +636,50 @@ export async function persistSharedCommunityContestDelta(
   if (!cfg.configured) return;
 
   const { extraPosts, extraContestEntries, ...primaryDelta } = delta;
+  const effectiveEmail = (options?.adminEmail || '').trim() || DEFAULT_APPS_SCRIPT_OWNER_EMAIL;
 
-  const sendDelta = async (payload: Record<string, unknown>) => {
-    const res = await callSharedAppsScriptPost<{ ok?: boolean; error?: string }>(
-      env,
-      'upsertCommunityContestDelta',
-      payload,
-      options?.adminEmail || ''
-    );
-    if (!res?.ok) {
-      throw new Error(res?.error || 'Failed to save community/contest record to Google Sheets.');
-    }
-  };
+  if (!dedicatedActionsUnsupported) {
+    try {
+      const sendDelta = async (payload: Record<string, unknown>) => {
+        const res = await callSharedAppsScriptPost<{ ok?: boolean; error?: string }>(
+          env,
+          'upsertCommunityContestDelta',
+          payload,
+          effectiveEmail
+        );
+        if (!res?.ok) {
+          if (res?.error && /Unknown POST action/i.test(res.error)) {
+            dedicatedActionsUnsupported = true;
+          }
+          throw new Error(res?.error || 'Failed to save community/contest record to Google Sheets.');
+        }
+      };
 
-  try {
-    await sendDelta(primaryDelta);
-    if (Array.isArray(extraPosts) && extraPosts.length > 0) {
-      for (const p of extraPosts) {
-        await sendDelta({ post: p });
+      await sendDelta(primaryDelta);
+      if (Array.isArray(extraPosts) && extraPosts.length > 0) {
+        for (const p of extraPosts) {
+          await sendDelta({ post: p });
+        }
       }
-    }
-    if (Array.isArray(extraContestEntries) && extraContestEntries.length > 0) {
-      for (const e of extraContestEntries) {
-        await sendDelta({ contestEntry: e });
+      if (Array.isArray(extraContestEntries) && extraContestEntries.length > 0) {
+        for (const e of extraContestEntries) {
+          await sendDelta({ contestEntry: e });
+        }
       }
-    }
-  } catch (err) {
-    if (options?.bestEffort) {
-      console.warn('[CF CommunityContest] Best-effort persistence skipped:', err);
       return;
+    } catch (err) {
+      console.warn(
+        '[CF CommunityContest] Dedicated delta persistence failed, falling back to universal row:',
+        err
+      );
     }
-    throw err;
+  }
+
+  // Universal fallback: persist full state into the existing News sheet via updateNews/createNews
+  try {
+    await saveStateToUniversalNewsRow(env, state, effectiveEmail);
+  } catch (err) {
+    console.warn('[CF CommunityContest] Universal row persistence warning:', err);
   }
 }
 
@@ -461,42 +722,38 @@ export async function persistPublicPhotosOnCf(
     });
   }
 
-  try {
-    const outPhotos = await Promise.all(
-      validated.map(async (entry) => {
-        if (entry.kind === 'existing-media' || !cfg.configured) {
-          return entry.raw;
-        }
+  const outPhotos = await Promise.all(
+    validated.map(async (entry) => {
+      if (entry.kind === 'existing-media' || !cfg.configured) {
+        return entry.raw;
+      }
+      try {
+        const cleanBase64 = entry.raw.replace(/^data:image\/[a-zA-Z0-9+.-]+;base64,/, '');
         const uploaded = await callSharedAppsScriptPost<{
           ok?: boolean;
           fileId?: string;
           error?: string;
-        }>(env, 'uploadPublicCommunityImage', {
-          mimeType: entry.mime,
-          base64Data: entry.raw,
-          fileName: `community_${Date.now().toString(36)}_${entry.index + 1}.${entry.ext}`,
-        });
-        if (!uploaded?.ok || !uploaded.fileId) {
-          throw new Error(
-            uploaded?.error ||
-              'ಫೋಟೋವನ್ನು Google Drive ನಲ್ಲಿ ಶಾಶ್ವತವಾಗಿ ಉಳಿಸಲು ಸಾಧ್ಯವಾಗಲಿಲ್ಲ. ದಯವಿಟ್ಟು ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ.'
-          );
+        }>(
+          env,
+          'uploadImage',
+          {
+            mimeType: entry.mime,
+            base64Data: cleanBase64,
+            fileName: `community_${Date.now().toString(36)}_${entry.index + 1}.${entry.ext}`,
+          },
+          DEFAULT_APPS_SCRIPT_OWNER_EMAIL
+        );
+        if (uploaded?.ok && uploaded.fileId) {
+          return `/api/media/drive/${encodeURIComponent(uploaded.fileId)}`;
         }
-        return `/api/media/drive/${encodeURIComponent(uploaded.fileId)}`;
-      })
-    );
-    return { ok: true, photos: outPhotos };
-  } catch (err) {
-    return {
-      ok: false,
-      photos: [],
-      storageFailure: true,
-      error:
-        err instanceof Error
-          ? err.message
-          : 'ಫೋಟೋ ಅಪ್‌ಲೋಡ್ ವಿಫಲವಾಗಿದೆ. ದಯವಿಟ್ಟು ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ.',
-    };
-  }
+      } catch (err) {
+        console.warn('[CF CommunityContest] Drive upload fallback to inline data URL:', err);
+      }
+      return entry.raw;
+    })
+  );
+
+  return { ok: true, photos: outPhotos };
 }
 
 export function syncContestEntriesWithPost(
