@@ -243,6 +243,7 @@ export async function handleCfContestApi(
     return null;
   }
 
+  try {
   // Always force-refresh authoritative snapshot for contest overview, submit, and admin views
   // so every browser, mobile phone, and admin panel stays 100% synchronized.
   const forceFresh =
@@ -773,12 +774,16 @@ export async function handleCfContestApi(
 
     const eligMatch = pathname.match(/^\/api\/admin2\/contest\/entries\/([^/]+)\/eligibility$/);
     if (eligMatch && method === 'PATCH') {
-      const entry = state.entries.find((e) => e.id === decodeURIComponent(eligMatch[1]));
-      if (!entry) return jsonResp({ ok: false, error: 'Not found' }, 404);
+      const targetKey = decodeURIComponent(eligMatch[1]).trim();
+      const entry = state.entries.find(
+        (e) => e.id === targetKey || e.postId === targetKey
+      );
+      if (!entry) return jsonResp({ ok: false, error: 'Contest entry not found.' }, 404);
       const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
       const eligibility: ContestEntryEligibility =
         body.eligibility === 'disqualified' ? 'disqualified' : 'eligible';
       const reason = cleanSingleLine(body.reason, 240);
+      const hidePost = body.hidePost === true;
       if (eligibility === 'disqualified' && reason.length < 3) {
         return jsonResp(
           { ok: false, error: 'Please enter a brief disqualification reason for the audit record.' },
@@ -791,6 +796,23 @@ export async function handleCfContestApi(
       entry.disqualifiedBy = eligibility === 'disqualified' ? actor : undefined;
       entry.disqualifiedAt = eligibility === 'disqualified' ? nowIso : undefined;
       entry.updatedAt = nowIso;
+
+      let touchedPost: typeof state.posts[number] | undefined;
+      const linkedPost = state.posts.find((p) => p.id === entry.postId);
+      if (linkedPost) {
+        if (eligibility === 'disqualified' && hidePost) {
+          linkedPost.status = 'hidden';
+          linkedPost.hiddenReason = reason;
+          linkedPost.updatedAt = nowIso;
+          touchedPost = linkedPost;
+        } else if (eligibility === 'eligible' && linkedPost.status === 'hidden') {
+          linkedPost.status = 'published';
+          linkedPost.hiddenReason = undefined;
+          linkedPost.updatedAt = nowIso;
+          touchedPost = linkedPost;
+        }
+      }
+
       const auditLog = {
         id: makeId('caud'),
         timestamp: nowIso,
@@ -798,15 +820,30 @@ export async function handleCfContestApi(
         action: eligibility === 'disqualified' ? 'entry.disqualify' : 'entry.reinstate',
         competitionMonth: entry.competitionMonth,
         targetId: entry.id,
-        details: `Updated "${entry.title}" -> ${eligibility}${reason ? ` (${reason})` : ''}`,
+        details: `Updated "${entry.title}" -> ${eligibility}${reason ? ` (${reason})` : ''}${
+          eligibility === 'disqualified' && hidePost ? ' [post hidden from feed]' : ''
+        }`,
       };
       state.auditLogs.unshift(auditLog);
-      await persistSharedCommunityContestDelta(
-        env,
-        state,
-        { contestEntry: entry, contestAuditLog: auditLog },
-        { adminEmail: actor }
-      );
+      try {
+        await persistSharedCommunityContestDelta(
+          env,
+          state,
+          { contestEntry: entry, post: touchedPost, contestAuditLog: auditLog },
+          { adminEmail: actor }
+        );
+      } catch (err) {
+        return jsonResp(
+          {
+            ok: false,
+            error:
+              err instanceof Error
+                ? err.message
+                : 'Failed to save disqualification decision to storage.',
+          },
+          502
+        );
+      }
       return jsonResp({ ok: true, entry });
     }
 
@@ -834,12 +871,19 @@ export async function handleCfContestApi(
         details: `Marked alert for "${alert.articleTitle}" as ${alert.status}`,
       };
       state.auditLogs.unshift(auditLog);
-      await persistSharedCommunityContestDelta(
-        env,
-        state,
-        { contestAlert: alert, contestAuditLog: auditLog },
-        { adminEmail: actor }
-      );
+      try {
+        await persistSharedCommunityContestDelta(
+          env,
+          state,
+          { contestAlert: alert, contestAuditLog: auditLog },
+          { adminEmail: actor }
+        );
+      } catch (err) {
+        return jsonResp(
+          { ok: false, error: err instanceof Error ? err.message : 'Failed to save alert review.' },
+          502
+        );
+      }
       return jsonResp({ ok: true, alert });
     }
 
@@ -859,12 +903,19 @@ export async function handleCfContestApi(
         details: `${m.winnersPublished ? 'Published' : 'Hidden'} public winner announcement for ${m.displayLabelEn}`,
       };
       state.auditLogs.unshift(auditLog);
-      await persistSharedCommunityContestDelta(
-        env,
-        state,
-        { contestMonth: m, contestAuditLog: auditLog },
-        { adminEmail: actor }
-      );
+      try {
+        await persistSharedCommunityContestDelta(
+          env,
+          state,
+          { contestMonth: m, contestAuditLog: auditLog },
+          { adminEmail: actor }
+        );
+      } catch (err) {
+        return jsonResp(
+          { ok: false, error: err instanceof Error ? err.message : 'Failed to update winner announcement.' },
+          502
+        );
+      }
       return jsonResp({ ok: true, month: m });
     }
 
@@ -899,12 +950,19 @@ export async function handleCfContestApi(
         details: `Updated ${m.displayLabelEn} configuration (Status: ${m.status})`,
       };
       state.auditLogs.unshift(auditLog);
-      await persistSharedCommunityContestDelta(
-        env,
-        state,
-        { contestMonth: m, contestAuditLog: auditLog },
-        { adminEmail: actor }
-      );
+      try {
+        await persistSharedCommunityContestDelta(
+          env,
+          state,
+          { contestMonth: m, contestAuditLog: auditLog },
+          { adminEmail: actor }
+        );
+      } catch (err) {
+        return jsonResp(
+          { ok: false, error: err instanceof Error ? err.message : 'Failed to save month configuration.' },
+          502
+        );
+      }
       return jsonResp({ ok: true, month: m });
     }
 
@@ -964,12 +1022,19 @@ export async function handleCfContestApi(
         details: `Saved ${m.winners.length} winner selection(s) for ${m.displayLabelEn}`,
       };
       state.auditLogs.unshift(auditLog);
-      await persistSharedCommunityContestDelta(
-        env,
-        state,
-        { contestMonth: m, contestAuditLog: auditLog },
-        { adminEmail: actor }
-      );
+      try {
+        await persistSharedCommunityContestDelta(
+          env,
+          state,
+          { contestMonth: m, contestAuditLog: auditLog },
+          { adminEmail: actor }
+        );
+      } catch (err) {
+        return jsonResp(
+          { ok: false, error: err instanceof Error ? err.message : 'Failed to save winners.' },
+          502
+        );
+      }
       return jsonResp({ ok: true, month: m });
     }
 
@@ -1032,12 +1097,19 @@ export async function handleCfContestApi(
         })`,
       };
       state.auditLogs.unshift(auditLog);
-      await persistSharedCommunityContestDelta(
-        env,
-        state,
-        { contestMonth: m, contestAuditLog: auditLog },
-        { adminEmail: actor }
-      );
+      try {
+        await persistSharedCommunityContestDelta(
+          env,
+          state,
+          { contestMonth: m, contestAuditLog: auditLog },
+          { adminEmail: actor }
+        );
+      } catch (err) {
+        return jsonResp(
+          { ok: false, error: err instanceof Error ? err.message : 'Failed to finalize competition month.' },
+          502
+        );
+      }
       return jsonResp({ ok: true, month: m });
     }
 
@@ -1089,20 +1161,27 @@ export async function handleCfContestApi(
         details: `Opened ${nextMonth.displayLabelEn} contest cycle`,
       };
       state.auditLogs.unshift(auditLog);
-      if (closedPrev) {
+      try {
+        if (closedPrev) {
+          await persistSharedCommunityContestDelta(
+            env,
+            state,
+            { contestMonth: closedPrev },
+            { adminEmail: actor }
+          );
+        }
         await persistSharedCommunityContestDelta(
           env,
           state,
-          { contestMonth: closedPrev },
+          { contestMonth: nextMonth, activeMonthKey: nextKey, contestAuditLog: auditLog },
           { adminEmail: actor }
         );
+      } catch (err) {
+        return jsonResp(
+          { ok: false, error: err instanceof Error ? err.message : 'Failed to open next competition month.' },
+          502
+        );
       }
-      await persistSharedCommunityContestDelta(
-        env,
-        state,
-        { contestMonth: nextMonth, activeMonthKey: nextKey, contestAuditLog: auditLog },
-        { adminEmail: actor }
-      );
       return jsonResp({ ok: true, month: nextMonth }, 201);
     }
 
@@ -1184,4 +1263,17 @@ export async function handleCfContestApi(
   }
 
   return null;
+  } catch (err) {
+    console.error('[CF Contest API] Unhandled exception:', err);
+    return jsonResp(
+      {
+        ok: false,
+        error:
+          err instanceof Error && err.message
+            ? err.message
+            : 'ಸರ್ವರ್ ಪ್ರತಿಕ್ರಿಯೆ ದೋಷ. ದಯವಿಟ್ಟು ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ.',
+      },
+      500
+    );
+  }
 }

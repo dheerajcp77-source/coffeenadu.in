@@ -12,6 +12,7 @@ import type {
 } from '../types/community';
 import type { CommunityFeedTabId } from '../constants/communityCategories';
 import { MAX_COMMUNITY_PHOTO_BYTES } from '../utils/communityHelpers';
+import { parseApiJsonResponse } from '../utils/httpResponse';
 
 // Security rule: community Bearer token lives strictly in JS memory (never localStorage/sessionStorage).
 // Server also maintains an HttpOnly cookie so page reloads stay signed in seamlessly.
@@ -38,12 +39,17 @@ function buildCommunityHeaders(extra: Record<string, string> = {}): Record<strin
 }
 
 async function parseJsonSafe<T>(resp: Response, fallbackMsg: string): Promise<T> {
-  let data: Record<string, unknown> = {};
+  let rawText = '';
   try {
-    data = (await resp.json()) as Record<string, unknown>;
+    rawText = await resp.text();
   } catch {
-    // ignore non-json error body
+    rawText = '';
   }
+  const data = parseApiJsonResponse<Record<string, unknown>>(
+    resp.status,
+    resp.headers.get('content-type'),
+    rawText
+  );
   if (!resp.ok || data.ok === false) {
     throw new Error(String(data.error || fallbackMsg));
   }
@@ -251,12 +257,14 @@ export async function reportCommunityPost(
  * before sending it to the backend, ensuring fast mobile uploads and strict 2 MB compliance.
  */
 export async function compressCommunityImageFile(file: File): Promise<string> {
-  const allowed = new Set(['image/jpeg', 'image/jpg', 'image/png', 'image/webp']);
-  if (!allowed.has(file.type.toLowerCase())) {
+  const allowedMimes = new Set(['image/jpeg', 'image/jpg', 'image/png', 'image/webp']);
+  const mimeLower = (file.type || '').toLowerCase();
+  const hasAllowedExtension = /\.(?:jpe?g|png|webp)$/i.test(file.name || '');
+  if ((mimeLower && !allowedMimes.has(mimeLower)) || (!mimeLower && !hasAllowedExtension)) {
     throw new Error('JPG, PNG ಅಥವಾ WebP ಫೋಟೋ ಮಾತ್ರ ಅಪ್‌ಲೋಡ್ ಮಾಡಬಹುದು.');
   }
-  if (file.size > 8 * 1024 * 1024) {
-    throw new Error('ಫೋಟೋ ಫೈಲ್ ಗಾತ್ರ ತುಂಬಾ ದೊಡ್ಡದಾಗಿದೆ (ಗರಿಷ್ಠ 8 MB ಆಯ್ಕೆಮಾಡಿ).');
+  if (file.size > 12 * 1024 * 1024) {
+    throw new Error('ಫೋಟೋ ಫೈಲ್ ಗಾತ್ರ ತುಂಬಾ ದೊಡ್ಡದಾಗಿದೆ (ಗರಿಷ್ಠ 12 MB ಆಯ್ಕೆಮಾಡಿ).');
   }
 
   return new Promise((resolve, reject) => {
@@ -267,30 +275,45 @@ export async function compressCommunityImageFile(file: File): Promise<string> {
       const img = new Image();
       img.onerror = () => reject(new Error('ಸರಿಯಾದ ಫೋಟೋ ಫೈಲ್ ಆಯ್ಕೆಮಾಡಿ.'));
       img.onload = () => {
-        const maxDim = 1280;
-        let { width, height } = img;
-        if (width > maxDim || height > maxDim) {
-          const scale = Math.min(maxDim / width, maxDim / height);
-          width = Math.max(1, Math.round(width * scale));
-          height = Math.max(1, Math.round(height * scale));
+        const targetMaxBytes = Math.min(MAX_COMMUNITY_PHOTO_BYTES, 900 * 1024);
+        const dimSteps = [1280, 960, 720];
+        const qualitySteps = [0.82, 0.68, 0.54, 0.42];
+        let bestDataUrl = '';
+
+        for (const maxDim of dimSteps) {
+          let { width, height } = img;
+          if (width > maxDim || height > maxDim) {
+            const scale = Math.min(maxDim / width, maxDim / height);
+            width = Math.max(1, Math.round(width * scale));
+            height = Math.max(1, Math.round(height * scale));
+          }
+          const canvas = document.createElement('canvas');
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          if (!ctx) {
+            reject(new Error('ಫೋಟೋ ಪ್ರಕ್ರಿಯೆಗೊಳಿಸಲು ಸಾಧ್ಯವಾಗಲಿಲ್ಲ.'));
+            return;
+          }
+          ctx.drawImage(img, 0, 0, width, height);
+
+          for (const q of qualitySteps) {
+            const dataUrl = canvas.toDataURL('image/jpeg', q);
+            bestDataUrl = dataUrl;
+            const approxBytes = Math.floor((dataUrl.length * 3) / 4);
+            if (approxBytes <= targetMaxBytes) {
+              resolve(dataUrl);
+              return;
+            }
+          }
         }
-        const canvas = document.createElement('canvas');
-        canvas.width = width;
-        canvas.height = height;
-        const ctx = canvas.getContext('2d');
-        if (!ctx) {
-          reject(new Error('ಫೋಟೋ ಪ್ರಕ್ರಿಯೆಗೊಳಿಸಲು ಸಾಧ್ಯವಾಗಲಿಲ್ಲ.'));
+
+        const finalBytes = Math.floor((bestDataUrl.length * 3) / 4);
+        if (finalBytes > MAX_COMMUNITY_PHOTO_BYTES) {
+          reject(new Error('ಪ್ರತಿ ಫೋಟೋ ಗರಿಷ್ಠ 2 MB ಒಳಗಿರಬೇಕು. ದಯವಿಟ್ಟು ಚಿಕ್ಕ ಫೋಟೋ ಆಯ್ಕೆಮಾಡಿ.'));
           return;
         }
-        ctx.drawImage(img, 0, 0, width, height);
-        const dataUrl = canvas.toDataURL('image/jpeg', 0.82);
-        const approxBytes = Math.floor((dataUrl.length * 3) / 4);
-        if (approxBytes > MAX_COMMUNITY_PHOTO_BYTES) {
-          const smaller = canvas.toDataURL('image/jpeg', 0.62);
-          resolve(smaller);
-          return;
-        }
-        resolve(dataUrl);
+        resolve(bestDataUrl);
       };
       img.src = src;
     };

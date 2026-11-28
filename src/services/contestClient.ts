@@ -14,6 +14,7 @@ import type {
   ContestViewRecordResult,
   PublicContestEntry,
 } from '../types/contest';
+import { parseApiJsonResponse } from '../utils/httpResponse';
 
 function buildCommunityHeaders(includeJson = false): Record<string, string> {
   const headers: Record<string, string> = {
@@ -31,14 +32,14 @@ async function buildAdminHeaders(includeJson = false): Promise<Record<string, st
   );
 }
 
-async function readJsonSafe<T>(resp: Response): Promise<T & { ok?: boolean; error?: string }> {
+async function readJsonSafe<T extends object>(
+  resp: Response
+): Promise<T & { ok?: boolean; error?: string }> {
   try {
-    return (await resp.json()) as T & { ok?: boolean; error?: string };
+    const rawText = await resp.text();
+    return parseApiJsonResponse<T>(resp.status, resp.headers.get('content-type'), rawText);
   } catch {
-    return { ok: false, error: 'ಸರ್ವರ್ ಪ್ರತಿಕ್ರಿಯೆ ದೋಷ. ದಯವಿಟ್ಟು ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ.' } as T & {
-      ok?: boolean;
-      error?: string;
-    };
+    return parseApiJsonResponse<T>(resp.status, resp.headers.get('content-type'), '');
   }
 }
 
@@ -169,15 +170,24 @@ export async function fetchAdminContestOverview(
 export async function updateAdminContestEntryEligibility(
   entryId: string,
   eligibility: ContestEntryEligibility,
-  reason?: string
+  reason?: string,
+  options?: { hidePost?: boolean }
 ): Promise<void> {
+  const cleanReason = typeof reason === 'string' ? reason.trim() : '';
+  if (eligibility === 'disqualified' && cleanReason.length < 3) {
+    throw new Error('Please enter at least 3 characters for the disqualification reason.');
+  }
   const resp = await fetch(
     `/api/admin2/contest/entries/${encodeURIComponent(entryId)}/eligibility`,
     {
       method: 'PATCH',
       credentials: 'include',
       headers: await buildAdminHeaders(true),
-      body: JSON.stringify({ eligibility, reason }),
+      body: JSON.stringify({
+        eligibility,
+        reason: cleanReason || undefined,
+        hidePost: options?.hidePost === true,
+      }),
     }
   );
   const data = await readJsonSafe<{ ok: boolean }>(resp);

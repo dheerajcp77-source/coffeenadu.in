@@ -1436,7 +1436,7 @@ async function startServer() {
   loadArticles();
 
   const app = express();
-  app.use(express.json({ limit: '10mb' }));
+  app.use(express.json({ limit: '15mb' }));
   app.use('/uploads', express.static(UPLOADS_DIR, { maxAge: '7d' }));
 
   app.get('/api/health', (_req, res) => {
@@ -3028,8 +3028,34 @@ Rules:
   });
 
   app.use('/api', (_req, res) => {
-    res.status(404).json({ error: 'API route not found.' });
+    res.status(404).json({ ok: false, error: 'API route not found.' });
   });
+
+  app.use(
+    '/api',
+    (
+      err: Error & { type?: string; status?: number; statusCode?: number },
+      _req: Request,
+      res: Response,
+      _next: NextFunction
+    ) => {
+      const status =
+        err?.type === 'entity.too.large'
+          ? 413
+          : err?.type === 'entity.parse.failed' || err instanceof SyntaxError
+          ? 400
+          : Number(err?.statusCode || err?.status) || 500;
+      const message =
+        status === 413
+          ? 'ಅಪ್‌ಲೋಡ್ ಮಾಡಿದ ಫೋಟೋಗಳು ತುಂಬಾ ದೊಡ್ಡದಾಗಿವೆ (413). ದಯವಿಟ್ಟು ಚಿಕ್ಕ ಫೋಟೋಗಳನ್ನು ಆಯ್ಕೆಮಾಡಿ.'
+          : status === 400
+          ? 'ಅಮಾನ್ಯ JSON ವಿನಂತಿ (Invalid request payload).'
+          : err?.message || 'ಸರ್ವರ್ ಪ್ರತಿಕ್ರಿಯೆ ದೋಷ. ದಯವಿಟ್ಟು ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ.';
+      if (!res.headersSent) {
+        res.status(status).json({ ok: false, error: message });
+      }
+    }
+  );
 
   function escapeHtmlAttr(value: string): string {
     return value

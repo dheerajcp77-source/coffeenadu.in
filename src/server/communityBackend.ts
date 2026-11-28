@@ -436,6 +436,24 @@ export class CommunityBackend {
   }
 
   /**
+   * Allows ContestBackend to optionally hide or restore a contest post when disqualifying
+   * or reinstating duplicate/off-topic entries from the Monthly News Contest tab.
+   */
+  public setPostStatusInternal(
+    postId: string,
+    status: CommunityPostStatus,
+    reason?: string
+  ): CommunityPostRecord | null {
+    const post = this.state.posts.find((p) => p.id === postId);
+    if (!post) return null;
+    post.status = status;
+    post.hiddenReason = status !== 'published' ? reason || post.hiddenReason : undefined;
+    post.updatedAt = new Date().toISOString();
+    this.persistState();
+    return post;
+  }
+
+  /**
    * Reuses the EXISTING community registration/session pipeline (Full Name + Mobile Number,
    * NO OTP, NO fee) for Monthly News Contest contributors.
    */
@@ -546,8 +564,17 @@ export class CommunityBackend {
       expiresAtMs: nowMs + SESSION_TTL_MS,
     });
 
-    this.persistState();
-    this.setSessionCookie(req, res, rawToken);
+    try {
+      this.persistState();
+      this.setSessionCookie(req, res, rawToken);
+    } catch (err) {
+      console.error('[CommunityBackend] Failed persisting contest contributor:', err);
+      return {
+        ok: false,
+        status: 500,
+        error: 'ಬಳಕೆದಾರರ ಮಾಹಿತಿಯನ್ನು ಉಳಿಸಲು ಸಾಧ್ಯವಾಗಲಿಲ್ಲ. ದಯವಿಟ್ಟು ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ.',
+      };
+    }
 
     return {
       ok: true,
@@ -632,7 +659,17 @@ export class CommunityBackend {
       };
     }
 
-    const photoResult = this.processUploadedPhotos(input.photos);
+    let photoResult: { ok: boolean; photos: string[]; error?: string };
+    try {
+      photoResult = this.processUploadedPhotos(input.photos);
+    } catch (err) {
+      console.error('[CommunityBackend] Contest photo processing error:', err);
+      return {
+        ok: false,
+        status: 500,
+        error: 'ಫೋಟೋವನ್ನು ಪ್ರಕ್ರಿಯೆಗೊಳಿಸಲು ಸಾಧ್ಯವಾಗಲಿಲ್ಲ. ದಯವಿಟ್ಟು ಚಿಕ್ಕ ಫೋಟೋ ಪ್ರಯತ್ನಿಸಿ.',
+      };
+    }
     if (!photoResult.ok) {
       return {
         ok: false,
@@ -663,9 +700,19 @@ export class CommunityBackend {
       sharesCount: 0,
     };
 
-    this.state.posts.unshift(newPost);
-    user.lastActiveAt = nowIso;
-    this.persistState();
+    try {
+      this.state.posts.unshift(newPost);
+      user.lastActiveAt = nowIso;
+      this.persistState();
+    } catch (err) {
+      console.error('[CommunityBackend] Failed saving contest post:', err);
+      this.state.posts = this.state.posts.filter((p) => p.id !== id);
+      return {
+        ok: false,
+        status: 500,
+        error: 'ಸುದ್ದಿಯನ್ನು ಸರ್ವರ್‌ನಲ್ಲಿ ಉಳಿಸಲು ಸಾಧ್ಯವಾಗಲಿಲ್ಲ. ದಯವಿಟ್ಟು ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ.',
+      };
+    }
 
     return {
       ok: true,

@@ -147,76 +147,86 @@ function buildProxyResponseHeaders(
 }
 
 export async function onRequest(context: PagesFunctionContext): Promise<Response> {
-  const { request, env } = context;
-  const incomingUrl = new URL(request.url);
-
-  if (incomingUrl.pathname !== '/api' && !incomingUrl.pathname.startsWith('/api/')) {
-    return jsonErrorResponse(400, 'Invalid API proxy path.');
-  }
-
-  const backendOrigin = resolveConfiguredBackendOrigin(env);
-  if (!backendOrigin) {
-    return handleApiDirectOnCloudflare(context);
-  }
-
-  const targetUrl = new URL(`${incomingUrl.pathname}${incomingUrl.search}`, backendOrigin);
-  if (
-    targetUrl.origin !== backendOrigin.origin ||
-    (targetUrl.pathname !== '/api' && !targetUrl.pathname.startsWith('/api/'))
-  ) {
-    return jsonErrorResponse(400, 'Invalid API proxy destination.');
-  }
-
-  const method = request.method.toUpperCase();
-  // Clone non-GET/HEAD requests before reading request.body so direct fallback can read the body safely
-  const fallbackRequest =
-    method !== 'GET' && method !== 'HEAD' && request.body !== null ? request.clone() : request;
-
-  const upstreamHeaders = buildUpstreamRequestHeaders(request, incomingUrl);
-  const fetchInit: RequestInit & { duplex?: 'half' } = {
-    method,
-    headers: upstreamHeaders,
-    redirect: 'manual',
-  };
-
-  if (method !== 'GET' && method !== 'HEAD' && request.body !== null) {
-    fetchInit.body = request.body;
-    fetchInit.duplex = 'half';
-  }
-
-  if (typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function') {
-    fetchInit.signal = AbortSignal.timeout(UPSTREAM_TIMEOUT_MS);
-  }
-
-  let upstreamResponse: Response;
   try {
-    upstreamResponse = await fetch(targetUrl.toString(), fetchInit);
-  } catch {
-    return handleApiDirectOnCloudflare({ ...context, request: fallbackRequest });
-  }
+    const { request, env } = context;
+    const incomingUrl = new URL(request.url);
 
-  // Never forward dead upstream 404/5xx HTML pages (e.g. expired preview hosts)
-  if (isDeadUpstreamHtmlResponse(upstreamResponse)) {
-    try {
-      await upstreamResponse.body?.cancel();
-    } catch {
-      // Ignore cancel error
+    if (incomingUrl.pathname !== '/api' && !incomingUrl.pathname.startsWith('/api/')) {
+      return jsonErrorResponse(400, 'Invalid API proxy path.');
     }
-    return handleApiDirectOnCloudflare({ ...context, request: fallbackRequest });
+
+    const backendOrigin = resolveConfiguredBackendOrigin(env);
+    if (!backendOrigin) {
+      return await handleApiDirectOnCloudflare(context);
+    }
+
+    const targetUrl = new URL(`${incomingUrl.pathname}${incomingUrl.search}`, backendOrigin);
+    if (
+      targetUrl.origin !== backendOrigin.origin ||
+      (targetUrl.pathname !== '/api' && !targetUrl.pathname.startsWith('/api/'))
+    ) {
+      return jsonErrorResponse(400, 'Invalid API proxy destination.');
+    }
+
+    const method = request.method.toUpperCase();
+    // Clone non-GET/HEAD requests before reading request.body so direct fallback can read the body safely
+    const fallbackRequest =
+      method !== 'GET' && method !== 'HEAD' && request.body !== null ? request.clone() : request;
+
+    const upstreamHeaders = buildUpstreamRequestHeaders(request, incomingUrl);
+    const fetchInit: RequestInit & { duplex?: 'half' } = {
+      method,
+      headers: upstreamHeaders,
+      redirect: 'manual',
+    };
+
+    if (method !== 'GET' && method !== 'HEAD' && request.body !== null) {
+      fetchInit.body = request.body;
+      fetchInit.duplex = 'half';
+    }
+
+    if (typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function') {
+      fetchInit.signal = AbortSignal.timeout(UPSTREAM_TIMEOUT_MS);
+    }
+
+    let upstreamResponse: Response;
+    try {
+      upstreamResponse = await fetch(targetUrl.toString(), fetchInit);
+    } catch {
+      return await handleApiDirectOnCloudflare({ ...context, request: fallbackRequest });
+    }
+
+    // Never forward dead/non-JSON upstream 404/5xx error pages (e.g. expired preview hosts or proxy HTML)
+    if (isDeadUpstreamHtmlResponse(upstreamResponse)) {
+      try {
+        await upstreamResponse.body?.cancel();
+      } catch {
+        // Ignore cancel error
+      }
+      return await handleApiDirectOnCloudflare({ ...context, request: fallbackRequest });
+    }
+
+    const responseHeaders = buildProxyResponseHeaders(
+      upstreamResponse.headers,
+      backendOrigin,
+      incomingUrl.origin
+    );
+
+    const hasNoBody =
+      method === 'HEAD' || upstreamResponse.status === 204 || upstreamResponse.status === 304;
+
+    return new Response(hasNoBody ? null : upstreamResponse.body, {
+      status: upstreamResponse.status,
+      statusText: upstreamResponse.statusText,
+      headers: responseHeaders,
+    });
+  } catch (err) {
+    console.error('[CF API Proxy] Unhandled API exception:', err);
+    return jsonErrorResponse(
+      500,
+      err instanceof Error && err.message
+        ? err.message
+        : 'ಸರ್ವರ್ ಪ್ರತಿಕ್ರಿಯೆ ದೋಷ. ದಯವಿಟ್ಟು ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ.'
+    );
   }
-
-  const responseHeaders = buildProxyResponseHeaders(
-    upstreamResponse.headers,
-    backendOrigin,
-    incomingUrl.origin
-  );
-
-  const hasNoBody =
-    method === 'HEAD' || upstreamResponse.status === 204 || upstreamResponse.status === 304;
-
-  return new Response(hasNoBody ? null : upstreamResponse.body, {
-    status: upstreamResponse.status,
-    statusText: upstreamResponse.statusText,
-    headers: responseHeaders,
-  });
 }

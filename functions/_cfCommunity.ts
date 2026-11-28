@@ -150,6 +150,7 @@ export async function handleCfCommunityApi(
     return null;
   }
 
+  try {
   const isMutation = method !== 'GET' && method !== 'HEAD';
   const isAdminRoute = pathname.startsWith('/api/admin2/community');
   const state = await loadSharedCommunityContestState(env, isMutation || isAdminRoute);
@@ -581,15 +582,22 @@ export async function handleCfCommunityApi(
       if (nextStatus === 'suspended') {
         state.sessions = state.sessions.filter((s) => s.userId !== user.id);
       }
-      await persistSharedCommunityContestDelta(
-        env,
-        state,
-        {
-          user,
-          revokeSessionsForUserId: nextStatus === 'suspended' ? user.id : undefined,
-        },
-        { adminEmail }
-      );
+      try {
+        await persistSharedCommunityContestDelta(
+          env,
+          state,
+          {
+            user,
+            revokeSessionsForUserId: nextStatus === 'suspended' ? user.id : undefined,
+          },
+          { adminEmail }
+        );
+      } catch (err) {
+        return jsonResp(
+          { ok: false, error: err instanceof Error ? err.message : 'Failed to update user status.' },
+          502
+        );
+      }
       return jsonResp({ ok: true, user });
     }
 
@@ -617,15 +625,22 @@ export async function handleCfCommunityApi(
         post.status !== 'published' ? cleanSingleLine(body.reason, 200) || undefined : undefined;
       post.updatedAt = new Date().toISOString();
       const updatedEntries = syncContestEntriesWithPost(state, post);
-      await persistSharedCommunityContestDelta(
-        env,
-        state,
-        {
-          post,
-          extraContestEntries: updatedEntries,
-        },
-        { adminEmail }
-      );
+      try {
+        await persistSharedCommunityContestDelta(
+          env,
+          state,
+          {
+            post,
+            extraContestEntries: updatedEntries,
+          },
+          { adminEmail }
+        );
+      } catch (err) {
+        return jsonResp(
+          { ok: false, error: err instanceof Error ? err.message : 'Failed to update post status.' },
+          502
+        );
+      }
       return jsonResp({ ok: true, post });
     }
 
@@ -636,16 +651,23 @@ export async function handleCfCommunityApi(
       const deletedId = state.posts[idx].id;
       state.posts.splice(idx, 1);
       const syncRes = handlePostDeletedInSharedState(state, deletedId);
-      await persistSharedCommunityContestDelta(
-        env,
-        state,
-        {
-          deletePostId: deletedId,
-          deleteContestEntryByPostId: syncRes.deletedByPostId,
-          extraContestEntries: syncRes.updatedEntries,
-        },
-        { adminEmail }
-      );
+      try {
+        await persistSharedCommunityContestDelta(
+          env,
+          state,
+          {
+            deletePostId: deletedId,
+            deleteContestEntryByPostId: syncRes.deletedByPostId,
+            extraContestEntries: syncRes.updatedEntries,
+          },
+          { adminEmail }
+        );
+      } catch (err) {
+        return jsonResp(
+          { ok: false, error: err instanceof Error ? err.message : 'Failed to delete post.' },
+          502
+        );
+      }
       return jsonResp({ ok: true });
     }
 
@@ -661,7 +683,14 @@ export async function handleCfCommunityApi(
       rep.status = body.status === 'dismissed' ? 'dismissed' : 'resolved';
       rep.resolvedAt = new Date().toISOString();
       rep.resolvedBy = adminEmail;
-      await persistSharedCommunityContestDelta(env, state, { report: rep }, { adminEmail });
+      try {
+        await persistSharedCommunityContestDelta(env, state, { report: rep }, { adminEmail });
+      } catch (err) {
+        return jsonResp(
+          { ok: false, error: err instanceof Error ? err.message : 'Failed to update report.' },
+          502
+        );
+      }
       return jsonResp({ ok: true, report: rep });
     }
 
@@ -688,4 +717,17 @@ export async function handleCfCommunityApi(
   }
 
   return null;
+  } catch (err) {
+    console.error('[CF Community API] Unhandled exception:', err);
+    return jsonResp(
+      {
+        ok: false,
+        error:
+          err instanceof Error && err.message
+            ? err.message
+            : 'ಸರ್ವರ್ ಪ್ರತಿಕ್ರಿಯೆ ದೋಷ. ದಯವಿಟ್ಟು ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ.',
+      },
+      500
+    );
+  }
 }

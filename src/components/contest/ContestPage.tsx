@@ -279,6 +279,7 @@ export const ContestPage: React.FC<ContestPageProps> = ({
               <div className="flex flex-wrap items-center gap-2.5 pt-2">
                 <button
                   type="button"
+                  data-testid="contest-participate-btn"
                   onClick={() => setSubmitModalOpen(true)}
                   disabled={activeMonth ? !activeMonth.isAcceptingEntries : false}
                   className="inline-flex min-h-[46px] items-center justify-center gap-2 rounded-lg bg-white px-5 py-2.5 text-sm font-extrabold text-[#0D3424] shadow-sm transition hover:bg-amber-50 disabled:opacity-50 cursor-pointer"

@@ -329,6 +329,11 @@ export async function loadSharedCommunityContestState(
       }
     } catch (err) {
       console.warn('[CF CommunityContest] Apps Script snapshot fetch failed:', err);
+      const cachedFallback = sharedMemState || (await readEdgeCache());
+      if (cachedFallback) {
+        sharedMemState = cachedFallback;
+        return sharedMemState;
+      }
     }
   }
 
@@ -406,7 +411,13 @@ export async function persistPublicPhotosOnCf(
   }
 
   const cfg = getCfAppsScriptConfig(env);
-  const outPhotos: string[] = [];
+  const validated: Array<{
+    index: number;
+    kind: 'existing-media' | 'data-url';
+    raw: string;
+    ext: string;
+    mime: string;
+  }> = [];
 
   for (let i = 0; i < rawPhotos.length; i++) {
     const item = rawPhotos[i];
@@ -414,57 +425,51 @@ export async function persistPublicPhotosOnCf(
     if (!check.ok) {
       return { ok: false, photos: [], error: check.error || 'ಅಮಾನ್ಯ ಫೋಟೋ ಫೈಲ್.' };
     }
+    validated.push({
+      index: i,
+      kind: check.kind || 'existing-media',
+      raw: String(item).trim(),
+      ext: check.ext || 'jpg',
+      mime: check.mime || 'image/jpeg',
+    });
+  }
 
-    if (check.kind === 'existing-media') {
-      outPhotos.push(String(item).trim());
-      continue;
-    }
-
-    if (check.kind === 'data-url') {
-      const dataUrl = String(item).trim();
-      if (!cfg.configured) {
-        outPhotos.push(dataUrl);
-        continue;
-      }
-
-      const ext = check.ext || 'jpg';
-      const mimeType = check.mime || 'image/jpeg';
-      try {
+  try {
+    const outPhotos = await Promise.all(
+      validated.map(async (entry) => {
+        if (entry.kind === 'existing-media' || !cfg.configured) {
+          return entry.raw;
+        }
         const uploaded = await callSharedAppsScriptPost<{
           ok?: boolean;
           fileId?: string;
           error?: string;
         }>(env, 'uploadPublicCommunityImage', {
-          mimeType,
-          base64Data: dataUrl,
-          fileName: `community_${Date.now().toString(36)}_${i + 1}.${ext}`,
+          mimeType: entry.mime,
+          base64Data: entry.raw,
+          fileName: `community_${Date.now().toString(36)}_${entry.index + 1}.${entry.ext}`,
         });
         if (!uploaded?.ok || !uploaded.fileId) {
-          return {
-            ok: false,
-            photos: [],
-            storageFailure: true,
-            error:
-              uploaded?.error ||
-              'ಫೋಟೋವನ್ನು Google Drive ನಲ್ಲಿ ಶಾಶ್ವತವಾಗಿ ಉಳಿಸಲು ಸಾಧ್ಯವಾಗಲಿಲ್ಲ. ದಯವಿಟ್ಟು ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ.',
-          };
+          throw new Error(
+            uploaded?.error ||
+              'ಫೋಟೋವನ್ನು Google Drive ನಲ್ಲಿ ಶಾಶ್ವತವಾಗಿ ಉಳಿಸಲು ಸಾಧ್ಯವಾಗಲಿಲ್ಲ. ದಯವಿಟ್ಟು ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ.'
+          );
         }
-        outPhotos.push(`/api/media/drive/${encodeURIComponent(uploaded.fileId)}`);
-      } catch (err) {
-        return {
-          ok: false,
-          photos: [],
-          storageFailure: true,
-          error:
-            err instanceof Error
-              ? err.message
-              : 'ಫೋಟೋ ಅಪ್‌ಲೋಡ್ ವಿಫಲವಾಗಿದೆ. ದಯವಿಟ್ಟು ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ.',
-        };
-      }
-    }
+        return `/api/media/drive/${encodeURIComponent(uploaded.fileId)}`;
+      })
+    );
+    return { ok: true, photos: outPhotos };
+  } catch (err) {
+    return {
+      ok: false,
+      photos: [],
+      storageFailure: true,
+      error:
+        err instanceof Error
+          ? err.message
+          : 'ಫೋಟೋ ಅಪ್‌ಲೋಡ್ ವಿಫಲವಾಗಿದೆ. ದಯವಿಟ್ಟು ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ.',
+    };
   }
-
-  return { ok: true, photos: outPhotos };
 }
 
 export function syncContestEntriesWithPost(

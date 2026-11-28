@@ -231,10 +231,13 @@ export function getAppsScriptConfig(env: PagesEnv | undefined): {
 
 export function isDeadUpstreamHtmlResponse(resp: Response): boolean {
   const contentType = (resp.headers.get('content-type') || '').toLowerCase();
-  return (
-    (resp.status === 404 || resp.status >= 500) &&
-    contentType.includes('text/html')
-  );
+  if (resp.status === 404 && contentType.includes('text/html')) {
+    return true;
+  }
+  if (resp.status >= 500 && !contentType.includes('json')) {
+    return true;
+  }
+  return false;
 }
 
 export function jsonResponse(
@@ -2028,6 +2031,7 @@ async function readJsonBody(request: Request): Promise<Record<string, unknown>> 
 export async function handleApiDirectOnCloudflare(
   context: PagesFunctionContext
 ): Promise<Response> {
+  try {
   const { request, env, waitUntil } = context;
   const url = new URL(request.url);
   const pathname = url.pathname.replace(/\/+$/, '') || '/';
@@ -4136,4 +4140,13 @@ export async function handleApiDirectOnCloudflare(
     404,
     'Endpoint not available in standalone Cloudflare mode. Set BACKEND_ORIGIN to your live Express backend URL for full CMS/Ads features.'
   );
+  } catch (err) {
+    console.error('[CF Direct API] Unhandled exception:', err);
+    return jsonErrorResponse(
+      500,
+      err instanceof Error && err.message
+        ? err.message
+        : 'ಸರ್ವರ್ ಪ್ರತಿಕ್ರಿಯೆ ದೋಷ. ದಯವಿಟ್ಟು ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ.'
+    );
+  }
 }

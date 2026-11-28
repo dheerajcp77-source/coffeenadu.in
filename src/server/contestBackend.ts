@@ -278,8 +278,11 @@ export class ContestBackend {
   }
 
   private getAdminActorEmail(req: Request): string {
-    const anyReq = req as Request & { adminUser?: { email?: string } };
-    return anyReq.adminUser?.email || 'admin@coffeenadu.in';
+    const anyReq = req as Request & {
+      admin2User?: { email?: string };
+      adminUser?: { email?: string };
+    };
+    return anyReq.admin2User?.email || anyReq.adminUser?.email || 'admin@coffeenadu.in';
   }
 
   private appendAuditLog(
@@ -577,30 +580,41 @@ export class ContestBackend {
     // PUBLIC CONTEST OVERVIEW & LEADERBOARD (STRICT PRIVACY WALL, ZERO ADS)
     // -------------------------------------------------------------------------
     app.get('/api/public/contest/overview', (_req, res) => {
-      res.json({ ok: true, ...this.buildPublicOverview(new Date()) });
+      try {
+        res.json({ ok: true, ...this.buildPublicOverview(new Date()) });
+      } catch (err) {
+        console.error('[ContestBackend] public overview failed:', err);
+        res.status(500).json({ ok: false, error: 'Failed to load contest overview.' });
+      }
     });
 
     app.get('/api/public/contest/entries/:slugOrId', (req, res) => {
-      const entry = this.findEntryBySlugOrId(req.params.slugOrId);
-      if (!entry) {
-        res.status(404).json({ ok: false, error: 'Contest entry not found.' });
-        return;
+      try {
+        const entry = this.findEntryBySlugOrId(req.params.slugOrId);
+        if (!entry) {
+          res.status(404).json({ ok: false, error: 'Contest entry not found.' });
+          return;
+        }
+        const month = this.state.months.find((m) => m.monthKey === entry.competitionMonth);
+        res.json({
+          ok: true,
+          entry: toPublicContestEntry(entry),
+          monthLabelEn: month?.displayLabelEn || entry.competitionMonth,
+          monthLabelKn: month?.displayLabelKn || entry.competitionMonth,
+          monthStatus: month?.status || 'closed',
+          isMonthOpen: month ? isContestMonthOpen(month) : false,
+        });
+      } catch (err) {
+        console.error('[ContestBackend] entry fetch failed:', err);
+        res.status(500).json({ ok: false, error: 'Failed to load contest article.' });
       }
-      const month = this.state.months.find((m) => m.monthKey === entry.competitionMonth);
-      res.json({
-        ok: true,
-        entry: toPublicContestEntry(entry),
-        monthLabelEn: month?.displayLabelEn || entry.competitionMonth,
-        monthLabelKn: month?.displayLabelKn || entry.competitionMonth,
-        monthStatus: month?.status || 'closed',
-        isMonthOpen: month ? isContestMonthOpen(month) : false,
-      });
     });
 
     // -------------------------------------------------------------------------
     // SECURE SERVER-SIDE VIEW COUNTER (ROLLING 24H DEDUPE + ANTI-ABUSE)
     // -------------------------------------------------------------------------
     app.post('/api/public/contest/entries/:slugOrId/view', (req, res) => {
+      try {
       const entry = this.findEntryBySlugOrId(req.params.slugOrId);
       if (!entry) {
         res.status(404).json({ ok: false, error: 'Contest entry not found.' });
@@ -777,12 +791,19 @@ export class ContestBackend {
 
       this.persistState();
       respond(true, 'counted');
+      } catch (err) {
+        console.error('[ContestBackend] view counter failed:', err);
+        if (!res.headersSent) {
+          res.status(500).json({ ok: false, error: 'Failed to record article view.' });
+        }
+      }
     });
 
     // -------------------------------------------------------------------------
     // PUBLIC CONTEST NEWS SUBMISSION (REUSES EXISTING COMMUNITY USER & POST STORE)
     // -------------------------------------------------------------------------
     app.post('/api/public/contest/submit', (req, res) => {
+      try {
       const ip = getClientIp(req);
       if (!this.checkSimpleIpRate(`csub:${ip}`, 15, 60 * 60 * 1000)) {
         res.status(429).json({
@@ -884,6 +905,15 @@ export class ContestBackend {
         entry: toPublicContestEntry(entry),
         permanentPath: `/community/${encodeURIComponent(postRes.post.slug)}`,
       });
+      } catch (err) {
+        console.error('[ContestBackend] contest submit failed:', err);
+        if (!res.headersSent) {
+          res.status(500).json({
+            ok: false,
+            error: 'ಸುದ್ದಿ ಪ್ರಕಟಿಸುವಾಗ ಸರ್ವರ್ ದೋಷ ಉಂಟಾಯಿತು. ದಯವಿಟ್ಟು ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ.',
+          });
+        }
+      }
     });
 
     // -------------------------------------------------------------------------
@@ -893,9 +923,14 @@ export class ContestBackend {
       '/api/admin2/contest/overview',
       this.authFactory('dashboard.view'),
       (req, res) => {
-        const monthParam =
-          typeof req.query.month === 'string' ? req.query.month.trim() : undefined;
-        res.json({ ok: true, ...this.buildAdminOverview(monthParam) });
+        try {
+          const monthParam =
+            typeof req.query.month === 'string' ? req.query.month.trim() : undefined;
+          res.json({ ok: true, ...this.buildAdminOverview(monthParam) });
+        } catch (err) {
+          console.error('[ContestBackend] admin overview failed:', err);
+          res.status(500).json({ ok: false, error: 'Failed to load admin contest overview.' });
+        }
       }
     );
 
@@ -903,43 +938,67 @@ export class ContestBackend {
       '/api/admin2/contest/entries/:id/eligibility',
       this.authFactory('news.edit'),
       (req, res) => {
-        const entry = this.state.entries.find((e) => e.id === req.params.id);
-        if (!entry) {
-          res.status(404).json({ ok: false, error: 'Contest entry not found.' });
-          return;
+        try {
+          const targetKey = decodeURIComponent(String(req.params.id || '')).trim();
+          const entry = this.state.entries.find(
+            (e) => e.id === targetKey || e.postId === targetKey
+          );
+          if (!entry) {
+            res.status(404).json({ ok: false, error: 'Contest entry not found.' });
+            return;
+          }
+          const eligibility: ContestEntryEligibility =
+            req.body?.eligibility === 'disqualified' ? 'disqualified' : 'eligible';
+          const reason = cleanSingleLine(req.body?.reason, 240);
+          const hidePost = req.body?.hidePost === true;
+
+          if (eligibility === 'disqualified' && reason.length < 3) {
+            res.status(400).json({
+              ok: false,
+              error: 'Please enter a brief disqualification reason for the audit record.',
+            });
+            return;
+          }
+
+          const actor = this.getAdminActorEmail(req);
+          const nowIso = new Date().toISOString();
+          entry.eligibility = eligibility;
+          entry.disqualificationReason = eligibility === 'disqualified' ? reason : undefined;
+          entry.disqualifiedBy = eligibility === 'disqualified' ? actor : undefined;
+          entry.disqualifiedAt = eligibility === 'disqualified' ? nowIso : undefined;
+          entry.updatedAt = nowIso;
+
+          if (eligibility === 'disqualified' && hidePost) {
+            this.communityBackend.setPostStatusInternal(entry.postId, 'hidden', reason);
+          } else if (eligibility === 'eligible') {
+            const linkedPost = this.communityBackend.getInternalPostByIdOrSlug(entry.postId);
+            if (linkedPost && linkedPost.status === 'hidden') {
+              this.communityBackend.setPostStatusInternal(entry.postId, 'published');
+            }
+          }
+
+          this.appendAuditLog(
+            actor,
+            eligibility === 'disqualified' ? 'entry.disqualify' : 'entry.reinstate',
+            `${eligibility === 'disqualified' ? 'Disqualified' : 'Reinstated'} "${entry.title}"${
+              reason ? ` (${reason})` : ''
+            }${eligibility === 'disqualified' && hidePost ? ' [post hidden from feed]' : ''}`,
+            entry.competitionMonth,
+            entry.id
+          );
+          this.persistState();
+
+          res.json({ ok: true, entry });
+        } catch (err) {
+          console.error('[ContestBackend] eligibility update failed:', err);
+          if (!res.headersSent) {
+            res.status(500).json({
+              ok: false,
+              error:
+                err instanceof Error ? err.message : 'Failed to update entry eligibility.',
+            });
+          }
         }
-        const eligibility: ContestEntryEligibility =
-          req.body?.eligibility === 'disqualified' ? 'disqualified' : 'eligible';
-        const reason = cleanSingleLine(req.body?.reason, 240);
-
-        if (eligibility === 'disqualified' && reason.length < 3) {
-          res.status(400).json({
-            ok: false,
-            error: 'Please enter a brief disqualification reason for the audit record.',
-          });
-          return;
-        }
-
-        const actor = this.getAdminActorEmail(req);
-        const nowIso = new Date().toISOString();
-        entry.eligibility = eligibility;
-        entry.disqualificationReason = eligibility === 'disqualified' ? reason : undefined;
-        entry.disqualifiedBy = eligibility === 'disqualified' ? actor : undefined;
-        entry.disqualifiedAt = eligibility === 'disqualified' ? nowIso : undefined;
-        entry.updatedAt = nowIso;
-
-        this.appendAuditLog(
-          actor,
-          eligibility === 'disqualified' ? 'entry.disqualify' : 'entry.reinstate',
-          `${eligibility === 'disqualified' ? 'Disqualified' : 'Reinstated'} "${entry.title}"${
-            reason ? ` (${reason})` : ''
-          }`,
-          entry.competitionMonth,
-          entry.id
-        );
-        this.persistState();
-
-        res.json({ ok: true, entry });
       }
     );
 
@@ -947,34 +1006,41 @@ export class ContestBackend {
       '/api/admin2/contest/alerts/:id',
       this.authFactory('security.view'),
       (req, res) => {
-        const alert = this.state.alerts.find((a) => a.id === req.params.id);
-        if (!alert) {
-          res.status(404).json({ ok: false, error: 'Suspicious alert not found.' });
-          return;
+        try {
+          const alert = this.state.alerts.find((a) => a.id === req.params.id);
+          if (!alert) {
+            res.status(404).json({ ok: false, error: 'Suspicious alert not found.' });
+            return;
+          }
+          const status =
+            req.body?.status === 'dismissed'
+              ? 'dismissed'
+              : req.body?.status === 'investigated'
+              ? 'investigated'
+              : 'open';
+          const adminNote = cleanSingleLine(req.body?.adminNote, 240);
+          const actor = this.getAdminActorEmail(req);
+
+          alert.status = status;
+          alert.adminNote = adminNote || alert.adminNote;
+          alert.reviewedBy = actor;
+          alert.reviewedAt = new Date().toISOString();
+
+          this.appendAuditLog(
+            actor,
+            'alert.review',
+            `Marked suspicious traffic alert for "${alert.articleTitle}" as ${status}`,
+            alert.competitionMonth,
+            alert.id
+          );
+          this.persistState();
+          res.json({ ok: true, alert });
+        } catch (err) {
+          console.error('[ContestBackend] alert review failed:', err);
+          if (!res.headersSent) {
+            res.status(500).json({ ok: false, error: 'Failed to update alert status.' });
+          }
         }
-        const status =
-          req.body?.status === 'dismissed'
-            ? 'dismissed'
-            : req.body?.status === 'investigated'
-            ? 'investigated'
-            : 'open';
-        const adminNote = cleanSingleLine(req.body?.adminNote, 240);
-        const actor = this.getAdminActorEmail(req);
-
-        alert.status = status;
-        alert.adminNote = adminNote || alert.adminNote;
-        alert.reviewedBy = actor;
-        alert.reviewedAt = new Date().toISOString();
-
-        this.appendAuditLog(
-          actor,
-          'alert.review',
-          `Marked suspicious traffic alert for "${alert.articleTitle}" as ${status}`,
-          alert.competitionMonth,
-          alert.id
-        );
-        this.persistState();
-        res.json({ ok: true, alert });
       }
     );
 
@@ -982,6 +1048,7 @@ export class ContestBackend {
       '/api/admin2/contest/months/:monthKey/config',
       this.authFactory('settings.manage'),
       (req, res) => {
+        try {
         const month = this.state.months.find((m) => m.monthKey === req.params.monthKey);
         if (!month) {
           res.status(404).json({ ok: false, error: 'Competition month not found.' });
@@ -1027,6 +1094,12 @@ export class ContestBackend {
         );
         this.persistState();
         res.json({ ok: true, month });
+        } catch (err) {
+          console.error('[ContestBackend] month config failed:', err);
+          if (!res.headersSent) {
+            res.status(500).json({ ok: false, error: 'Failed to save month configuration.' });
+          }
+        }
       }
     );
 
@@ -1034,6 +1107,7 @@ export class ContestBackend {
       '/api/admin2/contest/months/:monthKey/winners',
       this.authFactory('news.publish'),
       (req, res) => {
+        try {
         const month = this.state.months.find((m) => m.monthKey === req.params.monthKey);
         if (!month) {
           res.status(404).json({ ok: false, error: 'Competition month not found.' });
@@ -1103,6 +1177,12 @@ export class ContestBackend {
         );
         this.persistState();
         res.json({ ok: true, month });
+        } catch (err) {
+          console.error('[ContestBackend] winners save failed:', err);
+          if (!res.headersSent) {
+            res.status(500).json({ ok: false, error: 'Failed to save winners.' });
+          }
+        }
       }
     );
 
@@ -1110,6 +1190,7 @@ export class ContestBackend {
       '/api/admin2/contest/months/:monthKey/finalize',
       this.authFactory('news.publish'),
       (req, res) => {
+        try {
         const month = this.state.months.find((m) => m.monthKey === req.params.monthKey);
         if (!month) {
           res.status(404).json({ ok: false, error: 'Competition month not found.' });
@@ -1169,6 +1250,12 @@ export class ContestBackend {
         );
         this.persistState();
         res.json({ ok: true, month });
+        } catch (err) {
+          console.error('[ContestBackend] finalize failed:', err);
+          if (!res.headersSent) {
+            res.status(500).json({ ok: false, error: 'Failed to finalize competition month.' });
+          }
+        }
       }
     );
 
@@ -1176,6 +1263,7 @@ export class ContestBackend {
       '/api/admin2/contest/months/:monthKey/publish-winners',
       this.authFactory('news.publish'),
       (req, res) => {
+        try {
         const month = this.state.months.find((m) => m.monthKey === req.params.monthKey);
         if (!month) {
           res.status(404).json({ ok: false, error: 'Competition month not found.' });
@@ -1194,6 +1282,12 @@ export class ContestBackend {
         );
         this.persistState();
         res.json({ ok: true, month });
+        } catch (err) {
+          console.error('[ContestBackend] publish winners failed:', err);
+          if (!res.headersSent) {
+            res.status(500).json({ ok: false, error: 'Failed to update winner publication visibility.' });
+          }
+        }
       }
     );
 
@@ -1201,6 +1295,7 @@ export class ContestBackend {
       '/api/admin2/contest/months/open-next',
       this.authFactory('settings.manage'),
       (req, res) => {
+        try {
         const actor = this.getAdminActorEmail(req);
         const nowIso = new Date().toISOString();
         const requestedKey = cleanSingleLine(req.body?.monthKey, 16);
@@ -1253,6 +1348,12 @@ export class ContestBackend {
         );
         this.persistState();
         res.status(201).json({ ok: true, month: nextMonth });
+        } catch (err) {
+          console.error('[ContestBackend] open-next failed:', err);
+          if (!res.headersSent) {
+            res.status(500).json({ ok: false, error: 'Failed to open next competition month.' });
+          }
+        }
       }
     );
 

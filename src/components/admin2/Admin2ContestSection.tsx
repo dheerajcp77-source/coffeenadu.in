@@ -83,6 +83,8 @@ export const Admin2ContestSection: React.FC<Admin2ContestSectionProps> = ({ dark
 
   const [disqualifyTarget, setDisqualifyTarget] = useState<AdminContestEntryView | null>(null);
   const [disqualifyReason, setDisqualifyReason] = useState('');
+  const [disqualifyHidePost, setDisqualifyHidePost] = useState(true);
+  const [disqualifyModalError, setDisqualifyModalError] = useState('');
 
   const [winnerDrafts, setWinnerDrafts] = useState<WinnerDraftRow[]>([]);
 
@@ -152,15 +154,35 @@ export const Admin2ContestSection: React.FC<Admin2ContestSectionProps> = ({ dark
   const handleConfirmDisqualify = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!disqualifyTarget) return;
-    await runAction(async () => {
+    const trimmedReason = disqualifyReason.trim();
+    if (trimmedReason.length < 3) {
+      setDisqualifyModalError('Please select a preset reason or enter at least 3 characters.');
+      return;
+    }
+    setDisqualifyModalError('');
+    setBusy(true);
+    setError('');
+    setFeedback('');
+    try {
+      const targetTitle = disqualifyTarget.title;
       await updateAdminContestEntryEligibility(
         disqualifyTarget.id,
         'disqualified',
-        disqualifyReason.trim()
+        trimmedReason,
+        { hidePost: disqualifyHidePost }
       );
       setDisqualifyTarget(null);
       setDisqualifyReason('');
-    }, `Disqualified "${disqualifyTarget.title}" and recorded audit entry.`);
+      setDisqualifyHidePost(true);
+      setFeedback(`Disqualified "${targetTitle}" and recorded audit entry.`);
+      await loadData(selectedMonthKey || undefined);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Failed to disqualify entry.';
+      setDisqualifyModalError(msg);
+      setError(msg);
+    } finally {
+      setBusy(false);
+    }
   };
 
   const handleReinstate = async (entry: AdminContestEntryView) => {
@@ -532,9 +554,12 @@ export const Admin2ContestSection: React.FC<Admin2ContestSectionProps> = ({ dark
                             <button
                               type="button"
                               disabled={busy}
+                              data-testid={`contest-disqualify-btn-${entry.id}`}
                               onClick={() => {
                                 setDisqualifyTarget(entry);
                                 setDisqualifyReason('');
+                                setDisqualifyHidePost(true);
+                                setDisqualifyModalError('');
                               }}
                               className="inline-flex items-center gap-1 rounded border border-red-300 px-2.5 py-1 text-[11px] font-bold text-red-700 hover:bg-red-50 dark:border-red-800 dark:text-red-300"
                             >
@@ -545,6 +570,7 @@ export const Admin2ContestSection: React.FC<Admin2ContestSectionProps> = ({ dark
                             <button
                               type="button"
                               disabled={busy}
+                              data-testid={`contest-reinstate-btn-${entry.id}`}
                               onClick={() => void handleReinstate(entry)}
                               className="inline-flex items-center gap-1 rounded border border-emerald-400 px-2.5 py-1 text-[11px] font-bold text-emerald-800 hover:bg-emerald-50 dark:text-emerald-300"
                             >
@@ -562,39 +588,144 @@ export const Admin2ContestSection: React.FC<Admin2ContestSectionProps> = ({ dark
           )}
 
           {disqualifyTarget && (
-            <form
-              onSubmit={handleConfirmDisqualify}
-              className="border-t border-red-200 bg-red-50/70 p-4 dark:border-red-900 dark:bg-red-950/30"
+            <div
+              className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/65 p-4 backdrop-blur-xs"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="disqualify-modal-title"
+              data-testid="contest-disqualify-modal"
             >
-              <p className="text-xs font-bold text-red-900 dark:text-red-200">
-                Disqualify "{disqualifyTarget.title}" — Enter Audit Reason:
-              </p>
-              <div className="mt-2 flex flex-wrap gap-2">
-                <input
-                  type="text"
-                  required
-                  minLength={3}
-                  value={disqualifyReason}
-                  onChange={(e) => setDisqualifyReason(e.target.value)}
-                  placeholder="e.g., Promotional shop ad, duplicate copy-paste, artificial traffic spike"
-                  className={`flex-1 rounded-lg border px-3 py-2 text-xs ${inputClass}`}
-                />
-                <button
-                  type="submit"
-                  disabled={busy}
-                  className="rounded-lg bg-red-600 px-4 py-2 text-xs font-bold text-white hover:bg-red-700"
+              <form
+                onSubmit={handleConfirmDisqualify}
+                className={`w-full max-w-lg rounded-xl border p-5 shadow-2xl ${cardBg}`}
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-[11px] font-bold uppercase tracking-wider text-red-600 dark:text-red-400">
+                      Contest Moderation · Audit Logged
+                    </p>
+                    <h3 id="disqualify-modal-title" className="mt-0.5 text-base font-bold">
+                      Disqualify Contest Entry
+                    </h3>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setDisqualifyTarget(null);
+                      setDisqualifyModalError('');
+                    }}
+                    className={`rounded-lg border px-2.5 py-1 text-xs font-semibold ${inputClass}`}
+                  >
+                    Close
+                  </button>
+                </div>
+
+                <div
+                  className={`mt-3 rounded-lg border p-3 text-xs ${
+                    darkMode ? 'border-slate-800 bg-slate-950/60' : 'border-slate-200 bg-slate-50'
+                  }`}
                 >
-                  Confirm Disqualify
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setDisqualifyTarget(null)}
-                  className={`rounded-lg border px-3 py-2 text-xs font-semibold ${inputClass}`}
-                >
-                  Cancel
-                </button>
-              </div>
-            </form>
+                  <p className="font-bold">{disqualifyTarget.title}</p>
+                  <p className={`mt-0.5 text-[11px] ${mutedText}`}>
+                    {disqualifyTarget.contributorName} · {disqualifyTarget.location}
+                  </p>
+                </div>
+
+                <div className="mt-4">
+                  <p className="text-xs font-bold">Quick Reason Presets:</p>
+                  <div className="mt-2 flex flex-wrap gap-1.5">
+                    {[
+                      'Duplicate news submission',
+                      'Promotional / Shop advertisement',
+                      'Copy-paste / Not original local news',
+                      'Artificial / Suspicious traffic spike',
+                    ].map((preset) => (
+                      <button
+                        key={preset}
+                        type="button"
+                        onClick={() => {
+                          setDisqualifyReason(preset);
+                          setDisqualifyModalError('');
+                        }}
+                        className={`rounded-md border px-2.5 py-1 text-[11px] font-semibold transition ${
+                          disqualifyReason === preset
+                            ? 'border-red-600 bg-red-600 text-white'
+                            : darkMode
+                            ? 'border-slate-700 bg-slate-800 text-slate-200 hover:bg-slate-700'
+                            : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-100'
+                        }`}
+                      >
+                        {preset}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="mt-4">
+                  <label
+                    htmlFor="contest-disqualify-reason-input"
+                    className="mb-1 block text-xs font-bold"
+                  >
+                    Disqualification Reason (Recorded in Audit Log) *
+                  </label>
+                  <input
+                    id="contest-disqualify-reason-input"
+                    data-testid="contest-disqualify-reason-input"
+                    type="text"
+                    required
+                    minLength={3}
+                    value={disqualifyReason}
+                    onChange={(e) => {
+                      setDisqualifyReason(e.target.value);
+                      if (disqualifyModalError) setDisqualifyModalError('');
+                    }}
+                    placeholder="e.g., Duplicate news submission, shop advertisement"
+                    className={`w-full rounded-lg border px-3 py-2 text-xs ${inputClass}`}
+                  />
+                </div>
+
+                <label className="mt-3 flex cursor-pointer items-start gap-2 rounded-lg border border-red-200/70 bg-red-50/50 p-2.5 text-xs dark:border-red-900/60 dark:bg-red-950/20">
+                  <input
+                    type="checkbox"
+                    checked={disqualifyHidePost}
+                    onChange={(e) => setDisqualifyHidePost(e.target.checked)}
+                    className="mt-0.5 h-3.5 w-3.5 rounded accent-red-600"
+                  />
+                  <span>
+                    Also hide this duplicate/disqualified post from the public Community Feed
+                    (reinstating restores it automatically).
+                  </span>
+                </label>
+
+                {disqualifyModalError && (
+                  <p className="mt-3 rounded-lg border border-red-300 bg-red-50 px-3 py-2 text-xs font-semibold text-red-700 dark:border-red-800 dark:bg-red-950/50 dark:text-red-200">
+                    {disqualifyModalError}
+                  </p>
+                )}
+
+                <div className="mt-5 flex items-center justify-end gap-2">
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => {
+                      setDisqualifyTarget(null);
+                      setDisqualifyModalError('');
+                    }}
+                    className={`rounded-lg border px-3.5 py-2 text-xs font-semibold ${inputClass}`}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={busy}
+                    data-testid="contest-disqualify-confirm-btn"
+                    className="rounded-lg bg-red-600 px-4 py-2 text-xs font-bold text-white hover:bg-red-700 disabled:opacity-60"
+                  >
+                    {busy ? 'Disqualifying...' : 'Confirm Disqualify'}
+                  </button>
+                </div>
+              </form>
+            </div>
           )}
         </div>
       )}
