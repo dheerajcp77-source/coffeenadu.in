@@ -117,14 +117,23 @@ export function buildCommunityShareText(
 ): string {
   const url = buildCommunityPostPublicUrl(post.slug || post.id, origin);
   const catLabel = COMMUNITY_CATEGORY_MAP[post.category]?.labelKn || 'ಸಮುದಾಯ ಮಾಹಿತಿ';
-  return [
-    `*${post.title}*`,
-    '',
-    `📌 ${catLabel} · 📍 ${post.location}`,
-    `🔗 ${url}`,
-    '',
-    `COFFEENADU COMMUNITY – ನಮ್ಮ ಮಲೆನಾಡು ಸಮುದಾಯ`,
-  ].join('\n');
+  const cleanTitle = (post.title || '').trim();
+  const lines = cleanTitle
+    ? [
+        `*${cleanTitle}*`,
+        '',
+        `📌 ${catLabel} · 📍 ${post.location}`,
+        `🔗 ${url}`,
+        '',
+        `COFFEENADU COMMUNITY – ನಮ್ಮ ಮಲೆನಾಡು ಸಮುದಾಯ`,
+      ]
+    : [
+        `📸 *${catLabel}* · 📍 ${post.location}`,
+        `🔗 ${url}`,
+        '',
+        `COFFEENADU COMMUNITY – ನಮ್ಮ ಮಲೆನಾಡು ಸಮುದಾಯ`,
+      ];
+  return lines.join('\n');
 }
 
 export function buildCommunityWhatsappUrl(

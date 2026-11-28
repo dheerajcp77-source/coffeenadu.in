@@ -283,9 +283,31 @@ export const CommunityComposerModal: React.FC<CommunityComposerModalProps> = ({
     }
   };
 
+  const hasPhotos = photos.length > 0;
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
+
+    const trimmedTitle = title.trim();
+    const trimmedDesc = description.trim();
+    const hasText = trimmedTitle.length > 0 || trimmedDesc.length > 0;
+
+    if (!hasPhotos && !hasText) {
+      setError('ದಯವಿಟ್ಟು ಕನಿಷ್ಠ ಒಂದು ಫೋಟೋ ಸೇರಿಸಿ ಅಥವಾ ಶೀರ್ಷಿಕೆ ಮತ್ತು ವಿವರಣೆ ಬರೆಯಿರಿ.');
+      return;
+    }
+
+    if (!hasPhotos) {
+      if (trimmedTitle.length < 3) {
+        setError('ಫೋಟೋ ಇಲ್ಲದಿದ್ದರೆ ಕನಿಷ್ಠ 3 ಅಕ್ಷರಗಳ ಶೀರ್ಷಿಕೆ ಅಗತ್ಯವಿದೆ.');
+        return;
+      }
+      if (trimmedDesc.length < 5) {
+        setError('ಫೋಟೋ ಇಲ್ಲದಿದ್ದರೆ ಕನಿಷ್ಠ 5 ಅಕ್ಷರಗಳ ವಿವರಣೆ ಅಗತ್ಯವಿದೆ.');
+        return;
+      }
+    }
 
     const resolvedLocation =
       location === 'ಇತರೆ ಮಲೆನಾಡು ಗ್ರಾಮ' ? customLocation.trim() || 'ಮಲೆನಾಡು' : location;
@@ -293,9 +315,9 @@ export const CommunityComposerModal: React.FC<CommunityComposerModalProps> = ({
     setSubmitting(true);
     try {
       const payload = {
-        title: title.trim(),
+        title: trimmedTitle,
         category,
-        description: description.trim(),
+        description: trimmedDesc,
         location: resolvedLocation,
         price: activeCategoryMeta?.showPriceField ? price.trim() || undefined : undefined,
         optionalPublicContact: optionalPublicContact.trim() || undefined,
@@ -358,9 +380,15 @@ export const CommunityComposerModal: React.FC<CommunityComposerModalProps> = ({
               <div className="p-4 rounded-2xl bg-emerald-50 dark:bg-emerald-950/35 border border-emerald-200 dark:border-emerald-800 flex items-start gap-3">
                 <CheckCircle2 className="w-6 h-6 text-[#176B4A] dark:text-emerald-400 shrink-0 mt-0.5" />
                 <div className="space-y-1 min-w-0">
-                  <h3 className="font-kannada text-sm font-extrabold text-[#10243D] dark:text-white">
-                    {publishedPost.title}
-                  </h3>
+                  {publishedPost.title.trim() ? (
+                    <h3 className="font-kannada text-sm font-extrabold text-[#10243D] dark:text-white">
+                      {publishedPost.title}
+                    </h3>
+                  ) : (
+                    <h3 className="font-kannada text-sm font-extrabold text-[#10243D] dark:text-white">
+                      ಚಿತ್ರ ಪ್ರಕಟಣೆ ಲೈವ್ ಆಗಿದೆ!
+                    </h3>
+                  )}
                   <p className="font-kannada text-xs text-[#14533A] dark:text-emerald-200">
                     ನಿಮ್ಮ ಮಾಹಿತಿ ಈಗ COFFEENADU COMMUNITY ನಲ್ಲಿ ಲೈವ್ ಆಗಿದೆ. ಕೆಳಗಿನ ಲಿಂಕ್ ಮೂಲಕ WhatsApp ಅಥವಾ ಇತರರಿಗೆ ಹಂಚಿಕೊಳ್ಳಿ:
                   </p>
@@ -412,21 +440,30 @@ export const CommunityComposerModal: React.FC<CommunityComposerModalProps> = ({
               )}
 
               <div>
-                <label
-                  htmlFor="comm-post-title"
-                  className="block font-kannada text-xs font-bold text-[#10243D] dark:text-slate-200 mb-1"
-                >
-                  ಮಾಹಿತಿಯ ಶೀರ್ಷಿಕೆ *
-                </label>
+                <div className="flex items-center justify-between gap-2 mb-1">
+                  <label
+                    htmlFor="comm-post-title"
+                    className="block font-kannada text-xs font-bold text-[#10243D] dark:text-slate-200"
+                  >
+                    ಮಾಹಿತಿಯ ಶೀರ್ಷಿಕೆ {hasPhotos ? '(ಐಚ್ಛಿಕ — ಫೋಟೋ ಸೇರಿಸಲಾಗಿದೆ)' : '*'}
+                  </label>
+                  <span className="font-kannada text-[10px] text-[#5A677A] dark:text-slate-400">
+                    ಪಠ್ಯ + ಚಿತ್ರ · ಕೇವಲ ಪಠ್ಯ · ಕೇವಲ ಚಿತ್ರ
+                  </span>
+                </div>
                 <input
                   id="comm-post-title"
                   type="text"
-                  required
-                  minLength={3}
+                  required={!hasPhotos}
+                  minLength={hasPhotos ? undefined : 3}
                   maxLength={150}
                   value={title}
                   onChange={(e) => setTitle(e.target.value)}
-                  placeholder="ಉದಾ: ಕೊಪ್ಪದಲ್ಲಿ ತಾಜಾ ಕಾಫಿ ಪುಡಿ ಮಾರಾಟ / ಮನೆ ಬಾಡಿಗೆಗೆ ಇದೆ"
+                  placeholder={
+                    hasPhotos
+                      ? 'ಐಚ್ಛಿಕ: ಶೀರ್ಷಿಕೆ ಬರೆಯಬಹುದು ಅಥವಾ ಕೇವಲ ಫೋಟೋ ಮಾತ್ರ ಪ್ರಕಟಿಸಬಹುದು'
+                      : 'ಉದಾ: ಕೊಪ್ಪದಲ್ಲಿ ತಾಜಾ ಕಾಫಿ ಪುಡಿ ಮಾರಾಟ / ಮನೆ ಬಾಡಿಗೆಗೆ ಇದೆ'
+                  }
                   className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-sm text-[#10243D] dark:text-white placeholder:text-slate-500 dark:placeholder:text-slate-400 font-kannada focus:outline-none focus:ring-2 focus:ring-[#176B4A]"
                 />
               </div>
@@ -501,17 +538,21 @@ export const CommunityComposerModal: React.FC<CommunityComposerModalProps> = ({
                   htmlFor="comm-post-desc"
                   className="block font-kannada text-xs font-bold text-[#10243D] dark:text-slate-200 mb-1"
                 >
-                  ವಿವರಣೆ *
+                  ವಿವರಣೆ {hasPhotos ? '(ಐಚ್ಛಿಕ — ಫೋಟೋ ಸೇರಿಸಲಾಗಿದೆ)' : '*'}
                 </label>
                 <textarea
                   id="comm-post-desc"
-                  required
-                  minLength={5}
+                  required={!hasPhotos}
+                  minLength={hasPhotos ? undefined : 5}
                   maxLength={3000}
                   rows={4}
                   value={description}
                   onChange={(e) => setDescription(e.target.value)}
-                  placeholder="ಸಂಪೂರ್ಣ ಮಾಹಿತಿ, ಸಮಯ, ವಿಳಾಸ ಅಥವಾ ಅಗತ್ಯ ವಿವರಗಳನ್ನು ಇಲ್ಲಿ ಬರೆಯಿರಿ..."
+                  placeholder={
+                    hasPhotos
+                      ? 'ಐಚ್ಛಿಕ: ಹೆಚ್ಚುವರಿ ವಿವರ ಬೇಕಿದ್ದರೆ ಇಲ್ಲಿ ಬರೆಯಿರಿ ಅಥವಾ ನೇರವಾಗಿ ಫೋಟೋ ಪ್ರಕಟಿಸಿ...'
+                      : 'ಸಂಪೂರ್ಣ ಮಾಹಿತಿ, ಸಮಯ, ವಿಳಾಸ ಅಥವಾ ಅಗತ್ಯ ವಿವರಗಳನ್ನು ಇಲ್ಲಿ ಬರೆಯಿರಿ...'
+                  }
                   className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-sm text-[#10243D] dark:text-white font-kannada focus:outline-none focus:ring-2 focus:ring-[#176B4A]"
                 />
               </div>
@@ -536,11 +577,11 @@ export const CommunityComposerModal: React.FC<CommunityComposerModalProps> = ({
                 </div>
               )}
 
-              {/* Optional Photos (max 3) */}
+              {/* Photos (max 3 — supports Image-Only posts too) */}
               <div>
                 <div className="flex items-center justify-between mb-1.5">
                   <label className="font-kannada text-xs font-bold text-[#10243D] dark:text-slate-200">
-                    ಫೋಟೋಗಳು (ಐಚ್ಛಿಕ — ಗರಿಷ್ಠ {MAX_COMMUNITY_PHOTOS})
+                    ಫೋಟೋಗಳು (ಗರಿಷ್ಠ {MAX_COMMUNITY_PHOTOS} · ಕೇವಲ ಫೋಟೋ ಮಾತ್ರವೂ ಪ್ರಕಟಿಸಬಹುದು)
                   </label>
                   <span className="text-[11px] text-[#64748B] dark:text-slate-400">
                     {photos.length}/{MAX_COMMUNITY_PHOTOS}
@@ -551,7 +592,7 @@ export const CommunityComposerModal: React.FC<CommunityComposerModalProps> = ({
                   {photos.map((src, idx) => (
                     <div
                       key={`${idx}-${src.slice(0, 24)}`}
-                      className="relative w-20 h-20 rounded-xl overflow-hidden border border-slate-200 dark:border-slate-700 bg-slate-100 dark:bg-slate-900"
+                      className="relative w-24 h-24 rounded-xl overflow-hidden border border-slate-200 dark:border-slate-700 bg-[#F5F1E8] dark:bg-slate-900"
                     >
                       <img src={src} alt={`ಫೋಟೋ ${idx + 1}`} className="w-full h-full object-contain" />
                       <button
@@ -566,17 +607,18 @@ export const CommunityComposerModal: React.FC<CommunityComposerModalProps> = ({
                   ))}
 
                   {photos.length < MAX_COMMUNITY_PHOTOS && (
-                    <label className="w-20 h-20 rounded-xl border-2 border-dashed border-slate-300 dark:border-slate-700 hover:border-[#176B4A] flex flex-col items-center justify-center gap-1 text-[#5A677A] dark:text-slate-400 hover:text-[#176B4A] cursor-pointer transition-colors">
+                    <label className="w-24 h-24 rounded-xl border-2 border-dashed border-slate-300 dark:border-slate-700 hover:border-[#176B4A] flex flex-col items-center justify-center gap-1 text-[#5A677A] dark:text-slate-400 hover:text-[#176B4A] cursor-pointer transition-colors">
                       {uploadingPhoto ? (
                         <Loader2 className="w-5 h-5 animate-spin" />
                       ) : (
                         <>
                           <ImagePlus className="w-5 h-5" />
-                          <span className="font-kannada text-[10px] font-semibold">ಸೇರಿಸಿ</span>
+                          <span className="font-kannada text-[10px] font-semibold">ಫೋಟೋ ಸೇರಿಸಿ</span>
                         </>
                       )}
                       <input
                         type="file"
+                        data-testid="comm-photo-input"
                         accept="image/jpeg,image/png,image/webp"
                         multiple
                         className="sr-only"

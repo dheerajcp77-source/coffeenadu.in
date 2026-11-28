@@ -172,7 +172,7 @@ function isValidAppsScriptExecUrl(url: string): boolean {
   return /^https:\/\/script\.google\.com\/macros\/s\/[^/]+\/exec/i.test(url.trim());
 }
 
-function getAppsScriptConfig() {
+export function getAppsScriptConfig() {
   const envUrl = (process.env.APPS_SCRIPT_WEBAPP_URL || '').trim();
   const envSecret = (process.env.APPS_SCRIPT_API_SECRET || '').trim();
   const webAppUrl = isValidAppsScriptExecUrl(envUrl) ? envUrl : runtimeAppsScriptUrl;
@@ -184,6 +184,8 @@ function getAppsScriptConfig() {
   );
   return { webAppUrl, apiSecret, configured };
 }
+
+export type AppsScriptConfig = ReturnType<typeof getAppsScriptConfig>;
 
 /**
  * Generates canonical Google Drive image URLs directly from a Drive file ID

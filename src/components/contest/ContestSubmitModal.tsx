@@ -6,6 +6,7 @@ import {
   ImagePlus,
   Loader2,
   Lock,
+  PlusCircle,
   Share2,
   Trash2,
   Trophy,
@@ -61,9 +62,14 @@ export const ContestSubmitModal: React.FC<ContestSubmitModalProps> = ({
   const [submittedResult, setSubmittedResult] = useState<SubmitContestNewsResult | null>(null);
   const [copiedLink, setCopiedLink] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const submissionIdRef = useRef<string>('');
+
+  const createSubmissionId = () =>
+    `csub_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
 
   useEffect(() => {
     if (!isOpen) return;
+    submissionIdRef.current = createSubmissionId();
     setError('');
     setSubmittedResult(null);
     setCopiedLink(false);
@@ -147,6 +153,9 @@ export const ContestSubmitModal: React.FC<ContestSubmitModalProps> = ({
 
     setSubmitting(true);
     try {
+      if (!submissionIdRef.current) {
+        submissionIdRef.current = createSubmissionId();
+      }
       const result = await submitContestNewsEntry({
         contributorName: contributorName.trim(),
         mobileNumber: needsMobileInput ? mobileNumber.trim() : undefined,
@@ -156,6 +165,7 @@ export const ContestSubmitModal: React.FC<ContestSubmitModalProps> = ({
         location: finalLocation,
         photos,
         confirmOriginalNews: true,
+        clientSubmissionId: submissionIdRef.current,
       });
       setProfile(result.profile);
       setSwitchingContributor(false);
@@ -172,7 +182,19 @@ export const ContestSubmitModal: React.FC<ContestSubmitModalProps> = ({
     }
   };
 
+  const handlePublishAnother = () => {
+    submissionIdRef.current = createSubmissionId();
+    setTitle('');
+    setDescription('');
+    setPhotos([]);
+    setConfirmOriginalNews(false);
+    setSubmittedResult(null);
+    setCopiedLink(false);
+    setError('');
+  };
+
   const resetAndClose = () => {
+    submissionIdRef.current = '';
     setTitle('');
     setDescription('');
     setPhotos([]);
@@ -258,7 +280,7 @@ export const ContestSubmitModal: React.FC<ContestSubmitModalProps> = ({
                     </h4>
                     <p className="mt-1 text-sm text-emerald-900/85">
                       ಈಗಲೇ ನಿಮ್ಮ ಸುದ್ದಿಯ ಲಿಂಕ್ ಅನ್ನು WhatsApp, ಕುಟುಂಬ ಮತ್ತು ಸ್ನೇಹಿತರೊಂದಿಗೆ
-                      ಹಂಚಿಕೊಳ್ಳಿ — ಹೆಚ್ಚು ಜನರು ಓದಿದಷ್ಟೂ ₹500 ಬಹುಮಾನ ಗೆಲ್ಲುವ ಅವಕಾಶ ಹೆಚ್ಚುತ್ತದೆ.
+                      ಹಂಚಿಕೊಳ್ಳಿ — ಹೆಚ್ಚು ಜನರು ಓದಿದಷ್ಟೂ ₹1,500 ಬಹುಮಾನ ಗೆಲ್ಲುವ ಅವಕಾಶ ಹೆಚ್ಚುತ್ತದೆ.
                     </p>
                   </div>
                 </div>
@@ -307,30 +329,40 @@ export const ContestSubmitModal: React.FC<ContestSubmitModalProps> = ({
                     resetAndClose();
                     onOpenArticle(slug);
                   }}
-                  className="inline-flex min-h-[44px] items-center gap-1.5 text-sm font-bold text-emerald-800 hover:text-emerald-950"
+                  className="inline-flex min-h-[44px] items-center gap-1.5 text-sm font-bold text-emerald-800 hover:text-emerald-950 cursor-pointer"
                 >
                   <ExternalLink className="h-4 w-4" />
                   <span>ಸಂಪೂರ್ಣ ಸುದ್ದಿ ಪುಟ ತೆರೆಯಿರಿ</span>
                 </button>
-                <button
-                  type="button"
-                  onClick={resetAndClose}
-                  className="inline-flex min-h-[44px] items-center rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800"
-                >
-                  ಲೀಡರ್‌ಬೋರ್ಡ್ ನೋಡಿ
-                </button>
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    data-testid="contest-publish-another-btn"
+                    onClick={handlePublishAnother}
+                    className="inline-flex min-h-[44px] items-center gap-1.5 rounded-lg border border-emerald-700/30 bg-emerald-50 px-4 py-2 text-sm font-bold text-emerald-900 hover:bg-emerald-100 cursor-pointer"
+                  >
+                    <PlusCircle className="h-4 w-4" />
+                    <span>ಇನ್ನೊಂದು ಸುದ್ದಿ ಪ್ರಕಟಿಸಿ</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={resetAndClose}
+                    className="inline-flex min-h-[44px] items-center rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800 cursor-pointer"
+                  >
+                    ಲೀಡರ್‌ಬೋರ್ಡ್ ನೋಡಿ
+                  </button>
+                </div>
               </div>
             </div>
           ) : (
             <form onSubmit={handleSubmit} className="space-y-4">
-              {/* Strict Category Separation Notice */}
+              {/* Strict Category Separation & Unlimited 30-Day Publishing Notice */}
               <div className="rounded-lg border border-emerald-800/15 bg-emerald-50/70 px-4 py-3 text-xs leading-relaxed text-emerald-950">
                 <p className="font-bold">
-                  ವಿಭಾಗ: ತಿಂಗಳ ಸುದ್ದಿ ಸ್ಪರ್ಧೆ (Monthly News Contest) — 100% ಉಚಿತ
+                  ವಿಭಾಗ: 30 ದಿನಗಳ ಸುದ್ದಿ ಸ್ಪರ್ಧೆ (Monthly News Contest) — 100% ಉಚಿತ · ಅನಿಯಮಿತ ಮೂಲ ಸುದ್ದಿ ಪ್ರಕಟಣೆ
                 </p>
                 <p className="mt-0.5 text-emerald-900/80">
-                  ನಿಮ್ಮೂರಿನ ಮೂಲ ಸುದ್ದಿ, ಜನೋಪಯೋಗಿ ಮಾಹಿತಿ ಮತ್ತು ಸ್ಥಳೀಯ ಘಟನೆಗಳನ್ನು ಮಾತ್ರ ಪ್ರಕಟಿಸಿ.
-                  ಮಾರಾಟ, ಅಂಗಡಿ ಜಾಹೀರಾತು ಅಥವಾ ಕಳೆದುಹೋದ ವಸ್ತು ಪ್ರಕಟಣೆಗಳು ಸ್ಪರ್ಧೆಗೆ ಅರ್ಹವಲ್ಲ.
+                  ನೋಂದಾಯಿತ ಬಳಕೆದಾರರು 30 ದಿನಗಳ ಸ್ಪರ್ಧಾ ಅವಧಿಯಲ್ಲಿ ಎಷ್ಟು ಬೇಕಾದರೂ ಮೂಲ ಸ್ಥಳೀಯ ಸುದ್ದಿಗಳನ್ನು ಪ್ರಕಟಿಸಬಹುದು. ನಿಮ್ಮ ಎಲ್ಲಾ ಅರ್ಹ ಸುದ್ದಿಗಳ ಪರಿಶೀಲಿತ ವೀಕ್ಷಣೆಗಳು ಸ್ವಯಂಚಾಲಿತವಾಗಿ ನಿಮ್ಮ ಒಟ್ಟು ಲೀಡರ್‌ಬೋರ್ಡ್ ಸ್ಕೋರ್‌ಗೆ ಸೇರುತ್ತವೆ. ಮಾರಾಟ, ಅಂಗಡಿ ಜಾಹೀರಾತು ಅಥವಾ ನಕಲಿ ಸುದ್ದಿಗಳು ಸ್ಪರ್ಧೆಗೆ ಅರ್ಹವಲ್ಲ.
                 </p>
               </div>
 

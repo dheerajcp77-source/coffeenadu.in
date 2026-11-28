@@ -424,11 +424,11 @@ export const CoffeenaduCommunityPage: React.FC<CoffeenaduCommunityPageProps> = (
                   <div className="w-full max-h-[520px] overflow-hidden bg-[#F4F1EA] dark:bg-slate-900 flex items-center justify-center">
                     <img
                       src={activeSrc}
-                      alt={detailPost.title}
+                      alt={detailPost.title.trim() || `${detailPost.authorName} — ${catMeta?.labelKn || detailPost.category}`}
                       onError={() =>
                         setBrokenImages((prev) => ({ ...prev, [activeSrc]: true }))
                       }
-                      className="w-full max-h-[520px] h-auto object-contain bg-[#F4F1EA] dark:bg-slate-950"
+                      className="w-full max-h-[680px] h-auto object-contain bg-[#F4F1EA] dark:bg-slate-950"
                     />
                   </div>
                   {validPhotos.length > 1 && (
@@ -478,9 +478,11 @@ export const CoffeenaduCommunityPage: React.FC<CoffeenaduCommunityPageProps> = (
                 </span>
               </div>
 
-              <h1 className="font-kannada text-xl sm:text-2xl font-extrabold text-[#10243D] dark:text-white leading-snug">
-                {detailPost.title}
-              </h1>
+              {detailPost.title.trim() && (
+                <h1 className="font-kannada text-xl sm:text-2xl font-extrabold text-[#10243D] dark:text-white leading-snug">
+                  {detailPost.title}
+                </h1>
+              )}
 
               {/* Contest Participation Notice & Transparent Public View Counts (STRICTLY Contest Articles Only) */}
               {detailPost.category === 'monthly-news-contest' && (
@@ -495,7 +497,7 @@ export const CoffeenaduCommunityPage: React.FC<CoffeenaduCommunityPageProps> = (
                         <span>COFFEENADU – MOST VIEWED NEWS CHALLENGE 2026</span>
                       </div>
                       <p className="font-kannada text-xs sm:text-sm font-bold text-emerald-950 dark:text-emerald-100">
-                        ಈ ಸುದ್ದಿ ತಿಂಗಳ ₹500 ನಗದು ಬಹುಮಾನ ಸ್ಪರ್ಧೆಯ ಅಧಿಕೃತ ಭಾಗವಹಿಸುವಿಕೆಯಾಗಿದೆ.
+                        ಈ ಸುದ್ದಿ ತಿಂಗಳ ₹1,500 ನಗದು ಬಹುಮಾನ ಸ್ಪರ್ಧೆಯ ಅಧಿಕೃತ ಭಾಗವಹಿಸುವಿಕೆಯಾಗಿದೆ.
                       </p>
                     </div>
                     {onNavigateContest && (
@@ -546,9 +548,11 @@ export const CoffeenaduCommunityPage: React.FC<CoffeenaduCommunityPageProps> = (
                 </div>
               )}
 
-              <div className="font-kannada text-sm sm:text-base text-[#1E293B] dark:text-slate-200 leading-relaxed whitespace-pre-line">
-                {detailPost.description}
-              </div>
+              {detailPost.description.trim() && (
+                <div className="font-kannada text-sm sm:text-base text-[#1E293B] dark:text-slate-200 leading-relaxed whitespace-pre-line">
+                  {detailPost.description}
+                </div>
+              )}
 
               {/* Public contributor card (Name ONLY, optional public contact ONLY if user explicitly added it) */}
               <div className="p-4 rounded-xl bg-[#F8FAFC] dark:bg-slate-900/70 border border-slate-200/80 dark:border-slate-800 flex flex-wrap items-center justify-between gap-3">
@@ -1115,7 +1119,7 @@ export const CoffeenaduCommunityPage: React.FC<CoffeenaduCommunityPageProps> = (
                         >
                           <img
                             src={post.photos[0]}
-                            alt={post.title}
+                            alt={post.title.trim() || `${post.authorName} — ${cat?.labelKn || post.category}`}
                             loading="lazy"
                             onError={() =>
                               setBrokenImages((prev) => ({
@@ -1163,13 +1167,15 @@ export const CoffeenaduCommunityPage: React.FC<CoffeenaduCommunityPageProps> = (
                             </span>
                           </div>
 
-                          <button
-                            type="button"
-                            onClick={() => onNavigatePost(post.slug)}
-                            className="block text-left font-kannada text-base font-extrabold text-[#10243D] dark:text-white hover:text-[#176B4A] dark:hover:text-[#D9A441] leading-snug cursor-pointer"
-                          >
-                            {post.title}
-                          </button>
+                          {post.title.trim() && (
+                            <button
+                              type="button"
+                              onClick={() => onNavigatePost(post.slug)}
+                              className="block text-left font-kannada text-base font-extrabold text-[#10243D] dark:text-white hover:text-[#176B4A] dark:hover:text-[#D9A441] leading-snug cursor-pointer"
+                            >
+                              {post.title}
+                            </button>
+                          )}
 
                           {post.price && (
                             <div className="font-kannada text-xs font-extrabold text-[#9A6700] dark:text-[#D9A441]">
@@ -1177,15 +1183,17 @@ export const CoffeenaduCommunityPage: React.FC<CoffeenaduCommunityPageProps> = (
                             </div>
                           )}
 
-                          <p
-                            className={`font-kannada text-xs text-[#475569] dark:text-slate-300 leading-relaxed whitespace-pre-line ${
-                              post.photos[0] && !brokenImages[post.photos[0]]
-                                ? 'line-clamp-3'
-                                : 'line-clamp-6'
-                            }`}
-                          >
-                            {post.description}
-                          </p>
+                          {post.description.trim() && (
+                            <p
+                              className={`font-kannada text-xs text-[#475569] dark:text-slate-300 leading-relaxed whitespace-pre-line ${
+                                post.photos[0] && !brokenImages[post.photos[0]]
+                                  ? 'line-clamp-3'
+                                  : 'line-clamp-6'
+                              }`}
+                            >
+                              {post.description}
+                            </p>
+                          )}
 
                           {post.optionalPublicContact && (
                             <div className="text-[11px] font-kannada font-semibold text-[#176B4A] dark:text-emerald-300 inline-flex items-center gap-1">
@@ -1225,7 +1233,7 @@ export const CoffeenaduCommunityPage: React.FC<CoffeenaduCommunityPageProps> = (
                           <button
                             type="button"
                             onClick={() => setReportingPost(post)}
-                            aria-label={`ವರದಿ ಮಾಡಿ: ${post.title}`}
+                            aria-label={`ವರದಿ ಮಾಡಿ: ${post.title.trim() || post.authorName}`}
                             className="inline-flex items-center gap-1 text-[11px] font-kannada text-[#64748B] hover:text-red-600 cursor-pointer"
                           >
                             <Flag className="w-3 h-3" />

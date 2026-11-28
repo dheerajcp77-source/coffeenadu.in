@@ -25,15 +25,16 @@ import {
   validateCommunityPhotoInput,
 } from '../utils/communityHelpers.ts';
 import type { Admin2Request } from './admin2Backend.ts';
+import type { AppsScriptCommunityContestCoordinator } from './appsScriptCommunitySync.ts';
 
-interface CommunitySessionRecord {
+export interface CommunitySessionRecord {
   tokenHash: string;
   userId: string;
   createdAtMs: number;
   expiresAtMs: number;
 }
 
-interface CommunityStoreState {
+export interface CommunityStoreState {
   version: number;
   users: CommunityUserPrivate[];
   sessions: CommunitySessionRecord[];
@@ -123,6 +124,7 @@ export class CommunityBackend {
   private state: CommunityStoreState;
   private readonly rateBuckets = new Map<string, number[]>();
   private readonly postDeletedListeners: Array<(postId: string) => void> = [];
+  private cloudSync?: AppsScriptCommunityContestCoordinator;
 
   constructor(
     dataDir: string,
@@ -133,6 +135,40 @@ export class CommunityBackend {
     this.uploadsDir = path.resolve(dataDir, 'community-uploads');
     fs.mkdirSync(this.uploadsDir, { recursive: true });
     this.state = this.loadState();
+  }
+
+  public attachCloudSync(sync: AppsScriptCommunityContestCoordinator): void {
+    this.cloudSync = sync;
+  }
+
+  public getStoreState(): {
+    users: CommunityUserPrivate[];
+    sessions: CommunitySessionRecord[];
+    posts: CommunityPostRecord[];
+    reports: CommunityReportRecord[];
+  } {
+    return {
+      users: this.state.users,
+      sessions: this.state.sessions,
+      posts: this.state.posts,
+      reports: this.state.reports,
+    };
+  }
+
+  public applyMergedStoreState(next: {
+    users: CommunityUserPrivate[];
+    sessions: CommunitySessionRecord[];
+    posts: CommunityPostRecord[];
+    reports: CommunityReportRecord[];
+  }): void {
+    this.state = {
+      version: 1,
+      users: next.users,
+      sessions: next.sessions,
+      posts: next.posts,
+      reports: next.reports,
+    };
+    this.persistState();
   }
 
   private createDefaultState(): CommunityStoreState {
@@ -320,7 +356,9 @@ export class CommunityBackend {
     };
   }
 
-  private processUploadedPhotos(rawPhotos: unknown): { ok: boolean; photos: string[]; error?: string } {
+  private async processUploadedPhotos(
+    rawPhotos: unknown
+  ): Promise<{ ok: boolean; photos: string[]; error?: string }> {
     if (!Array.isArray(rawPhotos) || rawPhotos.length === 0) {
       return { ok: true, photos: [] };
     }
@@ -352,6 +390,19 @@ export class CommunityBackend {
             photos: [],
             error: 'ದಯವಿಟ್ಟು ಸರಿಯಾದ JPG, PNG ಅಥವಾ WebP ಫೋಟೋ ಆಯ್ಕೆಮಾಡಿ.',
           };
+        }
+
+        // Prefer Google Drive upload when Apps Script is configured so photos load identically on coffeenadu.in & AI Studio
+        if (this.cloudSync?.isConfigured()) {
+          const driveProxyUrl = await this.cloudSync.uploadPhotoToDrive(
+            check.base64Body,
+            check.mime,
+            check.ext
+          );
+          if (driveProxyUrl) {
+            savedUrls.push(driveProxyUrl);
+            continue;
+          }
         }
 
         const filename = `cm_${Date.now().toString(36)}_${crypto.randomBytes(6).toString('hex')}.${check.ext}`;
@@ -408,6 +459,14 @@ export class CommunityBackend {
   public getPrivateMobileByUserId(userId: string): string {
     const user = this.state.users.find((u) => u.id === userId);
     return user?.mobileNumber || '';
+  }
+
+  /**
+   * Internal admin-only lookup returning all registered community users for
+   * participant aggregation in the Monthly Contest Admin Dashboard.
+   */
+  public getAllUsersInternal(): CommunityUserPrivate[] {
+    return this.state.users;
   }
 
   /**
@@ -588,7 +647,7 @@ export class CommunityBackend {
    * Publishes a Monthly News Contest article directly through the existing community
    * publishing store under the dedicated `monthly-news-contest` category.
    */
-  public createContestPostInternal(
+  public async createContestPostInternal(
     req: Request,
     user: CommunityUserPrivate,
     input: {
@@ -598,14 +657,15 @@ export class CommunityBackend {
       photos?: unknown;
       contributorName?: unknown;
     }
-  ):
+  ): Promise<
     | {
         ok: true;
         post: CommunityPostRecord;
         publicPost: ReturnType<typeof toPublicCommunityPost>;
         duplicatePrevented?: boolean;
       }
-    | { ok: false; status: number; error: string } {
+    | { ok: false; status: number; error: string }
+  > {
     const ip = getClientIp(req);
     if (!this.checkRateLimit(`cpost:${user.id}:${ip}`, 20, 60 * 60 * 1000)) {
       return {
@@ -648,7 +708,7 @@ export class CommunityBackend {
         p.authorUserId === user.id &&
         p.category === 'monthly-news-contest' &&
         p.title.toLowerCase() === title.toLowerCase() &&
-        nowMs - Date.parse(p.createdAt) < 60_000
+        nowMs - Date.parse(p.createdAt) < 10 * 60_000
     );
     if (duplicate) {
       return {
@@ -661,7 +721,7 @@ export class CommunityBackend {
 
     let photoResult: { ok: boolean; photos: string[]; error?: string };
     try {
-      photoResult = this.processUploadedPhotos(input.photos);
+      photoResult = await this.processUploadedPhotos(input.photos);
     } catch (err) {
       console.error('[CommunityBackend] Contest photo processing error:', err);
       return {
@@ -748,7 +808,8 @@ export class CommunityBackend {
     // -------------------------------------------------------------------------
     // SIMPLE USER REGISTRATION & SESSION (Full Name + Mobile Number, NO OTP)
     // -------------------------------------------------------------------------
-    app.post('/api/community/auth/register', (req, res) => {
+    app.post('/api/community/auth/register', async (req, res) => {
+      await this.cloudSync?.syncIfNeeded();
       const ip = getClientIp(req);
       if (!this.checkRateLimit(`creg:${ip}`, 30, 60 * 60 * 1000)) {
         res.status(429).json({
@@ -812,15 +873,17 @@ export class CommunityBackend {
       }
 
       const rawToken = crypto.randomBytes(32).toString('hex');
-      this.state.sessions.push({
+      const newSession: CommunitySessionRecord = {
         tokenHash: sha256(rawToken),
         userId: user.id,
         createdAtMs: nowMs,
         expiresAtMs: nowMs + SESSION_TTL_MS,
-      });
+      };
+      this.state.sessions.push(newSession);
 
       this.persistState();
       this.setSessionCookie(req, res, rawToken);
+      void this.cloudSync?.pushDelta({ user, session: newSession });
 
       res.json({
         ok: true,
@@ -829,7 +892,8 @@ export class CommunityBackend {
       });
     });
 
-    app.get('/api/community/auth/me', (req, res) => {
+    app.get('/api/community/auth/me', async (req, res) => {
+      await this.cloudSync?.syncIfNeeded();
       const resolved = this.resolveSessionUser(req, false);
       if (!resolved) {
         res.json({ ok: true, authenticated: false, profile: null });
@@ -846,7 +910,8 @@ export class CommunityBackend {
       });
     });
 
-    app.put('/api/community/auth/profile', (req, res) => {
+    app.put('/api/community/auth/profile', async (req, res) => {
+      await this.cloudSync?.syncIfNeeded();
       const resolved = this.resolveSessionUser(req, true);
       if (!resolved) {
         res.status(401).json({ ok: false, error: 'ದಯವಿಟ್ಟು ಮೊದಲು ನೋಂದಣಿ ಮಾಡಿ.' });
@@ -862,13 +927,16 @@ export class CommunityBackend {
       resolved.user.lastActiveAt = new Date().toISOString();
 
       // Update contributor display name across their posts
+      const updatedPosts: CommunityPostRecord[] = [];
       for (const post of this.state.posts) {
         if (post.authorUserId === resolved.user.id) {
           post.authorName = fullName;
+          updatedPosts.push(post);
         }
       }
 
       this.persistState();
+      void this.cloudSync?.pushDelta({ user: resolved.user, extraPosts: updatedPosts });
       res.json({ ok: true, profile: this.buildSelfProfile(resolved.user) });
     });
 
@@ -879,6 +947,7 @@ export class CommunityBackend {
           (s) => s.tokenHash !== resolved.tokenHash
         );
         this.persistState();
+        void this.cloudSync?.pushDelta({ revokeSessionTokenHash: resolved.tokenHash });
       }
       this.clearSessionCookie(req, res);
       res.json({ ok: true });
@@ -887,7 +956,8 @@ export class CommunityBackend {
     // -------------------------------------------------------------------------
     // PUBLIC COMMUNITY FEED & SINGLE PERMANENT POST ROUTE (STRICT PRIVACY WALL)
     // -------------------------------------------------------------------------
-    app.get('/api/community/posts', (req, res) => {
+    app.get('/api/community/posts', async (req, res) => {
+      await this.cloudSync?.syncIfNeeded();
       const resolved = this.resolveSessionUser(req, false);
       const viewerUserId = resolved?.user.id || null;
 
@@ -914,7 +984,8 @@ export class CommunityBackend {
       });
     });
 
-    app.get('/api/community/posts/:slugOrId', (req, res) => {
+    app.get('/api/community/posts/:slugOrId', async (req, res) => {
+      await this.cloudSync?.syncIfNeeded();
       const key = String(req.params.slugOrId || '').trim().toLowerCase();
       const resolved = this.resolveSessionUser(req, false);
       const viewerUserId = resolved?.user.id || null;
@@ -932,6 +1003,7 @@ export class CommunityBackend {
       if (post.category !== 'monthly-news-contest') {
         post.viewsCount = (post.viewsCount || 0) + 1;
         this.persistState();
+        void this.cloudSync?.pushDelta({ post });
       }
 
       res.json({
@@ -947,11 +1019,13 @@ export class CommunityBackend {
       if (post && post.status === 'published') {
         post.sharesCount = (post.sharesCount || 0) + 1;
         this.persistState();
+        void this.cloudSync?.pushDelta({ post });
       }
       res.json({ ok: true });
     });
 
-    app.post('/api/community/posts/:id/report', (req, res) => {
+    app.post('/api/community/posts/:id/report', async (req, res) => {
+      await this.cloudSync?.syncIfNeeded();
       const ip = getClientIp(req);
       if (!this.checkRateLimit(`crep:${ip}`, 15, 60 * 60 * 1000)) {
         res.status(429).json({
@@ -1021,13 +1095,15 @@ export class CommunityBackend {
       };
       this.state.reports.unshift(report);
       this.persistState();
+      await this.cloudSync?.pushDelta({ report }, { awaitRemote: true });
       res.status(201).json({ ok: true, duplicatePrevented: false, id: report.id });
     });
 
     // -------------------------------------------------------------------------
     // USER SUBMISSIONS & DASHBOARD (IMMEDIATE PUBLISH — NO ADMIN APPROVAL!)
     // -------------------------------------------------------------------------
-    app.get('/api/community/my-posts', (req, res) => {
+    app.get('/api/community/my-posts', async (req, res) => {
+      await this.cloudSync?.syncIfNeeded();
       const resolved = this.resolveSessionUser(req, false);
       if (!resolved) {
         res.status(401).json({ ok: false, error: 'ದಯವಿಟ್ಟು ಮೊದಲು ನೋಂದಣಿ ಮಾಡಿ.' });
@@ -1045,7 +1121,8 @@ export class CommunityBackend {
       res.json({ ok: true, posts: myPosts });
     });
 
-    app.post('/api/community/posts', (req, res) => {
+    app.post('/api/community/posts', async (req, res) => {
+      await this.cloudSync?.syncIfNeeded();
       const resolved = this.resolveSessionUser(req, true);
       if (!resolved) {
         res.status(401).json({
@@ -1078,10 +1155,6 @@ export class CommunityBackend {
       const price = cleanSingleLine(req.body?.price, 80);
       const optionalPublicContact = cleanSingleLine(req.body?.optionalPublicContact, 80);
 
-      if (title.length < 3) {
-        res.status(400).json({ ok: false, error: 'ದಯವಿಟ್ಟು ಮಾಹಿತಿಯ ಶೀರ್ಷಿಕೆಯನ್ನು ನಮೂದಿಸಿ.' });
-        return;
-      }
       if (!isValidCommunityCategory(category)) {
         res.status(400).json({ ok: false, error: 'ದಯವಿಟ್ಟು ಸೂಕ್ತ ವಿಭಾಗವನ್ನು ಆಯ್ಕೆಮಾಡಿ.' });
         return;
@@ -1094,24 +1167,52 @@ export class CommunityBackend {
         });
         return;
       }
-      if (description.length < 5) {
-        res.status(400).json({ ok: false, error: 'ದಯವಿಟ್ಟು ಮಾಹಿತಿಯ ವಿವರಣೆಯನ್ನು ನಮೂದಿಸಿ.' });
-        return;
-      }
       if (location.length < 2) {
         res.status(400).json({ ok: false, error: 'ದಯವಿಟ್ಟು ನಿಮ್ಮ ಊರು / ಸ್ಥಳವನ್ನು ಆಯ್ಕೆಮಾಡಿ.' });
         return;
       }
 
-      // Duplicate submission protection within 60 seconds
+      const photoResult = await this.processUploadedPhotos(req.body?.photos);
+      if (!photoResult.ok) {
+        res.status(400).json({ ok: false, error: photoResult.error });
+        return;
+      }
+
+      const hasPhotos = photoResult.photos.length > 0;
+      if (!hasPhotos) {
+        if (title.length < 3 && description.length < 5) {
+          res.status(400).json({
+            ok: false,
+            error:
+              'ದಯವಿಟ್ಟು ಸುದ್ದಿಯ ಶೀರ್ಷಿಕೆ ಮತ್ತು ವಿವರಣೆಯನ್ನು ನಮೂದಿಸಿ ಅಥವಾ ಕನಿಷ್ಠ ಒಂದು ಫೋಟೋವನ್ನು ಅಪ್‌ಲೋಡ್ ಮಾಡಿ.',
+          });
+          return;
+        }
+        if (title.length < 3) {
+          res.status(400).json({ ok: false, error: 'ದಯವಿಟ್ಟು ಮಾಹಿತಿಯ ಶೀರ್ಷಿಕೆಯನ್ನು ನಮೂದಿಸಿ.' });
+          return;
+        }
+        if (description.length < 5) {
+          res.status(400).json({ ok: false, error: 'ದಯವಿಟ್ಟು ಮಾಹಿತಿಯ ವಿವರಣೆಯನ್ನು ನಮೂದಿಸಿ.' });
+          return;
+        }
+      }
+
+      // Idempotent duplicate submission protection
       const nowMs = Date.now();
-      const duplicate = this.state.posts.find(
-        (p) =>
-          p.authorUserId === resolved.user.id &&
-          p.category === category &&
-          p.title.toLowerCase() === title.toLowerCase() &&
-          nowMs - Date.parse(p.createdAt) < 60_000
-      );
+      const duplicate = this.state.posts.find((p) => {
+        if (p.authorUserId !== resolved.user.id || p.category !== category) return false;
+        const ageMs = nowMs - Date.parse(p.createdAt);
+        if (title.length > 0) {
+          return p.title.toLowerCase() === title.toLowerCase() && ageMs < 10 * 60_000;
+        }
+        return (
+          !p.title &&
+          photoResult.photos.length > 0 &&
+          p.photos[0] === photoResult.photos[0] &&
+          ageMs < 2 * 60_000
+        );
+      });
       if (duplicate) {
         res.status(200).json({
           ok: true,
@@ -1121,16 +1222,10 @@ export class CommunityBackend {
         return;
       }
 
-      const photoResult = this.processUploadedPhotos(req.body?.photos);
-      if (!photoResult.ok) {
-        res.status(400).json({ ok: false, error: photoResult.error });
-        return;
-      }
-
       const nowIso = new Date().toISOString();
       const id = makeId('cpost');
       const uniqueToken = crypto.randomBytes(4).toString('hex');
-      const slug = generateCommunitySlug(title, uniqueToken);
+      const slug = generateCommunitySlug(title || 'photo-post', uniqueToken);
 
       const newPost: CommunityPostRecord = {
         id,
@@ -1154,6 +1249,10 @@ export class CommunityBackend {
       this.state.posts.unshift(newPost);
       resolved.user.lastActiveAt = nowIso;
       this.persistState();
+      await this.cloudSync?.pushDelta(
+        { user: resolved.user, post: newPost },
+        { awaitRemote: true }
+      );
 
       res.status(201).json({
         ok: true,
@@ -1161,7 +1260,8 @@ export class CommunityBackend {
       });
     });
 
-    app.put('/api/community/posts/:id', (req, res) => {
+    app.put('/api/community/posts/:id', async (req, res) => {
+      await this.cloudSync?.syncIfNeeded();
       const resolved = this.resolveSessionUser(req, true);
       if (!resolved) {
         res.status(401).json({ ok: false, error: 'ದಯವಿಟ್ಟು ಮೊದಲು ನೋಂದಣಿ ಮಾಡಿ.' });
@@ -1185,10 +1285,19 @@ export class CommunityBackend {
         return;
       }
 
-      const title = cleanSingleLine(req.body?.title ?? post.title, 150);
+      const title = cleanSingleLine(
+        req.body?.title !== undefined ? req.body.title : post.title,
+        150
+      );
       const category = req.body?.category ?? post.category;
-      const description = cleanMultiline(req.body?.description ?? post.description, 3000);
-      const location = cleanSingleLine(req.body?.location ?? post.location, 100);
+      const description = cleanMultiline(
+        req.body?.description !== undefined ? req.body.description : post.description,
+        3000
+      );
+      const location = cleanSingleLine(
+        req.body?.location !== undefined ? req.body.location : post.location,
+        100
+      );
       const price =
         req.body?.price !== undefined ? cleanSingleLine(req.body.price, 80) : post.price || '';
       const optionalPublicContact =
@@ -1196,21 +1305,31 @@ export class CommunityBackend {
           ? cleanSingleLine(req.body.optionalPublicContact, 80)
           : post.optionalPublicContact || '';
 
-      if (title.length < 3 || !isValidCommunityCategory(category) || description.length < 5 || location.length < 2) {
-        res.status(400).json({ ok: false, error: 'ದಯವಿಟ್ಟು ಎಲ್ಲಾ ಅಗತ್ಯ ವಿವರಗಳನ್ನು ಸರಿಯಾಗಿ ಭರ್ತಿ ಮಾಡಿ.' });
-        return;
-      }
-
       const previousPhotos = [...post.photos];
+      let nextPhotos = post.photos;
       if (req.body?.photos !== undefined) {
-        const photoResult = this.processUploadedPhotos(req.body.photos);
+        const photoResult = await this.processUploadedPhotos(req.body.photos);
         if (!photoResult.ok) {
           res.status(400).json({ ok: false, error: photoResult.error });
           return;
         }
-        post.photos = photoResult.photos;
+        nextPhotos = photoResult.photos;
       }
 
+      const hasPhotos = nextPhotos.length > 0;
+      if (
+        !isValidCommunityCategory(category) ||
+        location.length < 2 ||
+        (!hasPhotos && (title.length < 3 || description.length < 5))
+      ) {
+        res.status(400).json({
+          ok: false,
+          error: 'ದಯವಿಟ್ಟು ಎಲ್ಲಾ ಅಗತ್ಯ ವಿವರಗಳನ್ನು ಸರಿಯಾಗಿ ಭರ್ತಿ ಮಾಡಿ ಅಥವಾ ಕನಿಷ್ಠ ಒಂದು ಫೋಟೋ ಉಳಿಸಿ.',
+        });
+        return;
+      }
+
+      post.photos = nextPhotos;
       post.title = title;
       post.category = category;
       post.description = description;
@@ -1222,6 +1341,7 @@ export class CommunityBackend {
 
       this.persistState();
       this.cleanupUnusedMedia(previousPhotos);
+      await this.cloudSync?.pushDelta({ post, user: resolved.user }, { awaitRemote: true });
 
       res.json({
         ok: true,
@@ -1229,7 +1349,8 @@ export class CommunityBackend {
       });
     });
 
-    app.delete('/api/community/posts/:id', (req, res) => {
+    app.delete('/api/community/posts/:id', async (req, res) => {
+      await this.cloudSync?.syncIfNeeded();
       const resolved = this.resolveSessionUser(req, true);
       if (!resolved) {
         res.status(401).json({ ok: false, error: 'ದಯವಿಟ್ಟು ಮೊದಲು ನೋಂದಣಿ ಮಾಡಿ.' });
@@ -1256,6 +1377,7 @@ export class CommunityBackend {
       this.persistState();
       this.cleanupUnusedMedia(removedPhotos);
       this.emitPostDeleted(deletedId);
+      await this.cloudSync?.pushDelta({ deletePostId: deletedId }, { awaitRemote: true });
 
       res.json({ ok: true });
     });
@@ -1266,7 +1388,8 @@ export class CommunityBackend {
     const requireAdminRead = this.authFactory('dashboard.view');
     const requireAdminManage = this.authFactory('messaging.manage');
 
-    app.get('/api/admin2/community/users', requireAdminRead, (req, res) => {
+    app.get('/api/admin2/community/users', requireAdminRead, async (req, res) => {
+      await this.cloudSync?.syncIfNeeded();
       const q = String(req.query.q || '').trim().toLowerCase();
       const statusFilter = String(req.query.status || 'all').trim();
 
@@ -1312,7 +1435,8 @@ export class CommunityBackend {
       });
     });
 
-    app.get('/api/admin2/community/users/:id/posts', requireAdminRead, (req, res) => {
+    app.get('/api/admin2/community/users/:id/posts', requireAdminRead, async (req, res) => {
+      await this.cloudSync?.syncIfNeeded();
       const user = this.state.users.find((u) => u.id === req.params.id);
       if (!user) {
         res.status(404).json({ ok: false, error: 'Registered user not found.' });
@@ -1345,29 +1469,42 @@ export class CommunityBackend {
       });
     });
 
-    app.patch('/api/admin2/community/users/:id/status', requireAdminManage, (req, res) => {
-      const user = this.state.users.find((u) => u.id === req.params.id);
-      if (!user) {
-        res.status(404).json({ ok: false, error: 'Registered user not found.' });
-        return;
+    app.patch(
+      '/api/admin2/community/users/:id/status',
+      requireAdminManage,
+      async (req: Admin2Request, res) => {
+        await this.cloudSync?.syncIfNeeded();
+        const user = this.state.users.find((u) => u.id === req.params.id);
+        if (!user) {
+          res.status(404).json({ ok: false, error: 'Registered user not found.' });
+          return;
+        }
+
+        const nextStatus: CommunityUserStatus =
+          req.body?.status === 'suspended' ? 'suspended' : 'active';
+        user.status = nextStatus;
+        user.suspendedReason =
+          nextStatus === 'suspended' ? cleanSingleLine(req.body?.reason, 200) || undefined : undefined;
+
+        // Revoke active sessions immediately when suspending a user
+        if (nextStatus === 'suspended') {
+          this.state.sessions = this.state.sessions.filter((s) => s.userId !== user.id);
+        }
+
+        this.persistState();
+        await this.cloudSync?.pushDelta(
+          {
+            user,
+            revokeSessionsForUserId: nextStatus === 'suspended' ? user.id : undefined,
+          },
+          { adminEmail: req.admin2User?.email, awaitRemote: true }
+        );
+        res.json({ ok: true, user });
       }
+    );
 
-      const nextStatus: CommunityUserStatus =
-        req.body?.status === 'suspended' ? 'suspended' : 'active';
-      user.status = nextStatus;
-      user.suspendedReason =
-        nextStatus === 'suspended' ? cleanSingleLine(req.body?.reason, 200) || undefined : undefined;
-
-      // Revoke active sessions immediately when suspending a user
-      if (nextStatus === 'suspended') {
-        this.state.sessions = this.state.sessions.filter((s) => s.userId !== user.id);
-      }
-
-      this.persistState();
-      res.json({ ok: true, user });
-    });
-
-    app.get('/api/admin2/community/posts', requireAdminRead, (req, res) => {
+    app.get('/api/admin2/community/posts', requireAdminRead, async (req, res) => {
+      await this.cloudSync?.syncIfNeeded();
       const statusFilter = String(req.query.status || 'all').trim();
       const q = String(req.query.q || '').trim().toLowerCase();
       const userMap = new Map(this.state.users.map((u) => [u.id, u]));
@@ -1397,55 +1534,83 @@ export class CommunityBackend {
       res.json({ ok: true, posts });
     });
 
-    app.patch('/api/admin2/community/posts/:id/status', requireAdminManage, (req, res) => {
-      const post = this.state.posts.find((p) => p.id === req.params.id);
-      if (!post) {
-        res.status(404).json({ ok: false, error: 'Community post not found.' });
-        return;
+    app.patch(
+      '/api/admin2/community/posts/:id/status',
+      requireAdminManage,
+      async (req: Admin2Request, res) => {
+        await this.cloudSync?.syncIfNeeded();
+        const post = this.state.posts.find((p) => p.id === req.params.id);
+        if (!post) {
+          res.status(404).json({ ok: false, error: 'Community post not found.' });
+          return;
+        }
+        const allowed: CommunityPostStatus[] = ['published', 'hidden', 'removed'];
+        const nextStatus = allowed.includes(req.body?.status)
+          ? (req.body.status as CommunityPostStatus)
+          : 'published';
+        post.status = nextStatus;
+        post.hiddenReason =
+          nextStatus !== 'published' ? cleanSingleLine(req.body?.reason, 200) || undefined : undefined;
+        post.updatedAt = new Date().toISOString();
+        this.persistState();
+        await this.cloudSync?.pushDelta(
+          { post },
+          { adminEmail: req.admin2User?.email, awaitRemote: true }
+        );
+        res.json({ ok: true, post });
       }
-      const allowed: CommunityPostStatus[] = ['published', 'hidden', 'removed'];
-      const nextStatus = allowed.includes(req.body?.status)
-        ? (req.body.status as CommunityPostStatus)
-        : 'published';
-      post.status = nextStatus;
-      post.hiddenReason =
-        nextStatus !== 'published' ? cleanSingleLine(req.body?.reason, 200) || undefined : undefined;
-      post.updatedAt = new Date().toISOString();
-      this.persistState();
-      res.json({ ok: true, post });
-    });
+    );
 
-    app.delete('/api/admin2/community/posts/:id', requireAdminManage, (req, res) => {
-      const idx = this.state.posts.findIndex((p) => p.id === req.params.id);
-      if (idx === -1) {
-        res.status(404).json({ ok: false, error: 'Community post not found.' });
-        return;
+    app.delete(
+      '/api/admin2/community/posts/:id',
+      requireAdminManage,
+      async (req: Admin2Request, res) => {
+        await this.cloudSync?.syncIfNeeded();
+        const idx = this.state.posts.findIndex((p) => p.id === req.params.id);
+        if (idx === -1) {
+          res.status(404).json({ ok: false, error: 'Community post not found.' });
+          return;
+        }
+        const removedPhotos = [...this.state.posts[idx].photos];
+        const deletedId = this.state.posts[idx].id;
+        this.state.posts.splice(idx, 1);
+        this.persistState();
+        this.cleanupUnusedMedia(removedPhotos);
+        this.emitPostDeleted(deletedId);
+        await this.cloudSync?.pushDelta(
+          { deletePostId: deletedId },
+          { adminEmail: req.admin2User?.email, awaitRemote: true }
+        );
+        res.json({ ok: true });
       }
-      const removedPhotos = [...this.state.posts[idx].photos];
-      const deletedId = this.state.posts[idx].id;
-      this.state.posts.splice(idx, 1);
-      this.persistState();
-      this.cleanupUnusedMedia(removedPhotos);
-      this.emitPostDeleted(deletedId);
-      res.json({ ok: true });
-    });
+    );
 
-    app.get('/api/admin2/community/reports', requireAdminRead, (_req, res) => {
+    app.get('/api/admin2/community/reports', requireAdminRead, async (_req, res) => {
+      await this.cloudSync?.syncIfNeeded();
       res.json({ ok: true, reports: this.state.reports });
     });
 
-    app.patch('/api/admin2/community/reports/:id', requireAdminManage, (req: Admin2Request, res) => {
-      const report = this.state.reports.find((r) => r.id === req.params.id);
-      if (!report) {
-        res.status(404).json({ ok: false, error: 'Report not found.' });
-        return;
+    app.patch(
+      '/api/admin2/community/reports/:id',
+      requireAdminManage,
+      async (req: Admin2Request, res) => {
+        await this.cloudSync?.syncIfNeeded();
+        const report = this.state.reports.find((r) => r.id === req.params.id);
+        if (!report) {
+          res.status(404).json({ ok: false, error: 'Report not found.' });
+          return;
+        }
+        report.status = req.body?.status === 'dismissed' ? 'dismissed' : 'resolved';
+        report.resolvedAt = new Date().toISOString();
+        report.resolvedBy = req.admin2User?.email || 'admin';
+        this.persistState();
+        await this.cloudSync?.pushDelta(
+          { report },
+          { adminEmail: req.admin2User?.email, awaitRemote: true }
+        );
+        res.json({ ok: true, report });
       }
-      report.status = req.body?.status === 'dismissed' ? 'dismissed' : 'resolved';
-      report.resolvedAt = new Date().toISOString();
-      report.resolvedBy = req.admin2User?.email || 'admin';
-      this.persistState();
-      res.json({ ok: true, report });
-    });
+    );
 
     app.get('/api/admin2/community/export', requireAdminRead, (_req, res) => {
       res.setHeader('Content-Type', 'application/json; charset=utf-8');

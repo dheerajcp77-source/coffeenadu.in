@@ -585,11 +585,11 @@ export async function onRequest(context: PagesMiddlewareContext): Promise<Respon
   const resolvedMeta = isContestRoute
     ? {
         pageTitle:
-          'COFFEENADU – MOST VIEWED NEWS CHALLENGE 2026 | ₹500 ನಗದು ಬಹುಮಾನ ಗೆಲ್ಲಿ!',
+          'COFFEENADU – MOST VIEWED NEWS CHALLENGE 2026 | ₹1,500 ನಗದು ಬಹುಮಾನ ಗೆಲ್ಲಿ!',
         ogTitle:
-          'COFFEENADU – MOST VIEWED NEWS CHALLENGE 2026 | ₹500 ನಗದು ಬಹುಮಾನ ಗೆಲ್ಲಿ!',
+          'COFFEENADU – MOST VIEWED NEWS CHALLENGE 2026 | ₹1,500 ನಗದು ಬಹುಮಾನ ಗೆಲ್ಲಿ!',
         description:
-          'ನಿಮ್ಮ ಸುದ್ದಿ ಹೆಚ್ಚು ಜನರಿಗೆ ತಲುಪಲಿ – ₹500 ನಗದು ಬಹುಮಾನ ಗೆಲ್ಲಿ! ನಿಮ್ಮೂರಿನ ಸುದ್ದಿ ಪ್ರಕಟಿಸಿ, ಎಲ್ಲರೊಂದಿಗೆ ಹಂಚಿಕೊಳ್ಳಿ ಮತ್ತು ತಿಂಗಳ ವಿಜೇತರಾಗಿ (ಕೊಪ್ಪ, ಶೃಂಗೇರಿ, ಜಯಪುರ, ಬಾಳೆಹೊನ್ನೂರು).',
+          'ನಿಮ್ಮ ಸುದ್ದಿ ಹೆಚ್ಚು ಜನರಿಗೆ ತಲುಪಲಿ – ₹1,500 ನಗದು ಬಹುಮಾನ ಗೆಲ್ಲಿ! ನಿಮ್ಮೂರಿನ ಸುದ್ದಿ ಪ್ರಕಟಿಸಿ, ಎಲ್ಲರೊಂದಿಗೆ ಹಂಚಿಕೊಳ್ಳಿ ಮತ್ತು ತಿಂಗಳ ವಿಜೇತರಾಗಿ (ಕೊಪ್ಪ, ಶೃಂಗೇರಿ, ಜಯಪುರ, ಬಾಳೆಹೊನ್ನೂರು).',
         imageUrl: `${publicOrigin}/api/og-default-image`,
         imageAlt: 'Coffeenadu Most Viewed News Challenge 2026',
         canonicalUrl: `${publicOrigin}/contest`,

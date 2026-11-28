@@ -5,6 +5,8 @@ import {
   Ban,
   Calendar,
   CheckCircle2,
+  ChevronDown,
+  ChevronUp,
   Download,
   Edit3,
   ExternalLink,
@@ -13,7 +15,9 @@ import {
   FileSpreadsheet,
   History,
   Lock,
+  PauseCircle,
   Phone,
+  PlayCircle,
   PlusCircle,
   RefreshCw,
   RotateCcw,
@@ -24,6 +28,9 @@ import {
   Sliders,
   Sparkles,
   Trophy,
+  UserCheck,
+  UserX,
+  Users,
 } from 'lucide-react';
 import {
   downloadAdminContestExport,
@@ -31,27 +38,43 @@ import {
   finalizeAdminContestMonth,
   openNextAdminContestMonth,
   resetAdminContestMonthScores,
+  restoreAdminContestContentVersion,
   reviewAdminContestAlert,
   saveAdminContestWinners,
+  toggleAdminContestParticipation,
   toggleAdminContestWinnersPublished,
+  updateAdminContestContent,
   updateAdminContestEntryEligibility,
   updateAdminContestEntryScore,
   updateAdminContestMonthConfig,
+  updateAdminContestParticipantEligibility,
   type AdminWinnerSelectionInput,
 } from '../../services/contestClient';
 import { setAdminCommunityPostStatus } from '../../services/communityClient';
 import type {
   AdminContestEntryView,
+  AdminContestParticipantView,
   ContestAdminOverview,
+  ContestEditableContent,
+  ContestFaqItem,
   ContestMonthStatus,
   ContestPrizeTier,
+  ContestRuleItem,
 } from '../../types/contest';
+import { createDefaultContestEditableContent } from '../../utils/contestHelpers';
 
 interface Admin2ContestSectionProps {
   darkMode: boolean;
 }
 
-type AdminContestTab = 'entries' | 'views' | 'winners' | 'alerts' | 'settings' | 'audit';
+type AdminContestTab =
+  | 'participants'
+  | 'entries'
+  | 'views'
+  | 'winners'
+  | 'alerts'
+  | 'settings'
+  | 'audit';
 
 interface WinnerDraftRow {
   rank: 1 | 2 | 3 | 4 | 5;
@@ -103,7 +126,20 @@ export const Admin2ContestSection: React.FC<Admin2ContestSectionProps> = ({ dark
   const [startsLocal, setStartsLocal] = useState('');
   const [endsLocal, setEndsLocal] = useState('');
   const [monthStatusDraft, setMonthStatusDraft] = useState<ContestMonthStatus>('open');
+  const [participationEnabledDraft, setParticipationEnabledDraft] = useState<boolean>(true);
+  const [durationDaysDraft, setDurationDaysDraft] = useState<number>(30);
   const [prizesDraft, setPrizesDraft] = useState<ContestPrizeTier[]>([]);
+  const [contentDraft, setContentDraft] = useState<ContestEditableContent>(() =>
+    createDefaultContestEditableContent()
+  );
+  const [selectedRestoreVersion, setSelectedRestoreVersion] = useState<string>('');
+
+  const [participantSearchQuery, setParticipantSearchQuery] = useState('');
+  const [expandedParticipantId, setExpandedParticipantId] = useState<string | null>(null);
+  const [excludeParticipantTarget, setExcludeParticipantTarget] =
+    useState<AdminContestParticipantView | null>(null);
+  const [excludeParticipantReason, setExcludeParticipantReason] = useState('');
+  const [excludeParticipantError, setExcludeParticipantError] = useState('');
 
   const loadData = useCallback(async (monthKey?: string) => {
     setLoading(true);
@@ -116,7 +152,14 @@ export const Admin2ContestSection: React.FC<Admin2ContestSectionProps> = ({ dark
       setStartsLocal(toDatetimeLocalValue(data.selectedMonth.startsAtIso));
       setEndsLocal(toDatetimeLocalValue(data.selectedMonth.endsAtIso));
       setMonthStatusDraft(data.selectedMonth.status);
+      setParticipationEnabledDraft(data.selectedMonth.participationEnabled !== false);
+      setDurationDaysDraft(data.selectedMonth.durationDays || 30);
       setPrizesDraft(data.selectedMonth.prizes);
+      if (data.contentConfig) {
+        setContentDraft(data.contentConfig);
+        const latestHistory = data.contentConfig.previousVersions?.[0];
+        setSelectedRestoreVersion(latestHistory ? String(latestHistory.version) : '');
+      }
 
       const eligibleRanked = data.entries
         .filter((e) => e.eligibility === 'eligible')
@@ -126,14 +169,23 @@ export const Admin2ContestSection: React.FC<Admin2ContestSectionProps> = ({ dark
             (a.competitionDisplayScore ?? a.eligibleViews)
         );
 
-      const drafts: WinnerDraftRow[] = ([1, 2, 3, 4, 5] as const).map((rank) => {
+      const isHistoricalFivePrize =
+        data.selectedMonth.status === 'finalized' &&
+        (data.selectedMonth.prizes.length === 5 ||
+          data.selectedMonth.winners.some((w) => w.rank === 5));
+      const activeRanks: ReadonlyArray<1 | 2 | 3 | 4 | 5> = isHistoricalFivePrize
+        ? ([1, 2, 3, 4, 5] as const)
+        : ([1, 2, 3, 4] as const);
+      const maxViewRank = isHistoricalFivePrize ? 4 : 3;
+
+      const drafts: WinnerDraftRow[] = activeRanks.map((rank) => {
         const existing = data.selectedMonth.winners.find((w) => w.rank === rank);
         const tier = data.selectedMonth.prizes.find((p) => p.rank === rank);
-        const suggestedEntry = rank <= 4 ? eligibleRanked[rank - 1] : undefined;
+        const suggestedEntry = rank <= maxViewRank ? eligibleRanked[rank - 1] : undefined;
         return {
           rank,
           entryId: existing?.entryId || suggestedEntry?.id || '',
-          prizeAmountInr: existing?.prizeAmountInr ?? tier?.amountInr ?? 50,
+          prizeAmountInr: existing?.prizeAmountInr ?? tier?.amountInr ?? 100,
           selectionNote: existing?.selectionNote || '',
           paymentStatus: existing?.paymentStatus || 'pending',
           paymentDate: existing?.paymentDate || '',
@@ -370,17 +422,170 @@ export const Admin2ContestSection: React.FC<Admin2ContestSectionProps> = ({ dark
           prizes: prizesDraft,
           status: monthStatusDraft,
           allowCarryOver: false,
+          participationEnabled: participationEnabledDraft,
+          durationDays: durationDaysDraft,
         });
       },
-      `Updated dates & prize configuration for ${overview.selectedMonth.displayLabelEn}.`
+      `Updated dates, participation & prize configuration for ${overview.selectedMonth.displayLabelEn}.`
     );
   };
 
-  const handleOpenNextMonth = async () => {
-    await runAction(async () => {
-      const nextMonth = await openNextAdminContestMonth();
-      setSelectedMonthKey(nextMonth.monthKey);
-    }, 'Opened next competition month cleanly (previous articles archived, zero auto carry-over).');
+  const handleToggleParticipation = async () => {
+    if (!overview) return;
+    const currentlyEnabled = overview.selectedMonth.participationEnabled !== false;
+    const nextEnabled = !currentlyEnabled;
+    await runAction(
+      async () => {
+        await toggleAdminContestParticipation(overview.selectedMonth.monthKey, nextEnabled);
+      },
+      nextEnabled
+        ? `Enabled competition participation for ${overview.selectedMonth.displayLabelEn}.`
+        : `Paused competition participation for ${overview.selectedMonth.displayLabelEn} (submissions blocked).`
+    );
+  };
+
+  const handleConfirmExcludeParticipant = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!overview || !excludeParticipantTarget) return;
+    const cleanReason = excludeParticipantReason.trim();
+    if (cleanReason.length < 3) {
+      setExcludeParticipantError('Please enter at least 3 characters for the exclusion reason.');
+      return;
+    }
+    setExcludeParticipantError('');
+    setBusy(true);
+    setError('');
+    setFeedback('');
+    try {
+      const targetName = excludeParticipantTarget.displayName;
+      await updateAdminContestParticipantEligibility(
+        overview.selectedMonth.monthKey,
+        excludeParticipantTarget.userId,
+        false,
+        cleanReason
+      );
+      setExcludeParticipantTarget(null);
+      setExcludeParticipantReason('');
+      setFeedback(`Excluded "${targetName}" from the ${overview.selectedMonth.displayLabelEn} leaderboard.`);
+      await loadData(selectedMonthKey || undefined);
+      notifyPublicDataMutated();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Failed to exclude participant.';
+      setExcludeParticipantError(msg);
+      setError(msg);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleReinstateParticipant = async (participant: AdminContestParticipantView) => {
+    if (!overview) return;
+    await runAction(
+      async () => {
+        await updateAdminContestParticipantEligibility(
+          overview.selectedMonth.monthKey,
+          participant.userId,
+          true
+        );
+      },
+      `Reinstated "${participant.displayName}" to the ${overview.selectedMonth.displayLabelEn} leaderboard.`
+    );
+  };
+
+  const handleApply30DayPreset = () => {
+    const startBase = startsLocal ? new Date(fromIstDatetimeLocal(startsLocal)) : new Date();
+    const startMs = Number.isFinite(startBase.getTime()) ? startBase.getTime() : Date.now();
+    const istOffsetMs = 5.5 * 60 * 60 * 1000;
+    const startIst = new Date(startMs + istOffsetMs);
+    const y = startIst.getUTCFullYear();
+    const m = String(startIst.getUTCMonth() + 1).padStart(2, '0');
+    const d = String(startIst.getUTCDate()).padStart(2, '0');
+    const startDateStr = `${y}-${m}-${d}T00:00`;
+    const endDateObj = new Date(Date.UTC(y, startIst.getUTCMonth(), startIst.getUTCDate() + 29));
+    const ey = endDateObj.getUTCFullYear();
+    const em = String(endDateObj.getUTCMonth() + 1).padStart(2, '0');
+    const ed = String(endDateObj.getUTCDate()).padStart(2, '0');
+    setStartsLocal(startDateStr);
+    setEndsLocal(`${ey}-${em}-${ed}T23:59`);
+    setDurationDaysDraft(30);
+  };
+
+  const handleOpenNextMonth = async (rolling30Days = false) => {
+    await runAction(
+      async () => {
+        const nextMonth = rolling30Days
+          ? await openNextAdminContestMonth({
+              startDateIso: new Date().toISOString(),
+              durationDays: 30,
+            })
+          : await openNextAdminContestMonth();
+        setSelectedMonthKey(nextMonth.monthKey);
+      },
+      rolling30Days
+        ? 'Started a fresh 30-day competition period cleanly (previous leaderboard frozen in history).'
+        : 'Opened next competition month cleanly (previous leaderboard frozen, zero auto carry-over).'
+    );
+  };
+
+  const handleSaveContestContent = async (e: React.FormEvent) => {
+    e.preventDefault();
+    await runAction(
+      async () => {
+        const saved = await updateAdminContestContent(contentDraft);
+        setContentDraft(saved);
+      },
+      'Saved & published Contest Page Content & Settings immediately across all devices.'
+    );
+  };
+
+  const handleRestoreContestContentVersion = async () => {
+    const ver = selectedRestoreVersion ? Number(selectedRestoreVersion) : undefined;
+    await runAction(
+      async () => {
+        const restored = await restoreAdminContestContentVersion(ver);
+        setContentDraft(restored);
+      },
+      'Restored previous Contest Content & Settings version and updated live /contest page.'
+    );
+  };
+
+  const handleAddRuleRow = () => {
+    const nextIdx = contentDraft.competitionRules.length + 1;
+    const newRule: ContestRuleItem = {
+      id: `rule-${Date.now()}`,
+      titleKn: `${nextIdx}. ಹೊಸ ನಿಯಮ (New Rule)`,
+      descKn: 'ನಿಯಮದ ವಿವರಣೆಯನ್ನು ಇಲ್ಲಿ ನಮೂದಿಸಿ.',
+    };
+    setContentDraft((prev) => ({
+      ...prev,
+      competitionRules: [...prev.competitionRules, newRule],
+    }));
+  };
+
+  const handleRemoveRuleRow = (idx: number) => {
+    setContentDraft((prev) => ({
+      ...prev,
+      competitionRules: prev.competitionRules.filter((_, i) => i !== idx),
+    }));
+  };
+
+  const handleAddFaqRow = () => {
+    const newFaq: ContestFaqItem = {
+      id: `faq-${Date.now()}`,
+      questionKn: 'ಹೊಸ ಪ್ರಶ್ನೆ (New FAQ Question)?',
+      answerKn: 'ಉತ್ತರವನ್ನು ಇಲ್ಲಿ ನಮೂದಿಸಿ.',
+    };
+    setContentDraft((prev) => ({
+      ...prev,
+      faqs: [...prev.faqs, newFaq],
+    }));
+  };
+
+  const handleRemoveFaqRow = (idx: number) => {
+    setContentDraft((prev) => ({
+      ...prev,
+      faqs: prev.faqs.filter((_, i) => i !== idx),
+    }));
   };
 
   const cardBg = darkMode
@@ -395,7 +600,7 @@ export const Admin2ContestSection: React.FC<Admin2ContestSectionProps> = ({ dark
   const eligibleEntries = (overview?.entries || []).filter((e) => e.eligibility === 'eligible');
   const currentBudget = selectedMonth
     ? selectedMonth.prizes.reduce((s, p) => s + p.amountInr, 0)
-    : 500;
+    : 1500;
 
   return (
     <div className="space-y-6">
@@ -411,7 +616,7 @@ export const Admin2ContestSection: React.FC<Admin2ContestSectionProps> = ({ dark
             </h2>
             <p className={`mt-1 text-xs ${mutedText}`}>
               Manage eligible entries, private contributor mobile numbers, suspicious traffic
-              alerts, ₹500 prize selections (1st–4th views + 5th quality), payouts, and monthly
+              alerts, ₹{currentBudget.toLocaleString('en-IN')} prize selections (1st–3rd views + 4th quality), payouts, and monthly
               cycles.
             </p>
           </div>
@@ -446,18 +651,51 @@ export const Admin2ContestSection: React.FC<Admin2ContestSectionProps> = ({ dark
               <>
                 <button
                   type="button"
-                  onClick={() =>
-                    void downloadAdminContestExport(selectedMonth.monthKey, 'csv')
-                  }
-                  className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-700/30 bg-emerald-50 px-3 py-2 text-xs font-bold text-emerald-900 hover:bg-emerald-100 dark:bg-emerald-950/60 dark:text-emerald-200"
+                  disabled={busy}
+                  data-testid="contest-toggle-participation-btn"
+                  onClick={() => void handleToggleParticipation()}
+                  className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-2 text-xs font-bold ${
+                    selectedMonth.participationEnabled === false
+                      ? 'border-amber-400 bg-amber-50 text-amber-950 hover:bg-amber-100 dark:border-amber-700 dark:bg-amber-950/60 dark:text-amber-200'
+                      : 'border-emerald-700/30 bg-emerald-50 text-emerald-900 hover:bg-emerald-100 dark:bg-emerald-950/60 dark:text-emerald-200'
+                  }`}
                 >
-                  <FileSpreadsheet className="h-3.5 w-3.5" />
-                  <span>Export CSV</span>
+                  {selectedMonth.participationEnabled === false ? (
+                    <>
+                      <PlayCircle className="h-3.5 w-3.5" />
+                      <span>Participation: PAUSED (Resume)</span>
+                    </>
+                  ) : (
+                    <>
+                      <PauseCircle className="h-3.5 w-3.5" />
+                      <span>Participation: ACTIVE</span>
+                    </>
+                  )}
                 </button>
                 <button
                   type="button"
                   onClick={() =>
-                    void downloadAdminContestExport(selectedMonth.monthKey, 'json')
+                    void downloadAdminContestExport(selectedMonth.monthKey, 'csv', 'leaderboard')
+                  }
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-700/30 bg-emerald-50 px-3 py-2 text-xs font-bold text-emerald-900 hover:bg-emerald-100 dark:bg-emerald-950/60 dark:text-emerald-200"
+                >
+                  <FileSpreadsheet className="h-3.5 w-3.5" />
+                  <span>Leaderboard CSV</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() =>
+                    void downloadAdminContestExport(selectedMonth.monthKey, 'csv', 'entries')
+                  }
+                  className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-2 text-xs font-semibold ${inputClass}`}
+                >
+                  <Download className="h-3.5 w-3.5" />
+                  <span>Entries CSV</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() =>
+                    void downloadAdminContestExport(selectedMonth.monthKey, 'json', 'leaderboard')
                   }
                   className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-2 text-xs font-semibold ${inputClass}`}
                 >
@@ -483,19 +721,19 @@ export const Admin2ContestSection: React.FC<Admin2ContestSectionProps> = ({ dark
           <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-6">
             {[
               {
+                label: 'Participants',
+                value: overview.summary.eligibleParticipants ?? (overview.userLeaderboard?.length || 0),
+                sub: `${overview.summary.totalParticipants ?? (overview.participants?.length || 0)} total contributors`,
+              },
+              {
                 label: 'Eligible Entries',
                 value: overview.summary.eligibleEntries,
                 sub: `${overview.summary.disqualifiedEntries} disqualified`,
               },
               {
-                label: 'Eligible Views',
+                label: 'Total Verified Views',
                 value: overview.summary.totalEligibleViews.toLocaleString('en-IN'),
                 sub: '24h unique filtered',
-              },
-              {
-                label: 'Total Raw Views',
-                value: overview.summary.totalPageViews.toLocaleString('en-IN'),
-                sub: 'All genuine page loads',
               },
               {
                 label: 'Blocked Suspicious',
@@ -510,9 +748,12 @@ export const Admin2ContestSection: React.FC<Admin2ContestSectionProps> = ({ dark
               {
                 label: 'Monthly Budget',
                 value: `₹${currentBudget}`,
-                sub: overview.selectedMonth.winnersPublished
-                  ? 'Winners Published'
-                  : 'Winners Private',
+                sub:
+                  overview.selectedMonth.participationEnabled === false
+                    ? 'Participation Paused'
+                    : overview.selectedMonth.winnersPublished
+                    ? 'Winners Published'
+                    : 'Winners Private',
               },
             ].map((kpi) => (
               <div
@@ -545,7 +786,12 @@ export const Admin2ContestSection: React.FC<Admin2ContestSectionProps> = ({ dark
 
       <div className="flex flex-wrap gap-2 border-b border-slate-200 pb-2 dark:border-slate-800">
         {[
-          { id: 'entries' as const, label: 'Rankings & Entries', icon: Trophy },
+          {
+            id: 'participants' as const,
+            label: `User Leaderboard (${overview?.participants?.length ?? 0})`,
+            icon: Users,
+          },
+          { id: 'entries' as const, label: 'Articles & Entries', icon: Trophy },
           {
             id: 'views' as const,
             label: `View Management${
@@ -555,14 +801,14 @@ export const Admin2ContestSection: React.FC<Admin2ContestSectionProps> = ({ dark
             }`,
             icon: Sliders,
           },
-          { id: 'winners' as const, label: 'Winners & ₹500 Payouts', icon: Award },
+          { id: 'winners' as const, label: `Winners & ₹${currentBudget.toLocaleString('en-IN')} Payouts`, icon: Award },
           {
             id: 'alerts' as const,
             label: `Suspicious Traffic Alerts (${overview?.summary.openAlerts ?? 0})`,
             icon: ShieldAlert,
           },
-          { id: 'settings' as const, label: 'Month Dates, Prizes & Cycle', icon: Settings },
-          { id: 'audit' as const, label: 'Audit Log', icon: History },
+          { id: 'settings' as const, label: 'Content & Settings', icon: Settings },
+          { id: 'audit' as const, label: 'Audit & Diagnostics', icon: History },
         ].map((tab) => {
           const Icon = tab.icon;
           const active = activeTab === tab.id;
@@ -586,6 +832,299 @@ export const Admin2ContestSection: React.FC<Admin2ContestSectionProps> = ({ dark
           );
         })}
       </div>
+
+      {activeTab === 'participants' && overview && selectedMonth && (() => {
+        const allParticipants = overview.participants || [];
+        const q = participantSearchQuery.trim().toLowerCase();
+        const filteredParticipants = q
+          ? allParticipants.filter(
+              (p) =>
+                p.displayName.toLowerCase().includes(q) ||
+                (p.mobileNumber || '').toLowerCase().includes(q)
+            )
+          : allParticipants;
+        return (
+          <div className={`overflow-hidden rounded-xl border ${cardBg}`} data-testid="admin-participants-panel">
+            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 px-5 py-4 dark:border-slate-800">
+              <div>
+                <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-emerald-600 dark:text-emerald-400">
+                  <Users className="h-3.5 w-3.5" />
+                  <span>30-Day Automatic User Views Leaderboard · Admin Control</span>
+                </div>
+                <h3 className="mt-0.5 font-serif text-base font-bold">
+                  Registered Participants & Aggregated Views — {selectedMonth.displayLabelEn}
+                </h3>
+                <p className={`mt-0.5 text-xs ${mutedText}`}>
+                  Each user&apos;s total equals the automatic sum of verified views across all of
+                  their eligible published articles in this period. Click any row to inspect individual
+                  articles and per-article view counts.
+                </p>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2">
+                <div className="relative">
+                  <Search className="pointer-events-none absolute left-3 top-2.5 h-3.5 w-3.5 text-slate-400" />
+                  <input
+                    type="text"
+                    value={participantSearchQuery}
+                    onChange={(e) => setParticipantSearchQuery(e.target.value)}
+                    placeholder="Search name or mobile..."
+                    className={`rounded-lg border py-1.5 pl-8 pr-3 text-xs ${inputClass}`}
+                  />
+                </div>
+                <button
+                  type="button"
+                  onClick={() =>
+                    void downloadAdminContestExport(selectedMonth.monthKey, 'csv', 'leaderboard')
+                  }
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-700/30 bg-emerald-50 px-3 py-1.5 text-xs font-bold text-emerald-900 hover:bg-emerald-100 dark:bg-emerald-950/60 dark:text-emerald-200"
+                >
+                  <FileSpreadsheet className="h-3.5 w-3.5" />
+                  <span>Export CSV</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() =>
+                    void downloadAdminContestExport(selectedMonth.monthKey, 'json', 'leaderboard')
+                  }
+                  className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-semibold ${inputClass}`}
+                >
+                  <Download className="h-3.5 w-3.5" />
+                  <span>Export JSON</span>
+                </button>
+              </div>
+            </div>
+
+            {filteredParticipants.length === 0 ? (
+              <div className="p-8 text-center text-sm text-slate-500">
+                No participants found for {selectedMonth.displayLabelEn}.
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs">
+                  <thead
+                    className={
+                      darkMode ? 'bg-slate-950/70 text-slate-300' : 'bg-slate-50 text-slate-600'
+                    }
+                  >
+                    <tr>
+                      <th className="px-4 py-3 font-bold">Rank</th>
+                      <th className="px-4 py-3 font-bold">Participant (Private Mobile)</th>
+                      <th className="px-4 py-3 font-bold text-right">Eligible / Total News</th>
+                      <th className="px-4 py-3 font-bold text-right">Total Verified Views</th>
+                      <th className="px-4 py-3 font-bold text-right">Genuine Views</th>
+                      <th className="px-4 py-3 font-bold">Eligibility</th>
+                      <th className="px-4 py-3 font-bold text-right">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
+                    {filteredParticipants.map((p) => {
+                      const isExpanded = expandedParticipantId === p.userId;
+                      const isExcluded = !p.leaderboardEligible && p.userStatus !== 'suspended';
+                      return (
+                        <React.Fragment key={p.userId}>
+                          <tr className="align-top">
+                            <td className="px-4 py-3 font-mono font-bold tabular-nums">
+                              {p.rank ? `#${p.rank}` : '—'}
+                            </td>
+                            <td className="px-4 py-3">
+                              <p className="font-bold">{p.displayName}</p>
+                              <p className="mt-0.5 inline-flex items-center gap-1 font-mono text-[11px] font-semibold text-emerald-700 dark:text-emerald-400">
+                                <Phone className="h-3 w-3" />
+                                <span>{p.mobileNumber || 'Not available'}</span>
+                              </p>
+                              {p.exclusionReason && (
+                                <p className="mt-1 text-[11px] font-semibold text-red-600 dark:text-red-400">
+                                  Excluded: {p.exclusionReason}
+                                </p>
+                              )}
+                            </td>
+                            <td className="px-4 py-3 text-right font-mono font-bold tabular-nums">
+                              {p.eligibleArticleCount} / {p.totalArticleCount}
+                            </td>
+                            <td className="px-4 py-3 text-right font-mono text-sm font-extrabold tabular-nums text-emerald-700 dark:text-emerald-400">
+                              {p.totalVerifiedViews.toLocaleString('en-IN')}
+                            </td>
+                            <td className="px-4 py-3 text-right font-mono tabular-nums">
+                              {p.totalGenuineViews.toLocaleString('en-IN')}
+                            </td>
+                            <td className="px-4 py-3">
+                              {p.userStatus === 'suspended' ? (
+                                <span className="inline-block rounded bg-red-100 px-2 py-0.5 text-[11px] font-bold text-red-800 dark:bg-red-900/40 dark:text-red-200">
+                                  Suspended User
+                                </span>
+                              ) : isExcluded ? (
+                                <span className="inline-block rounded bg-amber-100 px-2 py-0.5 text-[11px] font-bold text-amber-900 dark:bg-amber-950/60 dark:text-amber-200">
+                                  Excluded
+                                </span>
+                              ) : (
+                                <span className="inline-block rounded bg-emerald-100 px-2 py-0.5 text-[11px] font-bold text-emerald-900 dark:bg-emerald-900/40 dark:text-emerald-200">
+                                  Eligible
+                                </span>
+                              )}
+                            </td>
+                            <td className="px-4 py-3 text-right">
+                              <div className="flex flex-wrap items-center justify-end gap-1.5">
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    setExpandedParticipantId(isExpanded ? null : p.userId)
+                                  }
+                                  className={`inline-flex items-center gap-1 rounded border px-2 py-1 text-[11px] font-semibold ${inputClass}`}
+                                >
+                                  <span>Articles ({p.articles.length})</span>
+                                  {isExpanded ? (
+                                    <ChevronUp className="h-3 w-3" />
+                                  ) : (
+                                    <ChevronDown className="h-3 w-3" />
+                                  )}
+                                </button>
+                                {isExcluded ? (
+                                  <button
+                                    type="button"
+                                    disabled={busy}
+                                    data-testid={`participant-reinstate-${p.userId}`}
+                                    onClick={() => void handleReinstateParticipant(p)}
+                                    className="inline-flex items-center gap-1 rounded border border-emerald-400 px-2.5 py-1 text-[11px] font-bold text-emerald-800 hover:bg-emerald-50 dark:text-emerald-300"
+                                  >
+                                    <UserCheck className="h-3 w-3" />
+                                    <span>Reinstate</span>
+                                  </button>
+                                ) : (
+                                  <button
+                                    type="button"
+                                    disabled={busy}
+                                    data-testid={`participant-exclude-${p.userId}`}
+                                    onClick={() => {
+                                      setExcludeParticipantTarget(p);
+                                      setExcludeParticipantReason('');
+                                      setExcludeParticipantError('');
+                                    }}
+                                    className="inline-flex items-center gap-1 rounded border border-red-300 px-2.5 py-1 text-[11px] font-bold text-red-700 hover:bg-red-50 dark:border-red-800 dark:text-red-300"
+                                  >
+                                    <UserX className="h-3 w-3" />
+                                    <span>Exclude</span>
+                                  </button>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+                          {isExpanded && (
+                            <tr className={darkMode ? 'bg-slate-950/60' : 'bg-slate-50/80'}>
+                              <td colSpan={7} className="px-6 py-3">
+                                <p className={`mb-2 text-[11px] font-bold uppercase ${mutedText}`}>
+                                  Individual Articles by {p.displayName} ({p.articles.length})
+                                </p>
+                                <div className="space-y-1.5">
+                                  {p.articles.map((art) => (
+                                    <div
+                                      key={art.id}
+                                      className={`flex flex-wrap items-center justify-between gap-2 rounded-lg border px-3 py-2 ${
+                                        darkMode
+                                          ? 'border-slate-800 bg-slate-900'
+                                          : 'border-slate-200 bg-white'
+                                      }`}
+                                    >
+                                      <div className="min-w-0 flex-1">
+                                        <a
+                                          href={`/community/${encodeURIComponent(art.slug)}?preview=1`}
+                                          target="_blank"
+                                          rel="noreferrer"
+                                          className="font-bold hover:underline"
+                                        >
+                                          {art.title}
+                                        </a>
+                                        <p className={`text-[11px] ${mutedText}`}>
+                                          {new Date(art.publishedAt).toLocaleString('en-IN')} ·
+                                          Contest: {art.eligibility} · Feed: {art.postStatus}
+                                        </p>
+                                      </div>
+                                      <div className="text-right font-mono">
+                                        <span className="font-extrabold text-emerald-700 dark:text-emerald-400">
+                                          {(art.competitionDisplayScore ?? art.eligibleViews).toLocaleString('en-IN')} display
+                                        </span>
+                                        <span className={`ml-2 text-[11px] ${mutedText}`}>
+                                          ({(art.genuineEligibleViews ?? art.eligibleViews).toLocaleString('en-IN')} genuine)
+                                        </span>
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                              </td>
+                            </tr>
+                          )}
+                        </React.Fragment>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            {excludeParticipantTarget && (
+              <div
+                className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/65 p-4 backdrop-blur-xs"
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="exclude-participant-title"
+              >
+                <form
+                  onSubmit={handleConfirmExcludeParticipant}
+                  className={`w-full max-w-md rounded-xl border p-5 shadow-2xl ${cardBg}`}
+                >
+                  <h3 id="exclude-participant-title" className="text-base font-bold">
+                    Exclude Participant from Leaderboard
+                  </h3>
+                  <p className={`mt-1 text-xs ${mutedText}`}>
+                    Excluding <strong>{excludeParticipantTarget.displayName}</strong> immediately
+                    removes them from the {selectedMonth.displayLabelEn} leaderboard while keeping
+                    their published Community Feed posts intact.
+                  </p>
+                  <div className="mt-4">
+                    <label className="mb-1 block text-xs font-bold">
+                      Reason (Audit Logged) *
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      minLength={3}
+                      value={excludeParticipantReason}
+                      onChange={(e) => {
+                        setExcludeParticipantReason(e.target.value);
+                        if (excludeParticipantError) setExcludeParticipantError('');
+                      }}
+                      placeholder="e.g., Violated fair-play guidelines"
+                      className={`w-full rounded-lg border px-3 py-2 text-xs ${inputClass}`}
+                    />
+                  </div>
+                  {excludeParticipantError && (
+                    <p className="mt-2 text-xs font-semibold text-red-600">
+                      {excludeParticipantError}
+                    </p>
+                  )}
+                  <div className="mt-5 flex justify-end gap-2">
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() => setExcludeParticipantTarget(null)}
+                      className={`rounded-lg border px-3.5 py-2 text-xs font-semibold ${inputClass}`}
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={busy}
+                      className="rounded-lg bg-red-600 px-4 py-2 text-xs font-bold text-white hover:bg-red-700 disabled:opacity-60"
+                    >
+                      {busy ? 'Saving...' : 'Confirm Exclude'}
+                    </button>
+                  </div>
+                </form>
+              </div>
+            )}
+          </div>
+        );
+      })()}
 
       {activeTab === 'entries' && overview && (
         <div className={`overflow-hidden rounded-xl border ${cardBg}`}>
@@ -1406,9 +1945,10 @@ export const Admin2ContestSection: React.FC<Admin2ContestSectionProps> = ({ dark
                 Monthly Winner Selection & Cash Payout Tracker — {selectedMonth.displayLabelEn}
               </h3>
               <p className={`text-xs ${mutedText}`}>
-                Ranks 1–4 default to top eligible views (overridable before finalization). Rank 5
-                (₹50) is selected separately for best originality, accuracy, local relevance &
-                usefulness. Payment details remain Admin-Only.
+                Ranks 1–3 default to top eligible views (₹800, ₹400, ₹200 — overridable before
+                finalization). 4th Prize (₹100) is manually selected by Admin for Best Quality
+                Original News (originality, accuracy, local relevance &amp; usefulness). Payment
+                details remain Admin-Only.
               </p>
             </div>
 
@@ -1459,7 +1999,11 @@ export const Admin2ContestSection: React.FC<Admin2ContestSectionProps> = ({ dark
           <div className="space-y-3">
             {winnerDrafts.map((row, idx) => {
               const selectedEntry = overview.entries.find((e) => e.id === row.entryId);
-              const isQuality = row.rank === 5;
+              const tierForRank = selectedMonth.prizes.find((p) => p.rank === row.rank);
+              const isQuality =
+                tierForRank?.type === 'quality' ||
+                (selectedMonth.status !== 'finalized' && row.rank === 4) ||
+                row.rank === 5;
               return (
                 <div
                   key={row.rank}
@@ -1480,7 +2024,7 @@ export const Admin2ContestSection: React.FC<Admin2ContestSectionProps> = ({ dark
                       )}
                       <span>
                         {isQuality
-                          ? '5th Prize — Best Quality Original News (Admin Selected)'
+                          ? `${row.rank === 5 ? '5th' : '4th'} Prize — Best Quality Original News (Admin Selection)`
                           : `Rank #${row.rank} — Most Viewed Eligible News`}
                       </span>
                     </div>
@@ -1702,168 +2246,907 @@ export const Admin2ContestSection: React.FC<Admin2ContestSectionProps> = ({ dark
       )}
 
       {activeTab === 'settings' && overview && selectedMonth && (
-        <div className="grid gap-5 lg:grid-cols-3">
+        <div className="space-y-6">
+          <div className="grid gap-5 lg:grid-cols-3">
+            <form
+              onSubmit={handleSaveConfig}
+              className={`space-y-4 rounded-xl border p-5 lg:col-span-2 ${cardBg}`}
+            >
+              <div className="border-b border-slate-200 pb-3 dark:border-slate-800">
+                <h3 className="font-serif text-lg font-bold">
+                  Configure Competition Month — {selectedMonth.displayLabelEn}
+                </h3>
+                <p className={`text-xs ${mutedText}`}>
+                  All dates are enforced in India Standard Time (IST, UTC+05:30). Counting stops
+                  automatically once the end timestamp is reached.
+                </p>
+              </div>
+
+              <div className="grid gap-3 sm:grid-cols-3">
+                <div>
+                  <label className={`mb-1 block text-xs font-bold ${mutedText}`}>
+                    Start Date & Time (IST)
+                  </label>
+                  <input
+                    type="datetime-local"
+                    required
+                    value={startsLocal}
+                    onChange={(e) => setStartsLocal(e.target.value)}
+                    className={`w-full rounded-lg border px-3 py-2 text-xs ${inputClass}`}
+                  />
+                </div>
+                <div>
+                  <label className={`mb-1 block text-xs font-bold ${mutedText}`}>
+                    End Deadline (IST)
+                  </label>
+                  <input
+                    type="datetime-local"
+                    required
+                    value={endsLocal}
+                    onChange={(e) => setEndsLocal(e.target.value)}
+                    className={`w-full rounded-lg border px-3 py-2 text-xs ${inputClass}`}
+                  />
+                </div>
+                <div>
+                  <label className={`mb-1 block text-xs font-bold ${mutedText}`}>
+                    Month Lifecycle Status
+                  </label>
+                  <select
+                    value={monthStatusDraft}
+                    onChange={(e) =>
+                      setMonthStatusDraft(e.target.value as ContestMonthStatus)
+                    }
+                    className={`w-full rounded-lg border px-3 py-2 text-xs font-bold ${inputClass}`}
+                  >
+                    <option value="open">Open (Active)</option>
+                    <option value="closed">Closed (Reviewing)</option>
+                    <option value="finalized">Finalized (Archived)</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
+                <label className="inline-flex cursor-pointer items-center gap-2 text-xs font-bold">
+                  <input
+                    type="checkbox"
+                    checked={participationEnabledDraft}
+                    onChange={(e) => setParticipationEnabledDraft(e.target.checked)}
+                    className="h-4 w-4 rounded accent-emerald-700"
+                  />
+                  <span>Enable Competition Participation (allow new contest submissions)</span>
+                </label>
+
+                <button
+                  type="button"
+                  onClick={handleApply30DayPreset}
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-700/30 bg-emerald-50 px-3 py-1.5 text-xs font-bold text-emerald-900 hover:bg-emerald-100 dark:bg-emerald-950/60 dark:text-emerald-200"
+                >
+                  <Calendar className="h-3.5 w-3.5" />
+                  <span>Set Exact 30-Day Window (IST)</span>
+                </button>
+              </div>
+
+              <div className="space-y-2 pt-2">
+                <p className="text-xs font-bold">
+                  Configurable Monthly Prize Amounts (Current Total: ₹
+                  {prizesDraft.reduce((s, p) => s + p.amountInr, 0).toLocaleString('en-IN')})
+                </p>
+                <div className="grid gap-2.5 sm:grid-cols-2 lg:grid-cols-4">
+                  {prizesDraft.slice(0, 4).map((tier, idx) => (
+                    <div
+                      key={tier.rank}
+                      className={`rounded-lg border p-2.5 ${
+                        darkMode ? 'border-slate-800 bg-slate-950' : 'border-slate-200 bg-slate-50'
+                      }`}
+                    >
+                      <p className="text-[11px] font-bold">{tier.labelEn}</p>
+                      <p className={`text-[10px] ${mutedText}`}>
+                        {tier.type === 'quality' ? 'Admin Quality Selection' : 'Most Viewed'}
+                      </p>
+                      <input
+                        type="number"
+                        min={0}
+                        value={tier.amountInr}
+                        onChange={(e) => {
+                          const next = [...prizesDraft];
+                          next[idx] = {
+                            ...next[idx],
+                            amountInr: Math.max(0, Number(e.target.value) || 0),
+                          };
+                          setPrizesDraft(next);
+                        }}
+                        className={`mt-1.5 w-full rounded border px-2 py-1 font-mono text-xs font-bold ${inputClass}`}
+                      />
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="flex justify-end border-t border-slate-200 pt-3 dark:border-slate-800">
+                <button
+                  type="submit"
+                  disabled={busy}
+                  className="inline-flex items-center gap-1.5 rounded-lg bg-[#0F3928] px-4 py-2 text-xs font-bold text-white hover:bg-[#144B35]"
+                >
+                  <Save className="h-3.5 w-3.5" />
+                  <span>Save Period Configuration</span>
+                </button>
+              </div>
+            </form>
+
+            <div className={`flex flex-col justify-between rounded-xl border p-5 ${cardBg}`}>
+              <div className="space-y-2">
+                <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-emerald-600 dark:text-emerald-400">
+                  <Calendar className="h-4 w-4" />
+                  <span>30-Day Period Automation</span>
+                </div>
+                <h3 className="font-serif text-lg font-bold">Open Next Competition Period</h3>
+                <p className={`text-xs leading-relaxed ${mutedText}`}>
+                  Freezes the current period&apos;s user leaderboard in history and opens a clean new
+                  period with ₹1,500 default prizes (₹800, ₹400, ₹200, ₹100 Quality Selection). Old
+                  articles and views never carry over into the new period.
+                </p>
+              </div>
+
+              <div className="mt-5 space-y-2">
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => void handleOpenNextMonth(true)}
+                  className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-[#0F3928] px-4 py-2.5 text-xs font-extrabold text-white hover:bg-[#144B35]"
+                >
+                  <PlusCircle className="h-4 w-4" />
+                  <span>Start Fresh 30-Day Period Today (IST)</span>
+                </button>
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => void handleOpenNextMonth(false)}
+                  className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-amber-500 px-4 py-2.5 text-xs font-extrabold text-slate-950 hover:bg-amber-400"
+                >
+                  <PlusCircle className="h-4 w-4" />
+                  <span>Open Next Calendar Month</span>
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* Complete Contest Page Content & Settings Editor */}
           <form
-            onSubmit={handleSaveConfig}
-            className={`space-y-4 rounded-xl border p-5 lg:col-span-2 ${cardBg}`}
+            onSubmit={handleSaveContestContent}
+            data-testid="contest-content-editor-form"
+            className={`space-y-6 rounded-xl border p-5 ${cardBg}`}
           >
-            <div className="border-b border-slate-200 pb-3 dark:border-slate-800">
-              <h3 className="font-serif text-lg font-bold">
-                Configure Competition Month — {selectedMonth.displayLabelEn}
-              </h3>
-              <p className={`text-xs ${mutedText}`}>
-                All dates are enforced in India Standard Time (IST, UTC+05:30). Counting stops
-                automatically once the end timestamp is reached.
-              </p>
+            <div className="flex flex-wrap items-start justify-between gap-4 border-b border-slate-200 pb-4 dark:border-slate-800">
+              <div>
+                <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-emerald-600 dark:text-emerald-400">
+                  <Edit3 className="h-3.5 w-3.5" />
+                  <span>
+                    Contest Page Content & Settings · Version v{contentDraft.version || 1}
+                  </span>
+                </div>
+                <h3 className="mt-1 font-serif text-lg font-bold">
+                  Editable Public Contest Page & Homepage Promo Content
+                </h3>
+                <p className={`text-xs ${mutedText}`}>
+                  Edit all headings, subtitles, announcements, rules, eligibility criteria, FAQs,
+                  button labels, notices, and section visibility for{' '}
+                  <code className="font-mono">/contest</code>. Changes publish immediately to all
+                  visitors.
+                </p>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2">
+                {contentDraft.previousVersions && contentDraft.previousVersions.length > 0 && (
+                  <div className="flex items-center gap-1.5">
+                    <select
+                      value={selectedRestoreVersion}
+                      onChange={(e) => setSelectedRestoreVersion(e.target.value)}
+                      data-testid="contest-content-version-select"
+                      className={`rounded-lg border px-2.5 py-1.5 text-xs ${inputClass}`}
+                      aria-label="Select previous content version to restore"
+                    >
+                      {contentDraft.previousVersions.map((snap) => (
+                        <option key={snap.version} value={String(snap.version)}>
+                          v{snap.version} ({new Date(snap.updatedAt).toLocaleString('en-IN')})
+                        </option>
+                      ))}
+                    </select>
+                    <button
+                      type="button"
+                      disabled={busy}
+                      data-testid="contest-content-restore-btn"
+                      onClick={() => void handleRestoreContestContentVersion()}
+                      className="inline-flex items-center gap-1 rounded-lg border border-amber-400 bg-amber-50 px-3 py-1.5 text-xs font-bold text-amber-950 hover:bg-amber-100 dark:border-amber-700 dark:bg-amber-950/60 dark:text-amber-200"
+                    >
+                      <RotateCcw className="h-3.5 w-3.5" />
+                      <span>Restore Version</span>
+                    </button>
+                  </div>
+                )}
+
+                <button
+                  type="submit"
+                  disabled={busy}
+                  data-testid="contest-content-save-btn"
+                  className="inline-flex items-center gap-1.5 rounded-lg bg-[#0F3928] px-4 py-2 text-xs font-bold text-white hover:bg-[#144B35]"
+                >
+                  <Save className="h-3.5 w-3.5" />
+                  <span>Save & Publish Content</span>
+                </button>
+              </div>
             </div>
 
-            <div className="grid gap-3 sm:grid-cols-3">
+            {/* 1. Hero Titles & Introduction */}
+            <div className="grid gap-4 md:grid-cols-2">
               <div>
                 <label className={`mb-1 block text-xs font-bold ${mutedText}`}>
-                  Start Date & Time (IST)
+                  Official Competition Name (English Badge)
                 </label>
                 <input
-                  type="datetime-local"
-                  required
-                  value={startsLocal}
-                  onChange={(e) => setStartsLocal(e.target.value)}
-                  className={`w-full rounded-lg border px-3 py-2 text-xs ${inputClass}`}
-                />
-              </div>
-              <div>
-                <label className={`mb-1 block text-xs font-bold ${mutedText}`}>
-                  End Deadline (IST)
-                </label>
-                <input
-                  type="datetime-local"
-                  required
-                  value={endsLocal}
-                  onChange={(e) => setEndsLocal(e.target.value)}
-                  className={`w-full rounded-lg border px-3 py-2 text-xs ${inputClass}`}
-                />
-              </div>
-              <div>
-                <label className={`mb-1 block text-xs font-bold ${mutedText}`}>
-                  Month Lifecycle Status
-                </label>
-                <select
-                  value={monthStatusDraft}
+                  type="text"
+                  data-testid="contest-content-official-name"
+                  value={contentDraft.mainHeadingEn}
                   onChange={(e) =>
-                    setMonthStatusDraft(e.target.value as ContestMonthStatus)
+                    setContentDraft({ ...contentDraft, mainHeadingEn: e.target.value })
+                  }
+                  className={`w-full rounded-lg border px-3 py-2 text-xs font-semibold ${inputClass}`}
+                />
+              </div>
+              <div>
+                <label className={`mb-1 block text-xs font-bold ${mutedText}`}>
+                  Main Contest Heading (Kannada)
+                </label>
+                <input
+                  type="text"
+                  data-testid="contest-content-heading-kn"
+                  value={contentDraft.mainHeadingKn}
+                  onChange={(e) =>
+                    setContentDraft({ ...contentDraft, mainHeadingKn: e.target.value })
                   }
                   className={`w-full rounded-lg border px-3 py-2 text-xs font-bold ${inputClass}`}
-                >
-                  <option value="open">Open (Active)</option>
-                  <option value="closed">Closed (Reviewing)</option>
-                  <option value="finalized">Finalized (Archived)</option>
-                </select>
+                />
+              </div>
+              <div className="md:col-span-2">
+                <label className={`mb-1 block text-xs font-bold ${mutedText}`}>
+                  Contest Subtitle
+                </label>
+                <input
+                  type="text"
+                  data-testid="contest-content-subtitle-kn"
+                  value={contentDraft.subtitleKn}
+                  onChange={(e) =>
+                    setContentDraft({ ...contentDraft, subtitleKn: e.target.value })
+                  }
+                  className={`w-full rounded-lg border px-3 py-2 text-xs ${inputClass}`}
+                />
+              </div>
+              <div className="md:col-span-2">
+                <label className={`mb-1 block text-xs font-bold ${mutedText}`}>
+                  Introduction Paragraph / Target Area Text
+                </label>
+                <textarea
+                  rows={2}
+                  data-testid="contest-content-intro-kn"
+                  value={contentDraft.introKn}
+                  onChange={(e) =>
+                    setContentDraft({ ...contentDraft, introKn: e.target.value })
+                  }
+                  className={`w-full rounded-lg border px-3 py-2 text-xs ${inputClass}`}
+                />
               </div>
             </div>
 
-            <div className="space-y-2 pt-2">
-              <p className="text-xs font-bold">
-                Configurable Monthly Prize Amounts (Current Total: ₹
-                {prizesDraft.reduce((s, p) => s + p.amountInr, 0)})
-              </p>
-              <div className="grid gap-2.5 sm:grid-cols-5">
-                {prizesDraft.map((tier, idx) => (
+            {/* 2. Announcement Banner & Important Notice */}
+            <div className="grid gap-4 border-t border-slate-200 pt-4 md:grid-cols-2 dark:border-slate-800">
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-bold">
+                    Top Announcement Banner Text (Optional)
+                  </label>
+                  <label className="inline-flex cursor-pointer items-center gap-1.5 text-xs font-semibold">
+                    <input
+                      type="checkbox"
+                      data-testid="contest-content-announcement-toggle"
+                      checked={contentDraft.showAnnouncementBanner}
+                      onChange={(e) =>
+                        setContentDraft({
+                          ...contentDraft,
+                          showAnnouncementBanner: e.target.checked,
+                        })
+                      }
+                      className="h-3.5 w-3.5 rounded accent-emerald-700"
+                    />
+                    <span>Show Banner</span>
+                  </label>
+                </div>
+                <input
+                  type="text"
+                  data-testid="contest-content-announcement-text"
+                  value={contentDraft.announcementBannerKn}
+                  onChange={(e) =>
+                    setContentDraft({
+                      ...contentDraft,
+                      announcementBannerKn: e.target.value,
+                    })
+                  }
+                  placeholder="e.g., ಈ ತಿಂಗಳ ವಿಜೇತರ ಘೋಷಣೆ ದಿನಾಂಕ..."
+                  className={`w-full rounded-lg border px-3 py-2 text-xs ${inputClass}`}
+                />
+              </div>
+
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-bold">Important Notice Box (Optional)</label>
+                  <label className="inline-flex cursor-pointer items-center gap-1.5 text-xs font-semibold">
+                    <input
+                      type="checkbox"
+                      data-testid="contest-content-notice-toggle"
+                      checked={contentDraft.showImportantNotice}
+                      onChange={(e) =>
+                        setContentDraft({
+                          ...contentDraft,
+                          showImportantNotice: e.target.checked,
+                        })
+                      }
+                      className="h-3.5 w-3.5 rounded accent-amber-600"
+                    />
+                    <span>Show Notice</span>
+                  </label>
+                </div>
+                <input
+                  type="text"
+                  data-testid="contest-content-notice-text"
+                  value={contentDraft.importantNoticeKn}
+                  onChange={(e) =>
+                    setContentDraft({
+                      ...contentDraft,
+                      importantNoticeKn: e.target.value,
+                    })
+                  }
+                  placeholder="Important notice for contest participants..."
+                  className={`w-full rounded-lg border px-3 py-2 text-xs ${inputClass}`}
+                />
+              </div>
+            </div>
+
+            {/* 3. Homepage Promotional Banner & CTA Button Labels */}
+            <div className="grid gap-4 border-t border-slate-200 pt-4 md:grid-cols-2 dark:border-slate-800">
+              <div>
+                <label className={`mb-1 block text-xs font-bold ${mutedText}`}>
+                  Homepage Promo Banner Title
+                </label>
+                <input
+                  type="text"
+                  value={contentDraft.homepagePromoHeadingKn}
+                  onChange={(e) =>
+                    setContentDraft({ ...contentDraft, homepagePromoHeadingKn: e.target.value })
+                  }
+                  className={`w-full rounded-lg border px-3 py-2 text-xs ${inputClass}`}
+                />
+              </div>
+              <div>
+                <label className={`mb-1 block text-xs font-bold ${mutedText}`}>
+                  Homepage Promo Badge Text
+                </label>
+                <input
+                  type="text"
+                  value={contentDraft.homepagePromoBadgeKn}
+                  onChange={(e) =>
+                    setContentDraft({ ...contentDraft, homepagePromoBadgeKn: e.target.value })
+                  }
+                  className={`w-full rounded-lg border px-3 py-2 text-xs ${inputClass}`}
+                />
+              </div>
+              <div className="md:col-span-2">
+                <label className={`mb-1 block text-xs font-bold ${mutedText}`}>
+                  Homepage Promo Banner Subtitle
+                </label>
+                <input
+                  type="text"
+                  value={contentDraft.homepagePromoSubtitleKn}
+                  onChange={(e) =>
+                    setContentDraft({
+                      ...contentDraft,
+                      homepagePromoSubtitleKn: e.target.value,
+                    })
+                  }
+                  className={`w-full rounded-lg border px-3 py-2 text-xs ${inputClass}`}
+                />
+              </div>
+
+              <div>
+                <label className={`mb-1 block text-xs font-bold ${mutedText}`}>
+                  Primary Participate Button Label
+                </label>
+                <input
+                  type="text"
+                  data-testid="contest-content-participate-label"
+                  value={contentDraft.buttonLabels.participateBtnKn}
+                  onChange={(e) =>
+                    setContentDraft({
+                      ...contentDraft,
+                      buttonLabels: {
+                        ...contentDraft.buttonLabels,
+                        participateBtnKn: e.target.value,
+                      },
+                    })
+                  }
+                  className={`w-full rounded-lg border px-3 py-2 text-xs ${inputClass}`}
+                />
+              </div>
+              <div className="grid grid-cols-3 gap-2">
+                <div>
+                  <label className={`mb-1 block text-[11px] font-bold ${mutedText}`}>
+                    Leaderboard Btn
+                  </label>
+                  <input
+                    type="text"
+                    value={contentDraft.buttonLabels.leaderboardBtnEn}
+                    onChange={(e) =>
+                      setContentDraft({
+                        ...contentDraft,
+                        buttonLabels: {
+                          ...contentDraft.buttonLabels,
+                          leaderboardBtnEn: e.target.value,
+                        },
+                      })
+                    }
+                    className={`w-full rounded-lg border px-2.5 py-2 text-xs ${inputClass}`}
+                  />
+                </div>
+                <div>
+                  <label className={`mb-1 block text-[11px] font-bold ${mutedText}`}>
+                    Rules Btn
+                  </label>
+                  <input
+                    type="text"
+                    value={contentDraft.buttonLabels.rulesBtnEn}
+                    onChange={(e) =>
+                      setContentDraft({
+                        ...contentDraft,
+                        buttonLabels: {
+                          ...contentDraft.buttonLabels,
+                          rulesBtnEn: e.target.value,
+                        },
+                      })
+                    }
+                    className={`w-full rounded-lg border px-2.5 py-2 text-xs ${inputClass}`}
+                  />
+                </div>
+                <div>
+                  <label className={`mb-1 block text-[11px] font-bold ${mutedText}`}>
+                    Winners Btn
+                  </label>
+                  <input
+                    type="text"
+                    value={contentDraft.buttonLabels.previousWinnersBtnEn}
+                    onChange={(e) =>
+                      setContentDraft({
+                        ...contentDraft,
+                        buttonLabels: {
+                          ...contentDraft.buttonLabels,
+                          previousWinnersBtnEn: e.target.value,
+                        },
+                      })
+                    }
+                    className={`w-full rounded-lg border px-2.5 py-2 text-xs ${inputClass}`}
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* 4. Participation Instructions & Winner Section Headings */}
+            <div className="grid gap-4 border-t border-slate-200 pt-4 md:grid-cols-2 dark:border-slate-800">
+              <div>
+                <label className={`mb-1 block text-xs font-bold ${mutedText}`}>
+                  Participation Instructions (Kannada)
+                </label>
+                <input
+                  type="text"
+                  value={contentDraft.participationInstructionsKn}
+                  onChange={(e) =>
+                    setContentDraft({
+                      ...contentDraft,
+                      participationInstructionsKn: e.target.value,
+                    })
+                  }
+                  className={`w-full rounded-lg border px-3 py-2 text-xs ${inputClass}`}
+                />
+              </div>
+              <div>
+                <label className={`mb-1 block text-xs font-bold ${mutedText}`}>
+                  Closing Date Notice (Kannada)
+                </label>
+                <input
+                  type="text"
+                  value={contentDraft.closingDateNoticeKn}
+                  onChange={(e) =>
+                    setContentDraft({
+                      ...contentDraft,
+                      closingDateNoticeKn: e.target.value,
+                    })
+                  }
+                  className={`w-full rounded-lg border px-3 py-2 text-xs ${inputClass}`}
+                />
+              </div>
+              <div>
+                <label className={`mb-1 block text-xs font-bold ${mutedText}`}>
+                  Winner Announcement Heading
+                </label>
+                <input
+                  type="text"
+                  value={contentDraft.winnerAnnouncementHeadingKn}
+                  onChange={(e) =>
+                    setContentDraft({ ...contentDraft, winnerAnnouncementHeadingKn: e.target.value })
+                  }
+                  className={`w-full rounded-lg border px-3 py-2 text-xs ${inputClass}`}
+                />
+              </div>
+              <div>
+                <label className={`mb-1 block text-xs font-bold ${mutedText}`}>
+                  Winner Announcement Note
+                </label>
+                <input
+                  type="text"
+                  value={contentDraft.winnerAnnouncementNoteKn}
+                  onChange={(e) =>
+                    setContentDraft({ ...contentDraft, winnerAnnouncementNoteKn: e.target.value })
+                  }
+                  className={`w-full rounded-lg border px-3 py-2 text-xs ${inputClass}`}
+                />
+              </div>
+              <div>
+                <label className={`mb-1 block text-xs font-bold ${mutedText}`}>
+                  Previous Winners Archive Heading
+                </label>
+                <input
+                  type="text"
+                  value={contentDraft.previousWinnersHeadingKn}
+                  onChange={(e) =>
+                    setContentDraft({
+                      ...contentDraft,
+                      previousWinnersHeadingKn: e.target.value,
+                    })
+                  }
+                  className={`w-full rounded-lg border px-3 py-2 text-xs ${inputClass}`}
+                />
+              </div>
+              <div>
+                <label className={`mb-1 block text-xs font-bold ${mutedText}`}>
+                  Previous Winners Subtitle
+                </label>
+                <input
+                  type="text"
+                  value={contentDraft.previousWinnersSubtitleKn}
+                  onChange={(e) =>
+                    setContentDraft({
+                      ...contentDraft,
+                      previousWinnersSubtitleKn: e.target.value,
+                    })
+                  }
+                  className={`w-full rounded-lg border px-3 py-2 text-xs ${inputClass}`}
+                />
+              </div>
+            </div>
+
+            {/* 5. Editable Rules & Eligibility Criteria */}
+            <div className="space-y-3 border-t border-slate-200 pt-4 dark:border-slate-800">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <h4 className="text-xs font-bold uppercase tracking-wider text-emerald-700 dark:text-emerald-400">
+                    Competition Rules & Eligibility Criteria ({contentDraft.competitionRules.length} Rules)
+                  </h4>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleAddRuleRow}
+                  className="inline-flex items-center gap-1 rounded-lg border border-emerald-600/40 bg-emerald-50 px-2.5 py-1 text-xs font-bold text-emerald-900 hover:bg-emerald-100 dark:bg-emerald-950/50 dark:text-emerald-200"
+                >
+                  <PlusCircle className="h-3.5 w-3.5" />
+                  <span>Add Rule</span>
+                </button>
+              </div>
+
+              <div className="grid gap-3 md:grid-cols-2">
+                <div>
+                  <label className={`mb-1 block text-xs font-bold ${mutedText}`}>
+                    Page Description / Guidelines Summary
+                  </label>
+                  <input
+                    type="text"
+                    value={contentDraft.pageDescriptionKn}
+                    onChange={(e) =>
+                      setContentDraft({ ...contentDraft, pageDescriptionKn: e.target.value })
+                    }
+                    className={`w-full rounded-lg border px-3 py-2 text-xs ${inputClass}`}
+                  />
+                </div>
+                <div>
+                  <label className={`mb-1 block text-xs font-bold ${mutedText}`}>
+                    Eligibility Criteria Summary (Comma-separated)
+                  </label>
+                  <input
+                    type="text"
+                    value={contentDraft.eligibilityCriteriaKn.join(' | ')}
+                    onChange={(e) =>
+                      setContentDraft({
+                        ...contentDraft,
+                        eligibilityCriteriaKn: e.target.value
+                          .split('|')
+                          .map((s) => s.trim())
+                          .filter(Boolean),
+                      })
+                    }
+                    className={`w-full rounded-lg border px-3 py-2 text-xs ${inputClass}`}
+                  />
+                </div>
+              </div>
+
+              <div className="grid gap-3 md:grid-cols-2">
+                {contentDraft.competitionRules.map((rule, idx) => (
                   <div
-                    key={tier.rank}
-                    className={`rounded-lg border p-2.5 ${
-                      darkMode ? 'border-slate-800 bg-slate-950' : 'border-slate-200 bg-slate-50'
+                    key={rule.id || idx}
+                    className={`space-y-2 rounded-lg border p-3 ${
+                      darkMode ? 'border-slate-800 bg-slate-950/60' : 'border-slate-200 bg-slate-50'
                     }`}
                   >
-                    <p className="text-[11px] font-bold">{tier.labelEn}</p>
-                    <p className={`text-[10px] ${mutedText}`}>
-                      {tier.type === 'quality' ? 'Quality' : 'Views'}
-                    </p>
-                    <input
-                      type="number"
-                      min={0}
-                      value={tier.amountInr}
+                    <div className="flex items-center justify-between gap-2">
+                      <input
+                        type="text"
+                        value={rule.titleKn}
+                        onChange={(e) => {
+                          const next = [...contentDraft.competitionRules];
+                          next[idx] = { ...next[idx], titleKn: e.target.value };
+                          setContentDraft({ ...contentDraft, competitionRules: next });
+                        }}
+                        className={`w-full rounded border px-2.5 py-1.5 text-xs font-bold ${inputClass}`}
+                      />
+                      {contentDraft.competitionRules.length > 1 && (
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveRuleRow(idx)}
+                          className="rounded border border-red-300 px-2 py-1 text-[11px] font-bold text-red-700 hover:bg-red-50 dark:border-red-800 dark:text-red-300"
+                        >
+                          Remove
+                        </button>
+                      )}
+                    </div>
+                    <textarea
+                      rows={2}
+                      value={rule.descKn}
                       onChange={(e) => {
-                        const next = [...prizesDraft];
-                        next[idx] = {
-                          ...next[idx],
-                          amountInr: Math.max(0, Number(e.target.value) || 0),
-                        };
-                        setPrizesDraft(next);
+                        const next = [...contentDraft.competitionRules];
+                        next[idx] = { ...next[idx], descKn: e.target.value };
+                        setContentDraft({ ...contentDraft, competitionRules: next });
                       }}
-                      className={`mt-1.5 w-full rounded border px-2 py-1 font-mono text-xs font-bold ${inputClass}`}
+                      className={`w-full rounded border px-2.5 py-1.5 text-xs ${inputClass}`}
                     />
                   </div>
                 ))}
               </div>
             </div>
 
-            <div className="flex justify-end border-t border-slate-200 pt-3 dark:border-slate-800">
+            {/* 6. Editable FAQ Section */}
+            <div className="space-y-3 border-t border-slate-200 pt-4 dark:border-slate-800">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-3">
+                  <h4 className="text-xs font-bold uppercase tracking-wider text-emerald-700 dark:text-emerald-400">
+                    Frequently Asked Questions ({contentDraft.faqs.length} FAQs)
+                  </h4>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleAddFaqRow}
+                  className="inline-flex items-center gap-1 rounded-lg border border-emerald-600/40 bg-emerald-50 px-2.5 py-1 text-xs font-bold text-emerald-900 hover:bg-emerald-100 dark:bg-emerald-950/50 dark:text-emerald-200"
+                >
+                  <PlusCircle className="h-3.5 w-3.5" />
+                  <span>Add FAQ</span>
+                </button>
+              </div>
+
+              <div className="grid gap-3 md:grid-cols-2">
+                {contentDraft.faqs.map((faq, idx) => (
+                  <div
+                    key={faq.id || idx}
+                    className={`space-y-2 rounded-lg border p-3 ${
+                      darkMode ? 'border-slate-800 bg-slate-950/60' : 'border-slate-200 bg-slate-50'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <input
+                        type="text"
+                        value={faq.questionKn}
+                        onChange={(e) => {
+                          const next = [...contentDraft.faqs];
+                          next[idx] = { ...next[idx], questionKn: e.target.value };
+                          setContentDraft({ ...contentDraft, faqs: next });
+                        }}
+                        placeholder="Question"
+                        className={`w-full rounded border px-2.5 py-1.5 text-xs font-bold ${inputClass}`}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveFaqRow(idx)}
+                        className="rounded border border-red-300 px-2 py-1 text-[11px] font-bold text-red-700 hover:bg-red-50 dark:border-red-800 dark:text-red-300"
+                      >
+                        Remove
+                      </button>
+                    </div>
+                    <textarea
+                      rows={2}
+                      value={faq.answerKn}
+                      onChange={(e) => {
+                        const next = [...contentDraft.faqs];
+                        next[idx] = { ...next[idx], answerKn: e.target.value };
+                        setContentDraft({ ...contentDraft, faqs: next });
+                      }}
+                      placeholder="Answer"
+                      className={`w-full rounded border px-2.5 py-1.5 text-xs ${inputClass}`}
+                    />
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* 7. Footer & Section Visibility Controls */}
+            <div className="grid gap-4 border-t border-slate-200 pt-4 md:grid-cols-2 dark:border-slate-800">
+              <div>
+                <label className={`mb-1 block text-xs font-bold ${mutedText}`}>
+                  Contest Footer & Contact Information
+                </label>
+                <textarea
+                  rows={2}
+                  data-testid="contest-content-footer-kn"
+                  value={contentDraft.footerInfoKn}
+                  onChange={(e) =>
+                    setContentDraft({
+                      ...contentDraft,
+                      footerInfoKn: e.target.value,
+                    })
+                  }
+                  className={`w-full rounded-lg border px-3 py-2 text-xs ${inputClass}`}
+                />
+              </div>
+
+              <div>
+                <p className={`mb-2 text-xs font-bold ${mutedText}`}>
+                  Public Section Visibility Toggles
+                </p>
+                <div className="grid grid-cols-2 gap-2 text-xs">
+                  {(
+                    [
+                      ['prizes', 'Monthly Prizes Section'],
+                      ['leaderboard', 'Live Leaderboard'],
+                      ['notice', 'Important Notice Box'],
+                      ['rules', 'Competition Rules'],
+                      ['faqs', 'FAQ Section'],
+                      ['winners', 'Previous Winners Archive'],
+                    ] as const
+                  ).map(([key, label]) => {
+                    const isVisible = !contentDraft.hiddenSections.includes(key);
+                    return (
+                      <label
+                        key={key}
+                        className="flex cursor-pointer items-center gap-2 rounded border border-slate-200 px-2.5 py-1.5 dark:border-slate-800"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={isVisible}
+                          onChange={(e) => {
+                            const nextHidden = e.target.checked
+                              ? contentDraft.hiddenSections.filter((s) => s !== key)
+                              : [...contentDraft.hiddenSections, key];
+                            setContentDraft({
+                              ...contentDraft,
+                              hiddenSections: nextHidden,
+                            });
+                          }}
+                          className="h-3.5 w-3.5 rounded accent-emerald-700"
+                        />
+                        <span>{label}</span>
+                      </label>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 pt-4 dark:border-slate-800">
+              <p className={`text-[11px] ${mutedText}`}>
+                Last updated by <strong>{contentDraft.updatedBy || 'system'}</strong> at{' '}
+                {new Date(contentDraft.updatedAt).toLocaleString('en-IN')}
+              </p>
               <button
                 type="submit"
                 disabled={busy}
-                className="inline-flex items-center gap-1.5 rounded-lg bg-[#0F3928] px-4 py-2 text-xs font-bold text-white hover:bg-[#144B35]"
+                className="inline-flex items-center gap-1.5 rounded-lg bg-[#0F3928] px-5 py-2.5 text-xs font-bold text-white hover:bg-[#144B35]"
               >
                 <Save className="h-3.5 w-3.5" />
-                <span>Save Month Configuration</span>
+                <span>Save & Publish Content Settings</span>
               </button>
             </div>
           </form>
-
-          <div className={`flex flex-col justify-between rounded-xl border p-5 ${cardBg}`}>
-            <div className="space-y-2">
-              <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-emerald-600 dark:text-emerald-400">
-                <Calendar className="h-4 w-4" />
-                <span>Monthly Automation</span>
-              </div>
-              <h3 className="font-serif text-lg font-bold">Open Next Competition Month</h3>
-              <p className={`text-xs leading-relaxed ${mutedText}`}>
-                Starts the next IST calendar month cleanly with ₹500 default prizes. All current
-                month articles, views, and winners remain preserved in history without transferring
-                old articles into the new month.
-              </p>
-            </div>
-
-            <button
-              type="button"
-              disabled={busy}
-              onClick={() => void handleOpenNextMonth()}
-              className="mt-5 inline-flex w-full items-center justify-center gap-2 rounded-lg bg-amber-500 px-4 py-2.5 text-xs font-extrabold text-slate-950 hover:bg-amber-400"
-            >
-              <PlusCircle className="h-4 w-4" />
-              <span>Open Next Competition Month</span>
-            </button>
-          </div>
         </div>
       )}
 
       {activeTab === 'audit' && overview && (
-        <div className={`overflow-hidden rounded-xl border ${cardBg}`}>
-          <div className="border-b border-slate-200 px-5 py-3.5 dark:border-slate-800">
-            <h3 className="font-serif text-base font-bold">Admin Contest Audit Trail</h3>
+        <div className="space-y-6">
+          <div className={`overflow-hidden rounded-xl border ${cardBg}`}>
+            <div className="border-b border-slate-200 px-5 py-3.5 dark:border-slate-800">
+              <h3 className="font-serif text-base font-bold">Admin Contest Audit Trail</h3>
+              <p className={`text-xs ${mutedText}`}>
+                Permanent log of all score adjustments, disqualifications, content edits, and
+                monthly finalizations.
+              </p>
+            </div>
+            {overview.auditLogs.length === 0 ? (
+              <div className="p-8 text-center text-sm text-slate-500">
+                No administrative contest actions recorded yet.
+              </div>
+            ) : (
+              <div className="divide-y divide-slate-200 dark:divide-slate-800">
+                {overview.auditLogs.map((log) => (
+                  <div
+                    key={log.id}
+                    className="flex flex-wrap items-center justify-between gap-2 px-5 py-3 text-xs"
+                  >
+                    <div>
+                      <span className="font-mono font-bold text-emerald-700 dark:text-emerald-400">
+                        [{log.action}]
+                      </span>{' '}
+                      <span className="font-medium">{log.details}</span>
+                    </div>
+                    <div className={`text-[11px] ${mutedText}`}>
+                      {log.actorEmail} · {new Date(log.timestamp).toLocaleString('en-IN')}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
-          {overview.auditLogs.length === 0 ? (
-            <div className="p-8 text-center text-sm text-slate-500">
-              No administrative contest actions recorded yet.
+
+          <div className={`overflow-hidden rounded-xl border ${cardBg}`}>
+            <div className="border-b border-slate-200 px-5 py-3.5 dark:border-slate-800">
+              <h3 className="font-serif text-base font-bold">
+                System Operations & Technical Diagnostics
+              </h3>
+              <p className={`text-xs ${mutedText}`}>
+                Structured diagnostic log for registration, publishing, image storage, and cloud
+                synchronization (no secrets exposed).
+              </p>
             </div>
-          ) : (
-            <div className="divide-y divide-slate-200 dark:divide-slate-800">
-              {overview.auditLogs.map((log) => (
-                <div
-                  key={log.id}
-                  className="flex flex-wrap items-center justify-between gap-2 px-5 py-3 text-xs"
-                >
-                  <div>
-                    <span className="font-mono font-bold text-emerald-700 dark:text-emerald-400">
-                      [{log.action}]
-                    </span>{' '}
-                    <span className="font-medium">{log.details}</span>
+            {!overview.diagnostics || overview.diagnostics.length === 0 ? (
+              <div className="p-6 text-center text-xs text-emerald-700 dark:text-emerald-400">
+                All systems healthy — no backend or sync errors recorded.
+              </div>
+            ) : (
+              <div className="divide-y divide-slate-200 dark:divide-slate-800">
+                {overview.diagnostics.map((diag) => (
+                  <div
+                    key={diag.id}
+                    className="flex flex-wrap items-center justify-between gap-2 px-5 py-3 text-xs"
+                  >
+                    <div>
+                      <span className="font-mono font-bold uppercase text-amber-700 dark:text-amber-400">
+                        [{diag.category} · {diag.operationType}]
+                      </span>{' '}
+                      <span className="font-medium">{diag.message}</span>
+                      {diag.recordId && (
+                        <span className={`ml-2 font-mono text-[11px] ${mutedText}`}>
+                          (ID: {diag.recordId})
+                        </span>
+                      )}
+                    </div>
+                    <div className={`text-[11px] ${mutedText}`}>
+                      {diag.recoveryStatus.toUpperCase()} ·{' '}
+                      {new Date(diag.timestamp).toLocaleString('en-IN')}
+                    </div>
                   </div>
-                  <div className={`text-[11px] ${mutedText}`}>
-                    {log.actorEmail} · {new Date(log.timestamp).toLocaleString('en-IN')}
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
+                ))}
+              </div>
+            )}
+          </div>
         </div>
       )}
     </div>

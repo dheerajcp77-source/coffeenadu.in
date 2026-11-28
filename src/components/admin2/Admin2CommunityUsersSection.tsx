@@ -526,43 +526,65 @@ export const Admin2CommunityUsersSection: React.FC<Admin2CommunityUsersSectionPr
                     key={post.id}
                     className="p-4 rounded-xl border border-slate-200 dark:border-slate-800 flex flex-col md:flex-row md:items-center justify-between gap-3"
                   >
-                    <div className="space-y-1 min-w-0">
-                      <div className="flex flex-wrap items-center gap-2 text-[11px]">
-                        <span className="font-kannada font-bold text-[#176B4A] dark:text-emerald-400">
-                          {cat?.labelKn || post.category}
-                        </span>
-                        <span>·</span>
-                        <span>{post.location}</span>
-                        <span>·</span>
-                        <span className="font-semibold">{post.authorName}</span>
-                        {post.authorMobileNumber && (
-                          <span className="font-mono text-slate-500">
-                            ({post.authorMobileNumber})
+                    <div className="flex items-start gap-3 min-w-0">
+                      {post.photos?.[0] && (
+                        <img
+                          src={post.photos[0]}
+                          alt={post.title.trim() || `${post.authorName} image post`}
+                          className="w-16 h-16 rounded-lg object-contain bg-slate-100 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 shrink-0"
+                        />
+                      )}
+                      <div className="space-y-1 min-w-0">
+                        <div className="flex flex-wrap items-center gap-2 text-[11px]">
+                          <span className="font-kannada font-bold text-[#176B4A] dark:text-emerald-400">
+                            {cat?.labelKn || post.category}
                           </span>
+                          <span>·</span>
+                          <span>{post.location}</span>
+                          <span>·</span>
+                          <span className="font-semibold">{post.authorName}</span>
+                          {post.authorMobileNumber && (
+                            <span className="font-mono text-slate-500">
+                              ({post.authorMobileNumber})
+                            </span>
+                          )}
+                          {!post.title.trim() && post.photos?.length > 0 && (
+                            <span className="px-2 py-0.5 rounded bg-blue-100 text-blue-800 dark:bg-blue-950/60 dark:text-blue-200 font-bold">
+                              Image-Only Post ({post.photos.length})
+                            </span>
+                          )}
+                          {post.status !== 'published' && (
+                            <span className="px-2 py-0.5 rounded bg-amber-100 text-amber-900 font-bold">
+                              {post.status}
+                            </span>
+                          )}
+                          {post.openReportsCount > 0 && (
+                            <span className="px-2 py-0.5 rounded bg-red-100 text-red-800 font-bold">
+                              {post.openReportsCount} open report(s)
+                            </span>
+                          )}
+                        </div>
+                        {post.title.trim() ? (
+                          <h3 className="font-kannada text-sm font-extrabold">{post.title}</h3>
+                        ) : (
+                          <h3 className="font-kannada text-xs font-bold text-slate-500">
+                            ಚಿತ್ರ ಪ್ರಕಟಣೆ (Image-Only Post)
+                          </h3>
                         )}
-                        {post.status !== 'published' && (
-                          <span className="px-2 py-0.5 rounded bg-amber-100 text-amber-900 font-bold">
-                            {post.status}
+                        {post.description.trim() && (
+                          <p className="font-kannada text-xs text-slate-500 line-clamp-2">
+                            {post.description}
+                          </p>
+                        )}
+                        <div className="flex flex-wrap items-center gap-3 text-[11px] text-slate-400">
+                          <span className="inline-flex items-center gap-1 font-bold tabular-nums text-slate-800 dark:text-amber-300">
+                            <Eye className="w-3.5 h-3.5 text-slate-400 dark:text-amber-400/80" />
+                            {formatAdminViewCount(post.viewsCount)} views
                           </span>
-                        )}
-                        {post.openReportsCount > 0 && (
-                          <span className="px-2 py-0.5 rounded bg-red-100 text-red-800 font-bold">
-                            {post.openReportsCount} open report(s)
+                          <span className="font-mono">
+                            /community/{post.slug} · {new Date(post.createdAt).toLocaleString()}
                           </span>
-                        )}
-                      </div>
-                      <h3 className="font-kannada text-sm font-extrabold">{post.title}</h3>
-                      <p className="font-kannada text-xs text-slate-500 line-clamp-2">
-                        {post.description}
-                      </p>
-                      <div className="flex flex-wrap items-center gap-3 text-[11px] text-slate-400">
-                        <span className="inline-flex items-center gap-1 font-bold tabular-nums text-slate-800 dark:text-amber-300">
-                          <Eye className="w-3.5 h-3.5 text-slate-400 dark:text-amber-400/80" />
-                          {formatAdminViewCount(post.viewsCount)} views
-                        </span>
-                        <span className="font-mono">
-                          /community/{post.slug} · {new Date(post.createdAt).toLocaleString()}
-                        </span>
+                        </div>
                       </div>
                     </div>
 
@@ -808,7 +830,9 @@ export const Admin2CommunityUsersSection: React.FC<Admin2CommunityUsersSectionPr
                           {formatAdminViewCount(p.viewsCount)} views
                         </span>
                       </div>
-                      <p className="font-kannada text-sm font-bold">{p.title}</p>
+                      <p className="font-kannada text-sm font-bold">
+                        {p.title.trim() || `ಚಿತ್ರ ಪ್ರಕಟಣೆ (Image-Only Post${p.photos?.length ? ` · ${p.photos.length} photo` : ''})`}
+                      </p>
                     </div>
                     <div className="flex items-center gap-1.5">
                       <button

@@ -492,36 +492,40 @@ export const UnifiedCommunityFeed: React.FC<UnifiedCommunityFeedProps> = ({
                         </button>
                       </div>
 
-                      {/* Threads Text Body */}
-                      <div className="space-y-1.5">
-                        <h2 className="font-kannada text-base sm:text-lg font-extrabold text-[#1C1917] dark:text-[#FBF9F5] leading-snug">
-                          <button
-                            type="button"
-                            onClick={() => handleOpenItem(item)}
-                            className="text-left hover:text-[#926710] dark:hover:text-[#E6BC5C] transition-colors cursor-pointer focus-visible:outline-none focus-visible:underline"
-                          >
-                            {item.title}
-                          </button>
-                        </h2>
+                      {/* Threads Text Body (omitted completely for pure image-only posts — zero empty placeholders) */}
+                      {(item.title.trim() || item.description.trim() || item.priceLabel) && (
+                        <div className="space-y-1.5">
+                          {item.title.trim() && (
+                            <h2 className="font-kannada text-base sm:text-lg font-extrabold text-[#1C1917] dark:text-[#FBF9F5] leading-snug">
+                              <button
+                                type="button"
+                                onClick={() => handleOpenItem(item)}
+                                className="text-left hover:text-[#926710] dark:hover:text-[#E6BC5C] transition-colors cursor-pointer focus-visible:outline-none focus-visible:underline"
+                              >
+                                {item.title}
+                              </button>
+                            </h2>
+                          )}
 
-                        {item.description && (
-                          <p
-                            className={`font-kannada text-sm text-[#3F3830] dark:text-[#D9D0C1] leading-relaxed whitespace-pre-line ${
-                              validImages.length === 0 ? 'line-clamp-6' : 'line-clamp-3'
-                            }`}
-                          >
-                            {item.description}
-                          </p>
-                        )}
+                          {item.description.trim() && (
+                            <p
+                              className={`font-kannada text-sm text-[#3F3830] dark:text-[#D9D0C1] leading-relaxed whitespace-pre-line ${
+                                validImages.length === 0 ? 'line-clamp-6' : 'line-clamp-3'
+                              }`}
+                            >
+                              {item.description}
+                            </p>
+                          )}
 
-                        {item.priceLabel && (
-                          <div className="pt-0.5 text-xs sm:text-sm">
-                            <span className="font-extrabold text-[#926710] dark:text-[#E6BC5C] tabular-nums">
-                              {language === 'kn' ? 'ಬೆಲೆ:' : 'Price:'} {item.priceLabel}
-                            </span>
-                          </div>
-                        )}
-                      </div>
+                          {item.priceLabel && (
+                            <div className="pt-0.5 text-xs sm:text-sm">
+                              <span className="font-extrabold text-[#926710] dark:text-[#E6BC5C] tabular-nums">
+                                {language === 'kn' ? 'ಬೆಲೆ:' : 'Price:'} {item.priceLabel}
+                              </span>
+                            </div>
+                          )}
+                        </div>
+                      )}
 
                       {/* Card Media: ONLY rendered when user uploaded a real, valid image */}
                       {validImages.length > 0 && (
@@ -534,7 +538,7 @@ export const UnifiedCommunityFeed: React.FC<UnifiedCommunityFeedProps> = ({
                             >
                               <img
                                 src={validImages[0]}
-                                alt={item.title}
+                                alt={item.title.trim() || `${item.authorName} — ${categoryLabel}`}
                                 loading="lazy"
                                 decoding="async"
                                 data-testid="feed-card-image"
@@ -558,7 +562,7 @@ export const UnifiedCommunityFeed: React.FC<UnifiedCommunityFeedProps> = ({
                                 >
                                   <img
                                     src={imgSrc}
-                                    alt={`${item.title} (${imgIdx + 1})`}
+                                    alt={`${item.title.trim() || item.authorName} (${imgIdx + 1})`}
                                     loading="lazy"
                                     decoding="async"
                                     data-testid="feed-card-image"
@@ -607,7 +611,7 @@ export const UnifiedCommunityFeed: React.FC<UnifiedCommunityFeedProps> = ({
                       <button
                         type="button"
                         onClick={() => handleShareWhatsApp(item)}
-                        aria-label={`Share ${item.title} on WhatsApp`}
+                        aria-label={`Share ${item.title.trim() || item.authorName} on WhatsApp`}
                         className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-[#DFC996] dark:border-[#4A3B22] bg-[#FBF4E3] dark:bg-[#262015] text-[#8A6110] dark:text-[#E6BC5C] hover:bg-[#F5E8C8] dark:hover:bg-[#32291A] text-xs font-bold transition-colors cursor-pointer min-h-[40px]"
                       >
                         <Share2 className="w-3.5 h-3.5" />
@@ -617,7 +621,7 @@ export const UnifiedCommunityFeed: React.FC<UnifiedCommunityFeedProps> = ({
                       <button
                         type="button"
                         onClick={() => void handleCopyLink(item)}
-                        aria-label={`Copy permanent link for ${item.title}`}
+                        aria-label={`Copy permanent link for ${item.title.trim() || item.authorName}`}
                         className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-[#E7DFCE] dark:border-[#3A3122] bg-white dark:bg-[#201D18] text-[#1C1917] dark:text-[#F0E9DC] hover:bg-[#F5F0E4] dark:hover:bg-[#2B261E] text-xs font-bold transition-colors cursor-pointer min-h-[40px]"
                       >
                         {copied ? (

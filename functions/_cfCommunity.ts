@@ -350,8 +350,20 @@ export async function handleCfCommunityApi(
     const price = cleanSingleLine(body.price, 80);
     const optionalPublicContact = cleanSingleLine(body.optionalPublicContact, 80);
 
-    if (title.length < 3 || !isValidCommunityCategory(category) || description.length < 5 || location.length < 2) {
-      return jsonResp({ ok: false, error: 'ದಯವಿಟ್ಟು ಎಲ್ಲಾ ಅಗತ್ಯ ವಿವರಗಳನ್ನು ಸರಿಯಾಗಿ ಭರ್ತಿ ಮಾಡಿ.' }, 400);
+    if (!isValidCommunityCategory(category)) {
+      return jsonResp({ ok: false, error: 'ದಯವಿಟ್ಟು ಸೂಕ್ತ ವಿಭಾಗವನ್ನು ಆಯ್ಕೆಮಾಡಿ.' }, 400);
+    }
+    if (category === 'monthly-news-contest') {
+      return jsonResp(
+        {
+          ok: false,
+          error: 'ತಿಂಗಳ ಸುದ್ದಿ ಸ್ಪರ್ಧೆಯ ಸುದ್ದಿಗಳನ್ನು ದಯವಿಟ್ಟು /contest ಪುಟದ ಮೂಲಕವೇ ಪ್ರಕಟಿಸಿ.',
+        },
+        400
+      );
+    }
+    if (location.length < 2) {
+      return jsonResp({ ok: false, error: 'ದಯವಿಟ್ಟು ನಿಮ್ಮ ಊರು / ಸ್ಥಳವನ್ನು ಆಯ್ಕೆಮಾಡಿ.' }, 400);
     }
 
     const photoResult = await persistPublicPhotosOnCf(env, body.photos);
@@ -359,10 +371,55 @@ export async function handleCfCommunityApi(
       return jsonResp({ ok: false, error: photoResult.error }, photoResult.storageFailure ? 502 : 400);
     }
 
+    const hasPhotos = photoResult.photos.length > 0;
+    if (!hasPhotos) {
+      if (title.length < 3 && description.length < 5) {
+        return jsonResp(
+          {
+            ok: false,
+            error:
+              'ದಯವಿಟ್ಟು ಸುದ್ದಿಯ ಶೀರ್ಷಿಕೆ ಮತ್ತು ವಿವರಣೆಯನ್ನು ನಮೂದಿಸಿ ಅಥವಾ ಕನಿಷ್ಠ ಒಂದು ಫೋಟೋವನ್ನು ಅಪ್‌ಲೋಡ್ ಮಾಡಿ.',
+          },
+          400
+        );
+      }
+      if (title.length < 3) {
+        return jsonResp({ ok: false, error: 'ದಯವಿಟ್ಟು ಮಾಹಿತಿಯ ಶೀರ್ಷಿಕೆಯನ್ನು ನಮೂದಿಸಿ.' }, 400);
+      }
+      if (description.length < 5) {
+        return jsonResp({ ok: false, error: 'ದಯವಿಟ್ಟು ಮಾಹಿತಿಯ ವಿವರಣೆಯನ್ನು ನಮೂದಿಸಿ.' }, 400);
+      }
+    }
+
+    const nowMs = Date.now();
+    const existingDuplicate = state.posts.find((p) => {
+      if (p.authorUserId !== resolved.user.id || p.category !== category) return false;
+      const ageMs = nowMs - Date.parse(p.createdAt);
+      if (title.length > 0) {
+        return p.title.toLowerCase() === title.toLowerCase() && ageMs < 10 * 60_000;
+      }
+      return (
+        !p.title &&
+        photoResult.photos.length > 0 &&
+        p.photos[0] === photoResult.photos[0] &&
+        ageMs < 2 * 60_000
+      );
+    });
+    if (existingDuplicate) {
+      return jsonResp(
+        {
+          ok: true,
+          duplicatePrevented: true,
+          post: toPublicCommunityPost(existingDuplicate, resolved.user.id),
+        },
+        200
+      );
+    }
+
     const nowIso = new Date().toISOString();
     const post: CommunityPostRecord = {
       id: `cpost-${Date.now().toString(36)}-${randomHex(4)}`,
-      slug: generateCommunitySlug(title, randomHex(4)),
+      slug: generateCommunitySlug(title || 'photo-post', randomHex(4)),
       authorUserId: resolved.user.id,
       authorName: resolved.user.fullName,
       title,
@@ -426,20 +483,40 @@ export async function handleCfCommunityApi(
       if (post.authorUserId !== resolved.user.id) return jsonResp({ ok: false, error: 'Forbidden' }, 403);
 
       const body = await readJson();
-      post.title = cleanSingleLine(body.title ?? post.title, 150);
-      if (isValidCommunityCategory(body.category)) post.category = body.category;
-      post.description = cleanMultiline(body.description ?? post.description, 3000);
-      post.location = cleanSingleLine(body.location ?? post.location, 100);
-      if (body.price !== undefined) post.price = cleanSingleLine(body.price, 80) || undefined;
-      if (body.optionalPublicContact !== undefined) {
-        post.optionalPublicContact = cleanSingleLine(body.optionalPublicContact, 80) || undefined;
-      }
+      const nextTitle = cleanSingleLine(body.title !== undefined ? body.title : post.title, 150);
+      const nextCategory = isValidCommunityCategory(body.category) ? body.category : post.category;
+      const nextDescription = cleanMultiline(
+        body.description !== undefined ? body.description : post.description,
+        3000
+      );
+      const nextLocation = cleanSingleLine(
+        body.location !== undefined ? body.location : post.location,
+        100
+      );
+      let nextPhotos = post.photos;
       if (body.photos !== undefined) {
         const photoResult = await persistPublicPhotosOnCf(env, body.photos);
         if (!photoResult.ok) {
           return jsonResp({ ok: false, error: photoResult.error }, photoResult.storageFailure ? 502 : 400);
         }
-        post.photos = photoResult.photos;
+        nextPhotos = photoResult.photos;
+      }
+      const hasPhotos = nextPhotos.length > 0;
+      if (nextLocation.length < 2 || (!hasPhotos && (nextTitle.length < 3 || nextDescription.length < 5))) {
+        return jsonResp(
+          { ok: false, error: 'ದಯವಿಟ್ಟು ಅಗತ್ಯ ವಿವರಗಳನ್ನು ಭರ್ತಿ ಮಾಡಿ ಅಥವಾ ಕನಿಷ್ಠ ಒಂದು ಫೋಟೋ ಉಳಿಸಿ.' },
+          400
+        );
+      }
+
+      post.title = nextTitle;
+      post.category = nextCategory;
+      post.description = nextDescription;
+      post.location = nextLocation;
+      post.photos = nextPhotos;
+      if (body.price !== undefined) post.price = cleanSingleLine(body.price, 80) || undefined;
+      if (body.optionalPublicContact !== undefined) {
+        post.optionalPublicContact = cleanSingleLine(body.optionalPublicContact, 80) || undefined;
       }
       post.updatedAt = new Date().toISOString();
       const updatedEntries = syncContestEntriesWithPost(state, post);

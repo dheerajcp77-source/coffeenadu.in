@@ -10,10 +10,11 @@ import express, { type NextFunction, type Request, type Response } from 'express
 import sharp from 'sharp';
 import { SEED_ARTICLES as PORTAL_SEED_ARTICLES } from './src/constants/seedArticles.ts';
 import { Admin2Backend } from './src/server/admin2Backend.ts';
+import { AppsScriptCommunityContestCoordinator } from './src/server/appsScriptCommunitySync.ts';
 import { CommunityBackend } from './src/server/communityBackend.ts';
 import { ContestBackend } from './src/server/contestBackend.ts';
 import { PlatformBackend } from './src/server/platformBackend.ts';
-import { SheetsStorageManager } from './src/server/sheetsStorageProxy.ts';
+import { SheetsStorageManager, getAppsScriptConfig } from './src/server/sheetsStorageProxy.ts';
 
 void execFile;
 void promisify;
@@ -1455,6 +1456,13 @@ async function startServer() {
   const contestBackend = new ContestBackend(DATA_DIR, communityBackend, (perm) =>
     admin2Backend.createAuthMiddleware(perm)
   );
+
+  // Sync user-published Community & Monthly Contest records with Google Apps Script & Drive
+  const communityContestSync = new AppsScriptCommunityContestCoordinator(getAppsScriptConfig);
+  communityContestSync.bindBackends(communityBackend, contestBackend);
+  communityBackend.attachCloudSync(communityContestSync);
+  contestBackend.attachCloudSync(communityContestSync);
+  void communityContestSync.syncIfNeeded(true);
 
   // Record real public page traffic (anonymized daily hashes, never blocks response)
   app.use((req, _res, next) => {
@@ -3291,9 +3299,9 @@ Rules:
       } else if (req.path === '/contest' || req.path === '/contest/') {
         ogUrl = `${deepLinkOrigin}/contest`;
         ogTitle =
-          'COFFEENADU – MOST VIEWED NEWS CHALLENGE 2026 | ₹500 ನಗದು ಬಹುಮಾನ ಗೆಲ್ಲಿ!';
+          'COFFEENADU – MOST VIEWED NEWS CHALLENGE 2026 | ₹1,500 ನಗದು ಬಹುಮಾನ ಗೆಲ್ಲಿ!';
         ogDescription =
-          'ನಿಮ್ಮ ಸುದ್ದಿ ಹೆಚ್ಚು ಜನರಿಗೆ ತಲುಪಲಿ – ₹500 ನಗದು ಬಹುಮಾನ ಗೆಲ್ಲಿ! ನಿಮ್ಮೂರಿನ ಸುದ್ದಿ ಪ್ರಕಟಿಸಿ, ಎಲ್ಲರೊಂದಿಗೆ ಹಂಚಿಕೊಳ್ಳಿ ಮತ್ತು ತಿಂಗಳ ವಿಜೇತರಾಗಿ (ಕೊಪ್ಪ, ಶೃಂಗೇರಿ, ಜಯಪುರ, ಬಾಳೆಹೊನ್ನೂರು).';
+          'ನಿಮ್ಮ ಸುದ್ದಿ ಹೆಚ್ಚು ಜನರಿಗೆ ತಲುಪಲಿ – ₹1,500 ನಗದು ಬಹುಮಾನ ಗೆಲ್ಲಿ! ನಿಮ್ಮೂರಿನ ಸುದ್ದಿ ಪ್ರಕಟಿಸಿ, ಎಲ್ಲರೊಂದಿಗೆ ಹಂಚಿಕೊಳ್ಳಿ ಮತ್ತು ತಿಂಗಳ ವಿಜೇತರಾಗಿ (ಕೊಪ್ಪ, ಶೃಂಗೇರಿ, ಜಯಪುರ, ಬಾಳೆಹೊನ್ನೂರು).';
       } else if (req.path === '/community' || req.path === '/community/') {
         ogUrl = `${deepLinkOrigin}/community`;
         ogTitle = 'COFFEENADU COMMUNITY – ನಮ್ಮ ಮಲೆನಾಡು ಸಮುದಾಯ';
@@ -3305,8 +3313,12 @@ Rules:
           const publicPost = communityBackend.getPublicPostBySlugOrId(slugCandidate);
           ogUrl = `${deepLinkOrigin}/community/${encodeURIComponent(slugCandidate)}`;
           if (publicPost) {
-            ogTitle = `${publicPost.title} — COFFEENADU COMMUNITY`;
-            ogDescription = `${publicPost.location} · ${publicPost.description.slice(0, 180)}`;
+            const safeTitle = publicPost.title.trim() || `${publicPost.authorName} — ಚಿತ್ರ ಪ್ರಕಟಣೆ`;
+            const safeDesc = publicPost.description.trim()
+              ? `${publicPost.location} · ${publicPost.description.slice(0, 180)}`
+              : `${publicPost.location} · ${publicPost.authorName} ಅವರಿಂದ ಪ್ರಕಟಿತ ಚಿತ್ರ`;
+            ogTitle = `${safeTitle} — COFFEENADU COMMUNITY`;
+            ogDescription = safeDesc;
             if (publicPost.photos?.[0] && publicPost.photos[0].startsWith('/api/community/media/')) {
               ogImageUrl = `${origin}${publicPost.photos[0]}`;
             }

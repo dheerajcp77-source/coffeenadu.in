@@ -6,6 +6,7 @@ import { getAdmin2AuthHeaders } from './admin2Client';
 import type { CommunitySelfProfile, PublicCommunityPost } from '../types/community';
 import type {
   ContestAdminOverview,
+  ContestEditableContent,
   ContestEntryEligibility,
   ContestMonthRecord,
   ContestMonthStatus,
@@ -121,6 +122,7 @@ export interface SubmitContestNewsInput {
   location: string;
   photos?: string[];
   confirmOriginalNews: boolean;
+  clientSubmissionId?: string;
 }
 
 export interface SubmitContestNewsResult {
@@ -135,14 +137,71 @@ export interface SubmitContestNewsResult {
 export async function submitContestNewsEntry(
   input: SubmitContestNewsInput
 ): Promise<SubmitContestNewsResult> {
-  const resp = await fetch('/api/public/contest/submit', {
-    method: 'POST',
-    credentials: 'include',
-    headers: buildCommunityHeaders(true),
-    body: JSON.stringify(input),
-  });
+  const tryRecoverPublishedEntry = async (): Promise<SubmitContestNewsResult | null> => {
+    try {
+      const overview = await fetchContestOverview();
+      const targetTitle = input.title.trim().toLowerCase();
+      const recentMatch = overview.allEligibleEntries.find(
+        (e) =>
+          e.title.trim().toLowerCase() === targetTitle &&
+          Date.now() - Date.parse(e.publishedAt) < 10 * 60_000
+      );
+      if (recentMatch) {
+        return {
+          ok: true,
+          duplicatePrevented: true,
+          profile: {
+            fullName: recentMatch.contributorName,
+            maskedMobile: '',
+            registeredAt: recentMatch.publishedAt,
+            status: 'active',
+            totalPosts: 1,
+          },
+          post: {
+            id: recentMatch.postId,
+            slug: recentMatch.slug,
+            authorName: recentMatch.contributorName,
+            title: recentMatch.title,
+            category: 'monthly-news-contest',
+            description: recentMatch.summary || input.description,
+            location: recentMatch.location,
+            photos: recentMatch.thumbnailUrl ? [recentMatch.thumbnailUrl] : [],
+            createdAt: recentMatch.publishedAt,
+            updatedAt: recentMatch.publishedAt,
+            viewsCount: recentMatch.totalPageViews,
+            sharesCount: 0,
+            isOwner: true,
+          },
+          entry: recentMatch,
+          permanentPath: `/community/${recentMatch.slug}`,
+        };
+      }
+    } catch {
+      // Ignore recovery check failure
+    }
+    return null;
+  };
+
+  let resp: Response;
+  try {
+    resp = await fetch('/api/public/contest/submit', {
+      method: 'POST',
+      credentials: 'include',
+      headers: buildCommunityHeaders(true),
+      body: JSON.stringify(input),
+    });
+  } catch (networkErr) {
+    const recovered = await tryRecoverPublishedEntry();
+    if (recovered) return recovered;
+    throw networkErr;
+  }
+
   const data = await readJsonSafe<SubmitContestNewsResult & { token?: string | null }>(resp);
   if (!resp.ok || !data.ok) {
+    if (resp.status >= 500) {
+      const recovered = await tryRecoverPublishedEntry();
+      if (recovered) return recovered;
+    }
     throw new Error(data.error || 'ಸುದ್ದಿ ಪ್ರಕಟಿಸಲು ಸಾಧ್ಯವಾಗಲಿಲ್ಲ. ದಯವಿಟ್ಟು ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ.');
   }
   if (data.token) {
@@ -165,6 +224,38 @@ export async function fetchAdminContestOverview(
     throw new Error(data.error || 'Failed to load admin contest management data.');
   }
   return data;
+}
+
+export async function updateAdminContestContent(
+  payload: Partial<ContestEditableContent>
+): Promise<ContestEditableContent> {
+  const resp = await fetch('/api/admin2/contest/content', {
+    method: 'PUT',
+    credentials: 'include',
+    headers: await buildAdminHeaders(true),
+    body: JSON.stringify(payload),
+  });
+  const data = await readJsonSafe<{ ok: boolean; contentConfig: ContestEditableContent }>(resp);
+  if (!resp.ok || !data.ok) {
+    throw new Error(data.error || 'Failed to save Contest content settings.');
+  }
+  return data.contentConfig;
+}
+
+export async function restoreAdminContestContentVersion(
+  version?: number
+): Promise<ContestEditableContent> {
+  const resp = await fetch('/api/admin2/contest/content/restore', {
+    method: 'POST',
+    credentials: 'include',
+    headers: await buildAdminHeaders(true),
+    body: JSON.stringify({ version }),
+  });
+  const data = await readJsonSafe<{ ok: boolean; contentConfig: ContestEditableContent }>(resp);
+  if (!resp.ok || !data.ok) {
+    throw new Error(data.error || 'Failed to restore previous Contest content version.');
+  }
+  return data.contentConfig;
 }
 
 export async function updateAdminContestEntryEligibility(
@@ -294,6 +385,8 @@ export async function updateAdminContestMonthConfig(
     prizes: ContestPrizeTier[];
     status: ContestMonthStatus;
     allowCarryOver?: boolean;
+    participationEnabled?: boolean;
+    durationDays?: number;
   }
 ): Promise<ContestMonthRecord> {
   const resp = await fetch(
@@ -308,6 +401,51 @@ export async function updateAdminContestMonthConfig(
   const data = await readJsonSafe<{ ok: boolean; month: ContestMonthRecord }>(resp);
   if (!resp.ok || !data.ok) {
     throw new Error(data.error || 'Failed to save month configuration.');
+  }
+  return data.month;
+}
+
+export async function toggleAdminContestParticipation(
+  monthKey: string,
+  enabled: boolean
+): Promise<ContestMonthRecord> {
+  const resp = await fetch(
+    `/api/admin2/contest/months/${encodeURIComponent(monthKey)}/participation`,
+    {
+      method: 'PATCH',
+      credentials: 'include',
+      headers: await buildAdminHeaders(true),
+      body: JSON.stringify({ enabled }),
+    }
+  );
+  const data = await readJsonSafe<{ ok: boolean; month: ContestMonthRecord }>(resp);
+  if (!resp.ok || !data.ok) {
+    throw new Error(data.error || 'Failed to update competition participation status.');
+  }
+  return data.month;
+}
+
+export async function updateAdminContestParticipantEligibility(
+  monthKey: string,
+  userId: string,
+  eligible: boolean,
+  reason?: string
+): Promise<ContestMonthRecord> {
+  const resp = await fetch(
+    `/api/admin2/contest/months/${encodeURIComponent(monthKey)}/participants/${encodeURIComponent(userId)}/eligibility`,
+    {
+      method: 'PATCH',
+      credentials: 'include',
+      headers: await buildAdminHeaders(true),
+      body: JSON.stringify({
+        eligible,
+        reason: typeof reason === 'string' && reason.trim() ? reason.trim() : undefined,
+      }),
+    }
+  );
+  const data = await readJsonSafe<{ ok: boolean; month: ContestMonthRecord }>(resp);
+  if (!resp.ok || !data.ok) {
+    throw new Error(data.error || 'Failed to update participant eligibility.');
   }
   return data.month;
 }
@@ -383,27 +521,37 @@ export async function toggleAdminContestWinnersPublished(
 }
 
 export async function openNextAdminContestMonth(
-  monthKey?: string
+  options?: string | { monthKey?: string; startDateIso?: string; durationDays?: number }
 ): Promise<ContestMonthRecord> {
+  const body =
+    typeof options === 'string'
+      ? { monthKey: options }
+      : {
+          monthKey: options?.monthKey,
+          startDateIso: options?.startDateIso,
+          durationDays: options?.durationDays,
+        };
   const resp = await fetch('/api/admin2/contest/months/open-next', {
     method: 'POST',
     credentials: 'include',
     headers: await buildAdminHeaders(true),
-    body: JSON.stringify({ monthKey }),
+    body: JSON.stringify(body),
   });
   const data = await readJsonSafe<{ ok: boolean; month: ContestMonthRecord }>(resp);
   if (!resp.ok || !data.ok) {
-    throw new Error(data.error || 'Failed to open next competition month.');
+    throw new Error(data.error || 'Failed to open next competition period.');
   }
   return data.month;
 }
 
 export async function downloadAdminContestExport(
   monthKey: string,
-  format: 'csv' | 'json'
+  format: 'csv' | 'json',
+  scope: 'entries' | 'leaderboard' = 'entries'
 ): Promise<void> {
+  const scopeQuery = scope === 'leaderboard' ? '&scope=leaderboard' : '';
   const resp = await fetch(
-    `/api/admin2/contest/export?month=${encodeURIComponent(monthKey)}&format=${format}`,
+    `/api/admin2/contest/export?month=${encodeURIComponent(monthKey)}&format=${format}${scopeQuery}`,
     {
       credentials: 'include',
       headers: await buildAdminHeaders(false),
@@ -416,7 +564,10 @@ export async function downloadAdminContestExport(
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = `coffeenadu-contest-${monthKey}.${format}`;
+  a.download =
+    scope === 'leaderboard'
+      ? `coffeenadu-leaderboard-${monthKey}.${format}`
+      : `coffeenadu-contest-${monthKey}.${format}`;
   document.body.appendChild(a);
   a.click();
   a.remove();

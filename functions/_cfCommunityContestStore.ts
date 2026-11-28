@@ -19,17 +19,23 @@ import type {
 } from '../src/types/community';
 import type {
   ContestAuditLogRecord,
+  ContestEditableContent,
   ContestEntryRecord,
   ContestMonthRecord,
   ContestSuspiciousAlert,
+  ContestSystemDiagnosticRecord,
 } from '../src/types/contest';
 import {
   MAX_COMMUNITY_PHOTOS,
   validateCommunityPhotoInput,
 } from '../src/utils/communityHelpers';
 import {
+  createDefaultContestEditableContent,
   createInitialContestMonthRecord,
   normalizeEntryScoreFields,
+  sanitizeContestEditableContent,
+  upgradeActiveMonthPrizesIfLegacy,
+  upgradeLegacyContestContentDefaults,
 } from '../src/utils/contestHelpers';
 
 export interface PagesEnvLike {
@@ -62,6 +68,8 @@ export interface CfSharedCommunityContestState {
   viewBuckets: CfContestViewBucket[];
   alerts: ContestSuspiciousAlert[];
   auditLogs: ContestAuditLogRecord[];
+  contentConfig: ContestEditableContent;
+  diagnostics: ContestSystemDiagnosticRecord[];
 }
 
 export interface CfDeltaPayload {
@@ -81,6 +89,8 @@ export interface CfDeltaPayload {
   contestAlert?: ContestSuspiciousAlert;
   contestAuditLog?: ContestAuditLogRecord;
   viewBuckets?: CfContestViewBucket[];
+  contentConfig?: ContestEditableContent;
+  diagnostic?: ContestSystemDiagnosticRecord;
 }
 
 const CF_SHARED_CACHE_KEY = 'https://coffeenadu.internal/cf-shared-community-contest-v2';
@@ -193,6 +203,8 @@ export function createEmptySharedState(now = new Date()): CfSharedCommunityConte
     viewBuckets: [],
     alerts: [],
     auditLogs: [],
+    contentConfig: createDefaultContestEditableContent(now.toISOString()),
+    diagnostics: [],
   };
 }
 
@@ -239,6 +251,7 @@ function normalizeLoadedState(
       m.status = 'closed';
       m.updatedAt = now.toISOString();
     }
+    upgradeActiveMonthPrizesIfLegacy(m);
   }
 
   const activeMonthKey =
@@ -246,6 +259,15 @@ function normalizeLoadedState(
     months.some((m) => m.monthKey === raw.activeMonthKey)
       ? raw.activeMonthKey
       : months[0].monthKey;
+
+  const contentConfig = upgradeLegacyContestContentDefaults(
+    sanitizeContestEditableContent(
+      raw?.contentConfig,
+      createDefaultContestEditableContent(now.toISOString()),
+      raw?.contentConfig?.updatedBy || 'system',
+      false
+    )
+  );
 
   return {
     users: Array.isArray(raw?.users) ? raw.users : [],
@@ -258,6 +280,8 @@ function normalizeLoadedState(
     viewBuckets: Array.isArray(raw?.viewBuckets) ? raw.viewBuckets : [],
     alerts: Array.isArray(raw?.alerts) ? raw.alerts : [],
     auditLogs: Array.isArray(raw?.auditLogs) ? raw.auditLogs : [],
+    contentConfig,
+    diagnostics: Array.isArray(raw?.diagnostics) ? raw.diagnostics : [],
   };
 }
 
@@ -324,9 +348,14 @@ function mergeTwoStates(
       entryMap.set(re.id, re);
     } else {
       const newer = (le.updatedAt || '') > (re.updatedAt || '') ? le : re;
+      const mergedGenuine = Math.max(
+        Number(re.genuineEligibleViews ?? re.eligibleViews) || 0,
+        Number(le.genuineEligibleViews ?? le.eligibleViews) || 0
+      );
       const merged: ContestEntryRecord = {
         ...newer,
-        eligibleViews: Math.max(Number(re.eligibleViews) || 0, Number(le.eligibleViews) || 0),
+        eligibleViews: mergedGenuine,
+        genuineEligibleViews: mergedGenuine,
         totalPageViews: Math.max(Number(re.totalPageViews) || 0, Number(le.totalPageViews) || 0),
         suspiciousBlockedViews: Math.max(
           Number(re.suspiciousBlockedViews) || 0,
@@ -376,6 +405,13 @@ function mergeTwoStates(
     auditMap.set(l.id, l);
   }
 
+  // Merge diagnostics by id
+  const diagMap = new Map<string, ContestSystemDiagnosticRecord>();
+  for (const d of [...(local.diagnostics || []), ...(remote.diagnostics || [])]) {
+    if (!d?.id) continue;
+    diagMap.set(d.id, d);
+  }
+
   const bucketMap = new Map<string, CfContestViewBucket>();
   for (const b of [...(remote.viewBuckets || []), ...(local.viewBuckets || [])]) {
     if (!b?.entryId || !b?.visitorHash) continue;
@@ -392,6 +428,13 @@ function mergeTwoStates(
       ? remote.activeMonthKey
       : local.activeMonthKey;
 
+  const contentConfig =
+    (local.contentConfig?.version || 1) > (remote.contentConfig?.version || 1) ||
+    ((local.contentConfig?.version || 1) === (remote.contentConfig?.version || 1) &&
+      (local.contentConfig?.updatedAt || '') > (remote.contentConfig?.updatedAt || ''))
+      ? local.contentConfig
+      : remote.contentConfig || local.contentConfig;
+
   return {
     users: Array.from(userMap.values()),
     sessions: Array.from(sessionMap.values()),
@@ -403,6 +446,10 @@ function mergeTwoStates(
     viewBuckets: Array.from(bucketMap.values()),
     alerts: Array.from(alertMap.values()),
     auditLogs: Array.from(auditMap.values()).sort(
+      (a, b) => Date.parse(b.timestamp || '') - Date.parse(a.timestamp || '')
+    ),
+    contentConfig,
+    diagnostics: Array.from(diagMap.values()).sort(
       (a, b) => Date.parse(b.timestamp || '') - Date.parse(a.timestamp || '')
     ),
   };
@@ -431,6 +478,8 @@ function buildCompactStateForUniversalRow(
     viewBuckets: state.viewBuckets.slice(-800),
     alerts: state.alerts.slice(0, 100),
     auditLogs: state.auditLogs.slice(0, 150),
+    contentConfig: state.contentConfig,
+    diagnostics: (state.diagnostics || []).slice(0, 100),
   };
 }
 

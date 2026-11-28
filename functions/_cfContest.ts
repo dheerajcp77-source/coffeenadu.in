@@ -9,6 +9,7 @@ import type { CommunityPostRecord, CommunityUserPrivate } from '../src/types/com
 import type {
   AdminContestEntryView,
   ContestAdminOverview,
+  ContestEditableContent,
   ContestEntryEligibility,
   ContestEntryRecord,
   ContestMonthRecord,
@@ -26,7 +27,11 @@ import {
   CONTEST_PUBLIC_URL,
   CONTEST_TARGET_AREA,
   ROLLING_VIEW_WINDOW_MS,
+  buildAdminContestParticipants,
+  buildUserViewsLeaderboard,
+  compute30DayPeriodBounds,
   computeCompetitionDisplayScore,
+  createDefaultContestEditableContent,
   createDefaultContestPrizes,
   createInitialContestMonthRecord,
   detectSuspiciousTrafficPattern,
@@ -35,14 +40,19 @@ import {
   getIstMonthBounds,
   getManualScoreAdjustment,
   getNextIstMonthKey,
+  isContestAcceptingEntries,
   isContestMonthOpen,
   isEligibleRolling24hVisit,
   isLikelyBotUserAgent,
   normalizeContestPrizes,
   normalizeEntryScoreFields,
   rankEligibleContestEntries,
+  restoreContestContentFromHistory,
+  sanitizeContestEditableContent,
   toPublicContestEntry,
   toPublicContestWinner,
+  upgradeActiveMonthPrizesIfLegacy,
+  upgradeLegacyContestContentDefaults,
 } from '../src/utils/contestHelpers';
 import {
   generateCommunitySlug,
@@ -133,13 +143,42 @@ function csvEscape(value: unknown): string {
   return /[",\r\n]/.test(str) ? `"${str}"` : str;
 }
 
+function buildCfUserDirectory(
+  state: CfSharedCommunityContestState
+): Map<string, { fullName: string; status: 'active' | 'suspended' }> {
+  const map = new Map<string, { fullName: string; status: 'active' | 'suspended' }>();
+  for (const u of state.users) {
+    if (u?.id) map.set(u.id, { fullName: u.fullName, status: u.status });
+  }
+  return map;
+}
+
+function freezeCfMonthLeaderboard(
+  state: CfSharedCommunityContestState,
+  month: ContestMonthRecord,
+  nowIso: string
+): void {
+  const postMap = new Map(state.posts.map((p) => [p.id, p]));
+  const monthEntries = syncMonthEntriesWithPosts(state, month.monthKey);
+  month.frozenUserLeaderboard = buildUserViewsLeaderboard({
+    month,
+    entries: monthEntries,
+    isPostPublished: (postId) => postMap.get(postId)?.status === 'published',
+    userDirectory: buildCfUserDirectory(state),
+    forceRecompute: true,
+  });
+  month.frozenAt = nowIso;
+}
+
 function syncMonths(state: CfSharedCommunityContestState, now = new Date()): ContestMonthRecord {
   const nowMs = now.getTime();
   for (const m of state.months) {
     if (m.status === 'open' && nowMs > Date.parse(m.endsAtIso)) {
+      freezeCfMonthLeaderboard(state, m, now.toISOString());
       m.status = 'closed';
       m.updatedAt = now.toISOString();
     }
+    upgradeActiveMonthPrizesIfLegacy(m);
   }
   let active = state.months.find((m) => m.monthKey === state.activeMonthKey);
   if (!active) {
@@ -147,6 +186,7 @@ function syncMonths(state: CfSharedCommunityContestState, now = new Date()): Con
     state.months.unshift(active);
     state.activeMonthKey = active.monthKey;
   }
+  upgradeActiveMonthPrizesIfLegacy(active);
   return active;
 }
 
@@ -242,17 +282,37 @@ function buildAdminOverviewPayload(
     };
   });
 
+  const userLeaderboard = buildUserViewsLeaderboard({
+    month: selectedMonth,
+    entries: rawMonthEntries,
+    isPostPublished: (postId) => postMap.get(postId)?.status === 'published',
+    userDirectory: buildCfUserDirectory(state),
+  });
+  const participants = buildAdminContestParticipants({
+    month: selectedMonth,
+    entriesWithMobile: entries,
+    allUsers: state.users,
+    userLeaderboard,
+  });
+
   return {
     activeMonthKey: activeMonth.monthKey,
     months: [...state.months].sort((a, b) => b.monthKey.localeCompare(a.monthKey)),
     selectedMonth,
+    contentConfig:
+      state.contentConfig || createDefaultContestEditableContent(),
+    diagnostics: (state.diagnostics || []).slice(0, 80),
     entries,
+    participants,
+    userLeaderboard,
     alerts,
     auditLogs: state.auditLogs.slice(0, 120),
     summary: {
       totalEntries: entries.length,
       eligibleEntries: entries.filter((e) => e.eligibility === 'eligible').length,
       disqualifiedEntries: entries.filter((e) => e.eligibility === 'disqualified').length,
+      totalParticipants: participants.filter((p) => p.totalArticleCount > 0).length,
+      eligibleParticipants: userLeaderboard.length,
       totalPageViews: entries.reduce((s, e) => s + (e.totalPageViews || 0), 0),
       totalEligibleViews: entries.reduce((s, e) => s + (e.genuineEligibleViews || 0), 0),
       totalCompetitionDisplayScore: entries.reduce(
@@ -294,51 +354,87 @@ export async function handleCfContestApi(
   const activeMonth = syncMonths(state);
 
   if (pathname === '/api/public/contest/overview' && method === 'GET') {
+    const postMap = new Map(state.posts.map((p) => [p.id, p]));
     const monthEntries = syncMonthEntriesWithPosts(state, activeMonth.monthKey);
-    const publicEntries = rankEligibleContestEntries(monthEntries);
+    const publishedMonthEntries = monthEntries.filter(
+      (e) => postMap.get(e.postId)?.status === 'published'
+    );
+    const publicEntries = rankEligibleContestEntries(publishedMonthEntries);
+    const userLeaderboard = buildUserViewsLeaderboard({
+      month: activeMonth,
+      entries: monthEntries,
+      isPostPublished: (postId) => postMap.get(postId)?.status === 'published',
+      userDirectory: buildCfUserDirectory(state),
+    });
     const publishedWinners = activeMonth.winnersPublished
       ? [...activeMonth.winners]
           .sort((a, b) => a.rank - b.rank)
           .map((w) => toPublicContestWinner(w))
       : [];
-    const fifthQualityWinner =
+    const qualityWinner =
       publishedWinners.find((w) => w.prizeType === 'quality') || null;
     const totalBudgetInr = activeMonth.prizes.reduce((s, p) => s + p.amountInr, 0);
+    const contentConfig = upgradeLegacyContestContentDefaults(
+      state.contentConfig || createDefaultContestEditableContent()
+    );
 
     const overview: ContestPublicOverview = {
-      competitionName: CONTEST_OFFICIAL_NAME,
-      kannadaHeading: CONTEST_KANNADA_HEADING,
-      kannadaSubtitle: CONTEST_KANNADA_SUBTITLE,
-      targetArea: CONTEST_TARGET_AREA,
+      competitionName: contentConfig.mainHeadingEn || CONTEST_OFFICIAL_NAME,
+      kannadaHeading: contentConfig.mainHeadingKn || CONTEST_KANNADA_HEADING,
+      kannadaSubtitle: contentConfig.subtitleKn || CONTEST_KANNADA_SUBTITLE,
+      targetArea: contentConfig.introEn || CONTEST_TARGET_AREA,
       contestUrl: CONTEST_PUBLIC_URL,
+      contentConfig,
       activeMonth: {
         monthKey: activeMonth.monthKey,
+        periodId: activeMonth.periodId || activeMonth.monthKey,
+        durationDays: activeMonth.durationDays || 30,
         displayLabelEn: activeMonth.displayLabelEn,
         displayLabelKn: activeMonth.displayLabelKn,
         startsAtIso: activeMonth.startsAtIso,
         endsAtIso: activeMonth.endsAtIso,
         status: activeMonth.status,
-        isAcceptingEntries: isContestMonthOpen(activeMonth),
+        participationEnabled: activeMonth.participationEnabled !== false,
+        isAcceptingEntries: isContestAcceptingEntries(activeMonth),
         totalBudgetInr,
         prizes: activeMonth.prizes,
         winnersPublished: activeMonth.winnersPublished,
         publishedWinners,
       },
-      topFour: publicEntries.slice(0, 4),
-      fifthQualityWinner,
+      userLeaderboard,
+      totalParticipantsCount: userLeaderboard.length,
+      topThree: publicEntries.slice(0, 3),
+      topFour: publicEntries.slice(0, 3),
+      fourthQualityWinner: qualityWinner,
+      fifthQualityWinner: qualityWinner,
       allEligibleEntries: publicEntries,
       totalEligibleCount: publicEntries.length,
       previousMonths: state.months
-        .filter((m) => m.winnersPublished && m.winners.length > 0)
+        .filter(
+          (m) =>
+            (m.winnersPublished && m.winners.length > 0) ||
+            (m.monthKey !== activeMonth.monthKey &&
+              m.status !== 'open' &&
+              Array.isArray(m.frozenUserLeaderboard) &&
+              m.frozenUserLeaderboard.length > 0)
+        )
         .sort((a, b) => b.monthKey.localeCompare(a.monthKey))
         .map((m) => ({
           monthKey: m.monthKey,
+          periodId: m.periodId || m.monthKey,
           displayLabelEn: m.displayLabelEn,
           displayLabelKn: m.displayLabelKn,
+          startsAtIso: m.startsAtIso,
+          endsAtIso: m.endsAtIso,
           status: m.status,
-          winners: [...m.winners]
-            .sort((a, b) => a.rank - b.rank)
-            .map((w) => toPublicContestWinner(w)),
+          winners: m.winnersPublished
+            ? [...m.winners]
+                .sort((a, b) => a.rank - b.rank)
+                .map((w) => toPublicContestWinner(w))
+            : [],
+          userLeaderboard: Array.isArray(m.frozenUserLeaderboard)
+            ? m.frozenUserLeaderboard
+            : undefined,
         })),
       serverNowIso: new Date().toISOString(),
     };
@@ -533,6 +629,7 @@ export async function handleCfContestApi(
     }
 
     entry.eligibleViews += 1;
+    entry.lastEligibleViewAt = now.toISOString();
     normalizeEntryScoreFields(entry);
     if (linkedPost) {
       linkedPost.viewsCount = Math.max(
@@ -567,7 +664,17 @@ export async function handleCfContestApi(
   }
 
   if (pathname === '/api/public/contest/submit' && method === 'POST') {
-    if (!isContestMonthOpen(activeMonth)) {
+    if (activeMonth.participationEnabled === false) {
+      return jsonResp(
+        {
+          ok: false,
+          error:
+            'ಈ ಸ್ಪರ್ಧೆಯ ಸುದ್ದಿ ಸ್ವೀಕಾರವನ್ನು ಆಡ್ಮಿನ್ ತಾತ್ಕಾಲಿಕವಾಗಿ ನಿಲ್ಲಿಸಿದ್ದಾರೆ. (Competition participation is currently paused.)',
+        },
+        403
+      );
+    }
+    if (!isContestAcceptingEntries(activeMonth)) {
       return jsonResp({ ok: false, error: 'ಈ ತಿಂಗಳ ಸುದ್ದಿ ಸ್ಪರ್ಧೆಯ ಅವಧಿ ಮುಕ್ತಾಯಗೊಂಡಿದೆ.' }, 400);
     }
     let body: Record<string, unknown> = {};
@@ -672,17 +779,29 @@ export async function handleCfContestApi(
     const authorDisplayName =
       providedName.length >= 2 ? providedName : contributorUser.fullName;
 
-    // Duplicate prevention within 60s
+    // Duplicate & idempotent retry prevention (clientSubmissionId + 10-min title check)
+    const rawSubId = cleanSingleLine(body.clientSubmissionId, 80);
+    const clientSubmissionId = /^[a-zA-Z0-9_-]{8,80}$/.test(rawSubId) ? rawSubId : undefined;
     const nowMs = Date.now();
-    const duplicatePost = state.posts.find(
-      (p) =>
-        p.authorUserId === contributorUser!.id &&
-        p.category === CONTEST_CATEGORY_ID &&
-        p.title.toLowerCase() === title.toLowerCase() &&
-        nowMs - Date.parse(p.createdAt) < 60_000
-    );
+    const idempotentEntry = clientSubmissionId
+      ? state.entries.find(
+          (e) =>
+            e.contributorUserId === contributorUser!.id &&
+            e.clientSubmissionId === clientSubmissionId
+        )
+      : undefined;
+    const duplicatePost =
+      (idempotentEntry && state.posts.find((p) => p.id === idempotentEntry.postId)) ||
+      state.posts.find(
+        (p) =>
+          p.authorUserId === contributorUser!.id &&
+          p.category === CONTEST_CATEGORY_ID &&
+          p.title.toLowerCase() === title.toLowerCase() &&
+          nowMs - Date.parse(p.createdAt) < 10 * 60_000
+      );
     if (duplicatePost) {
-      const existingEntry = state.entries.find((e) => e.postId === duplicatePost.id);
+      const existingEntry =
+        idempotentEntry || state.entries.find((e) => e.postId === duplicatePost.id);
       if (existingEntry) {
         return jsonResp({
           ok: true,
@@ -750,6 +869,7 @@ export async function handleCfContestApi(
       eligibleViews: 0,
       suspiciousBlockedViews: 0,
       suspiciousFlagged: false,
+      clientSubmissionId,
       createdAt: nowIso,
       updatedAt: nowIso,
     };
@@ -1186,21 +1306,40 @@ export async function handleCfContestApi(
       ) {
         return jsonResp({ ok: false, error: 'End date must be strictly after start date.' }, 400);
       }
+      const wasOpen = m.status === 'open';
+      const nowIso = new Date().toISOString();
       m.startsAtIso = startsAtIso;
       m.endsAtIso = endsAtIso;
       m.prizes = normalizeContestPrizes(body.prizes as never);
       if (['open', 'closed', 'finalized'].includes(String(body.status))) {
         m.status = body.status as ContestMonthStatus;
       }
+      if (typeof body.participationEnabled === 'boolean') {
+        m.participationEnabled = body.participationEnabled;
+      }
+      if (body.durationDays !== undefined) {
+        const parsedDays = Math.round(Number(body.durationDays));
+        if (Number.isFinite(parsedDays) && parsedDays >= 1 && parsedDays <= 365) {
+          m.durationDays = parsedDays;
+        }
+      }
+      if (wasOpen && m.status !== 'open') {
+        freezeCfMonthLeaderboard(state, m, nowIso);
+      } else if (m.status === 'open') {
+        m.frozenUserLeaderboard = undefined;
+        m.frozenAt = undefined;
+      }
       m.allowCarryOver = Boolean(body.allowCarryOver);
-      m.updatedAt = new Date().toISOString();
+      m.updatedAt = nowIso;
       const auditLog = {
         id: makeId('caud'),
         timestamp: m.updatedAt,
         actorEmail: actor,
         action: 'month.config',
         competitionMonth: m.monthKey,
-        details: `Updated ${m.displayLabelEn} configuration (Status: ${m.status})`,
+        details: `Updated ${m.displayLabelEn} configuration (Status: ${m.status}, Participation: ${
+          m.participationEnabled === false ? 'Disabled' : 'Enabled'
+        })`,
       };
       state.auditLogs.unshift(auditLog);
       try {
@@ -1219,6 +1358,101 @@ export async function handleCfContestApi(
       return jsonResp({ ok: true, month: m });
     }
 
+    const partToggleMatch = pathname.match(/^\/api\/admin2\/contest\/months\/([^/]+)\/participation$/);
+    if (partToggleMatch && method === 'PATCH') {
+      const m = state.months.find((x) => x.monthKey === decodeURIComponent(partToggleMatch[1]));
+      if (!m) return jsonResp({ ok: false, error: 'Competition period not found.' }, 404);
+      const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
+      const enabled = Boolean(body.enabled);
+      const nowIso = new Date().toISOString();
+      m.participationEnabled = enabled;
+      m.updatedAt = nowIso;
+      const auditLog = {
+        id: makeId('caud'),
+        timestamp: nowIso,
+        actorEmail: actor,
+        action: enabled ? 'month.participation_enabled' : 'month.participation_disabled',
+        competitionMonth: m.monthKey,
+        details: `${enabled ? 'Enabled' : 'Disabled'} public competition participation for ${m.displayLabelEn}`,
+      };
+      state.auditLogs.unshift(auditLog);
+      try {
+        await persistSharedCommunityContestDelta(
+          env,
+          state,
+          { contestMonth: m, contestAuditLog: auditLog },
+          { adminEmail: actor }
+        );
+      } catch (err) {
+        return jsonResp(
+          { ok: false, error: err instanceof Error ? err.message : 'Failed to update participation status.' },
+          502
+        );
+      }
+      return jsonResp({ ok: true, month: m });
+    }
+
+    const partEligMatch = pathname.match(
+      /^\/api\/admin2\/contest\/months\/([^/]+)\/participants\/([^/]+)\/eligibility$/
+    );
+    if (partEligMatch && method === 'PATCH') {
+      const m = state.months.find((x) => x.monthKey === decodeURIComponent(partEligMatch[1]));
+      if (!m) return jsonResp({ ok: false, error: 'Competition period not found.' }, 404);
+      const userId = decodeURIComponent(partEligMatch[2]).trim();
+      const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
+      const eligible = body.eligible === true;
+      const reason = cleanSingleLine(body.reason, 240);
+      if (!eligible && reason.length < 3) {
+        return jsonResp(
+          { ok: false, error: 'Please enter a brief reason (min 3 chars) for excluding this participant.' },
+          400
+        );
+      }
+      const excluded = new Set(Array.isArray(m.excludedUserIds) ? m.excludedUserIds : []);
+      const reasons: Record<string, string> = { ...(m.excludedUserReasons || {}) };
+      if (eligible) {
+        excluded.delete(userId);
+        delete reasons[userId];
+      } else {
+        excluded.add(userId);
+        reasons[userId] = reason;
+      }
+      const nowIso = new Date().toISOString();
+      m.excludedUserIds = Array.from(excluded);
+      m.excludedUserReasons = reasons;
+      if (m.status !== 'open') {
+        freezeCfMonthLeaderboard(state, m, nowIso);
+      }
+      m.updatedAt = nowIso;
+      const userRec = state.users.find((u) => u.id === userId);
+      const auditLog = {
+        id: makeId('caud'),
+        timestamp: nowIso,
+        actorEmail: actor,
+        action: eligible ? 'participant.reinstate' : 'participant.exclude',
+        competitionMonth: m.monthKey,
+        targetId: userId,
+        details: `${eligible ? 'Reinstated' : 'Excluded'} participant "${userRec?.fullName || userId}" on ${m.displayLabelEn} leaderboard${
+          !eligible ? ` (${reason})` : ''
+        }`,
+      };
+      state.auditLogs.unshift(auditLog);
+      try {
+        await persistSharedCommunityContestDelta(
+          env,
+          state,
+          { contestMonth: m, contestAuditLog: auditLog },
+          { adminEmail: actor }
+        );
+      } catch (err) {
+        return jsonResp(
+          { ok: false, error: err instanceof Error ? err.message : 'Failed to update participant eligibility.' },
+          502
+        );
+      }
+      return jsonResp({ ok: true, month: m });
+    }
+
     const winMatch = pathname.match(/^\/api\/admin2\/contest\/months\/([^/]+)\/winners$/);
     if (winMatch && method === 'PUT') {
       const m = state.months.find((x) => x.monthKey === decodeURIComponent(winMatch[1]));
@@ -1230,20 +1464,35 @@ export async function handleCfContestApi(
       const defaultPrizes = createDefaultContestPrizes();
       const userMap = new Map(state.users.map((u) => [u.id, u]));
       const next: ContestWinnerRecord[] = [];
+      const allowedRanks = m.status === 'finalized' ? [1, 2, 3, 4, 5] : [1, 2, 3, 4];
       for (const item of body.winners || []) {
         const rank = Number(item.rank);
-        if (![1, 2, 3, 4, 5].includes(rank)) continue;
+        if (!allowedRanks.includes(rank)) continue;
         const entry = state.entries.find(
           (e) => e.id === String(item.entryId || '') && e.competitionMonth === m.monthKey
         );
         if (!entry) continue;
-        const tier = m.prizes.find((p) => p.rank === rank) || defaultPrizes[rank - 1];
+        if (entry.eligibility !== 'eligible') {
+          return jsonResp(
+            {
+              ok: false,
+              error: `Disqualified article "${entry.title}" cannot be selected as a contest winner.`,
+            },
+            400
+          );
+        }
+        const tier = m.prizes.find((p) => p.rank === rank) || defaultPrizes[Math.min(rank - 1, defaultPrizes.length - 1)];
+        const isQualityPrize =
+          tier.type === 'quality' || (m.status !== 'finalized' && rank === 4) || rank === 5;
         next.push({
           rank: rank as 1 | 2 | 3 | 4 | 5,
-          prizeType: rank === 5 ? 'quality' : 'views',
+          prizeType: isQualityPrize ? 'quality' : 'views',
           prizeLabelEn: tier.labelEn,
           prizeLabelKn: tier.labelKn,
-          prizeAmountInr: Number(item.prizeAmountInr) || tier.amountInr,
+          prizeAmountInr:
+            item.prizeAmountInr !== undefined && Number.isFinite(Number(item.prizeAmountInr))
+              ? Math.max(0, Math.round(Number(item.prizeAmountInr)))
+              : tier.amountInr,
           entryId: entry.id,
           postId: entry.postId,
           articleSlug: entry.slug,
@@ -1305,10 +1554,10 @@ export async function handleCfContestApi(
         );
         const defaultPrizes = createDefaultContestPrizes();
         const autoWinners: ContestWinnerRecord[] = [];
-        rankedPublic.slice(0, 4).forEach((pub, idx) => {
+        rankedPublic.slice(0, 3).forEach((pub, idx) => {
           const rawEntry = state.entries.find((e) => e.id === pub.id);
           if (!rawEntry) return;
-          const rank = (idx + 1) as 1 | 2 | 3 | 4;
+          const rank = (idx + 1) as 1 | 2 | 3;
           const tier = m.prizes.find((p) => p.rank === rank) || defaultPrizes[idx];
           autoWinners.push({
             rank,
@@ -1331,6 +1580,7 @@ export async function handleCfContestApi(
         m.winners = autoWinners;
       }
 
+      freezeCfMonthLeaderboard(state, m, nowIso);
       m.status = 'finalized';
       m.finalizedAt = nowIso;
       m.finalizedBy = actor;
@@ -1345,9 +1595,9 @@ export async function handleCfContestApi(
         actorEmail: actor,
         action: 'month.finalize',
         competitionMonth: m.monthKey,
-        details: `Finalized ${m.displayLabelEn} winners (Publicly announced: ${
-          m.winnersPublished ? 'Yes' : 'No'
-        })`,
+        details: `Finalized ${m.displayLabelEn} winners & froze leaderboard (${
+          m.frozenUserLeaderboard?.length ?? 0
+        } participants; Publicly announced: ${m.winnersPublished ? 'Yes' : 'No'})`,
       };
       state.auditLogs.unshift(auditLog);
       try {
@@ -1368,15 +1618,42 @@ export async function handleCfContestApi(
 
     if (pathname === '/api/admin2/contest/months/open-next' && method === 'POST') {
       const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
-      const reqKey = cleanSingleLine(body.monthKey, 16);
-      const nextKey = /^\d{4}-\d{2}$/.test(reqKey)
-        ? reqKey
-        : getNextIstMonthKey(state.activeMonthKey);
-      const bounds = getIstMonthBounds(nextKey);
+      const reqKey = cleanSingleLine(body.monthKey, 32);
+      const startDateIso = cleanSingleLine(body.startDateIso, 40);
+      const rawDurationDays = Number(body.durationDays);
+      const use30DayCustom =
+        Boolean(startDateIso) ||
+        (Number.isFinite(rawDurationDays) && rawDurationDays >= 1 && rawDurationDays <= 365);
+
+      let nextKey: string;
+      let bounds: {
+        startsAtIso: string;
+        endsAtIso: string;
+        displayLabelEn: string;
+        displayLabelKn: string;
+        periodId?: string;
+        durationDays?: number;
+      };
+      if (use30DayCustom) {
+        const p = compute30DayPeriodBounds(
+          startDateIso || undefined,
+          Number.isFinite(rawDurationDays) ? rawDurationDays : 30
+        );
+        nextKey = /^[a-zA-Z0-9_-]{4,32}$/.test(reqKey) ? reqKey : p.periodId;
+        bounds = p;
+      } else {
+        nextKey = /^\d{4}-\d{2}$/.test(reqKey)
+          ? reqKey
+          : getNextIstMonthKey(state.activeMonthKey);
+        const cal = getIstMonthBounds(nextKey);
+        bounds = { ...cal, periodId: nextKey, durationDays: 30 };
+      }
+
       const nowIso = new Date().toISOString();
       let closedPrev: ContestMonthRecord | undefined;
       for (const x of state.months) {
         if (x.status === 'open' && x.monthKey !== nextKey) {
+          freezeCfMonthLeaderboard(state, x, nowIso);
           x.status = 'closed';
           x.updatedAt = nowIso;
           closedPrev = x;
@@ -1386,13 +1663,21 @@ export async function handleCfContestApi(
       if (!nextMonth) {
         nextMonth = {
           monthKey: nextKey,
+          periodId: bounds.periodId || nextKey,
+          durationDays: bounds.durationDays || 30,
           competitionName: CONTEST_OFFICIAL_NAME,
           displayLabelEn: bounds.displayLabelEn,
           displayLabelKn: bounds.displayLabelKn,
           startsAtIso: bounds.startsAtIso,
           endsAtIso: bounds.endsAtIso,
           status: 'open',
-          prizes: activeMonth.prizes,
+          participationEnabled: true,
+          excludedUserIds: [],
+          excludedUserReasons: {},
+          prizes: normalizeContestPrizes(
+            (body.prizes as Partial<import('../src/types/contest').ContestPrizeTier>[] | undefined) ??
+              activeMonth.prizes
+          ),
           winners: [],
           winnersPublished: false,
           allowCarryOver: false,
@@ -1402,6 +1687,9 @@ export async function handleCfContestApi(
         state.months.unshift(nextMonth);
       } else {
         nextMonth.status = 'open';
+        nextMonth.participationEnabled = true;
+        nextMonth.frozenUserLeaderboard = undefined;
+        nextMonth.frozenAt = undefined;
         nextMonth.updatedAt = nowIso;
       }
       state.activeMonthKey = nextKey;
@@ -1411,7 +1699,7 @@ export async function handleCfContestApi(
         actorEmail: actor,
         action: 'month.open_next',
         competitionMonth: nextMonth.monthKey,
-        details: `Opened ${nextMonth.displayLabelEn} contest cycle`,
+        details: `Opened ${nextMonth.displayLabelEn} contest cycle (previous period frozen)`,
       };
       state.auditLogs.unshift(auditLog);
       try {
@@ -1444,7 +1732,86 @@ export async function handleCfContestApi(
         String(url.searchParams.get('format') || 'csv').toLowerCase() === 'json'
           ? 'json'
           : 'csv';
+      const scope =
+        String(url.searchParams.get('scope') || 'entries').toLowerCase() === 'leaderboard'
+          ? 'leaderboard'
+          : 'entries';
       const overview = buildAdminOverviewPayload(state, activeMonth, monthKey);
+
+      if (scope === 'leaderboard') {
+        if (format === 'json') {
+          return new Response(
+            JSON.stringify(
+              {
+                exportedAt: new Date().toISOString(),
+                scope: 'leaderboard',
+                period: {
+                  monthKey: overview.selectedMonth.monthKey,
+                  periodId: overview.selectedMonth.periodId || overview.selectedMonth.monthKey,
+                  displayLabelEn: overview.selectedMonth.displayLabelEn,
+                  startsAtIso: overview.selectedMonth.startsAtIso,
+                  endsAtIso: overview.selectedMonth.endsAtIso,
+                  status: overview.selectedMonth.status,
+                },
+                summary: overview.summary,
+                userLeaderboard: overview.userLeaderboard || [],
+                participants: overview.participants || [],
+              },
+              null,
+              2
+            ),
+            {
+              headers: {
+                'Content-Type': 'application/json; charset=utf-8',
+                'Content-Disposition': `attachment; filename="coffeenadu-leaderboard-${overview.selectedMonth.monthKey}.json"`,
+              },
+            }
+          );
+        }
+        const lbHeader = [
+          'Rank',
+          'Competition Period',
+          'Participant Name',
+          'Mobile (Admin Only)',
+          'Leaderboard Eligibility',
+          'Total Verified Views',
+          'Total Genuine Views',
+          'Eligible News Published',
+          'Total News Published',
+          'Disqualified News',
+          'Last View Achieved At',
+          'Exclusion Reason',
+        ];
+        const lbRows = [lbHeader.map(csvEscape).join(',')];
+        for (const p of overview.participants || []) {
+          if (p.totalArticleCount === 0 && p.rank === null) continue;
+          lbRows.push(
+            [
+              p.rank !== null ? String(p.rank) : '-',
+              overview.selectedMonth.displayLabelEn,
+              p.displayName,
+              p.mobileNumber,
+              p.leaderboardEligible ? 'eligible' : 'excluded',
+              p.totalVerifiedViews,
+              p.totalGenuineViews,
+              p.eligibleArticleCount,
+              p.totalArticleCount,
+              p.disqualifiedArticleCount,
+              p.lastViewAchievedAt || '',
+              p.exclusionReason || '',
+            ]
+              .map(csvEscape)
+              .join(',')
+          );
+        }
+        return new Response(`\uFEFF${lbRows.join('\n')}`, {
+          headers: {
+            'Content-Type': 'text/csv; charset=utf-8',
+            'Content-Disposition': `attachment; filename="coffeenadu-leaderboard-${overview.selectedMonth.monthKey}.csv"`,
+          },
+        });
+      }
+
       if (format === 'json') {
         return new Response(
           JSON.stringify(
@@ -1452,6 +1819,8 @@ export async function handleCfContestApi(
               exportedAt: new Date().toISOString(),
               month: overview.selectedMonth,
               summary: overview.summary,
+              userLeaderboard: overview.userLeaderboard || [],
+              participants: overview.participants || [],
               entries: overview.entries,
               alerts: overview.alerts,
             },
@@ -1512,6 +1881,80 @@ export async function handleCfContestApi(
           'Content-Disposition': `attachment; filename="coffeenadu-contest-${overview.selectedMonth.monthKey}.csv"`,
         },
       });
+    }
+
+    if (pathname === '/api/admin2/contest/content' && method === 'PUT') {
+      const body = (await request.json().catch(() => ({}))) as Partial<ContestEditableContent>;
+      const current = state.contentConfig || createDefaultContestEditableContent();
+      const updated = sanitizeContestEditableContent(
+        body,
+        current,
+        actor,
+        true
+      );
+      state.contentConfig = updated;
+      const audit = {
+        id: makeId('caud'),
+        timestamp: updated.updatedAt || new Date().toISOString(),
+        actorEmail: actor,
+        action: 'update_contest_content',
+        competitionMonth: state.activeMonthKey,
+        targetId: `content-v${updated.version}`,
+        details: `Updated Contest page content & settings (v${updated.version})`,
+      };
+      state.auditLogs.unshift(audit);
+      try {
+        await persistSharedCommunityContestDelta(
+          env,
+          state,
+          {
+            contentConfig: updated,
+            contestAuditLog: audit,
+          },
+          { adminEmail: actor }
+        );
+      } catch {
+        return jsonResp({ ok: false, error: 'ಸ್ಪರ್ಧೆಯ ವಿಷಯವನ್ನು ಉಳಿಸಲು ಸಾಧ್ಯವಾಗಲಿಲ್ಲ.' }, 502);
+      }
+      return jsonResp({ ok: true, contentConfig: updated });
+    }
+
+    if (pathname === '/api/admin2/contest/content/restore' && method === 'POST') {
+      const body = (await request.json().catch(() => ({}))) as { version?: number };
+      const current = state.contentConfig || createDefaultContestEditableContent();
+      const targetVersion =
+        body?.version !== undefined && Number.isFinite(Number(body.version))
+          ? Math.round(Number(body.version))
+          : undefined;
+      const restored = restoreContestContentFromHistory(current, targetVersion, actor);
+      if (!restored) {
+        return jsonResp({ ok: false, error: 'ಮರುಸ್ಥಾಪಿಸಲು ಹಿಂದಿನ ಆವೃತ್ತಿ ಕಂಡುಬಂದಿಲ್ಲ.' }, 404);
+      }
+      state.contentConfig = restored;
+      const audit = {
+        id: makeId('caud'),
+        timestamp: restored.updatedAt || new Date().toISOString(),
+        actorEmail: actor,
+        action: 'restore_contest_content',
+        competitionMonth: state.activeMonthKey,
+        targetId: `content-v${restored.version}`,
+        details: `Restored Contest page content to v${restored.version}`,
+      };
+      state.auditLogs.unshift(audit);
+      try {
+        await persistSharedCommunityContestDelta(
+          env,
+          state,
+          {
+            contentConfig: restored,
+            contestAuditLog: audit,
+          },
+          { adminEmail: actor }
+        );
+      } catch {
+        return jsonResp({ ok: false, error: 'ಹಿಂದಿನ ಆವೃತ್ತಿಯನ್ನು ಮರುಸ್ಥಾಪಿಸಲು ಸಾಧ್ಯವಾಗಲಿಲ್ಲ.' }, 502);
+      }
+      return jsonResp({ ok: true, contentConfig: restored });
     }
   }
 

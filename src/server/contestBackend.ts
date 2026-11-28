@@ -7,6 +7,7 @@ import type {
   AdminContestEntryView,
   ContestAdminOverview,
   ContestAuditLogRecord,
+  ContestEditableContent,
   ContestEntryEligibility,
   ContestEntryRecord,
   ContestMonthRecord,
@@ -14,6 +15,7 @@ import type {
   ContestPrizeTier,
   ContestPublicOverview,
   ContestSuspiciousAlert,
+  ContestSystemDiagnosticRecord,
   ContestViewRecordResult,
   ContestWinnerRecord,
   PublicContestEntry,
@@ -26,7 +28,11 @@ import {
   CONTEST_PUBLIC_URL,
   CONTEST_TARGET_AREA,
   ROLLING_VIEW_WINDOW_MS,
+  buildAdminContestParticipants,
+  buildUserViewsLeaderboard,
+  compute30DayPeriodBounds,
   computeCompetitionDisplayScore,
+  createDefaultContestEditableContent,
   createDefaultContestPrizes,
   createDefaultMonthRecord,
   createInitialContestMonthRecord,
@@ -37,25 +43,31 @@ import {
   getIstMonthKey,
   getManualScoreAdjustment,
   getNextIstMonthKey,
+  isContestAcceptingEntries,
   isContestMonthOpen,
   isEligibleRolling24hVisit,
   isLikelyBotUserAgent,
   normalizeContestPrizes,
   normalizeEntryScoreFields,
   rankEligibleContestEntries,
+  restoreContestContentFromHistory,
+  sanitizeContestEditableContent,
   toPublicContestEntry,
   toPublicContestWinner,
+  upgradeActiveMonthPrizesIfLegacy,
+  upgradeLegacyContestContentDefaults,
 } from '../utils/contestHelpers';
 import type { CommunityBackend } from './communityBackend';
+import type { AppsScriptCommunityContestCoordinator } from './appsScriptCommunitySync';
 
-interface ContestViewBucketRecord {
+export interface ContestViewBucketRecord {
   entryId: string;
   visitorHash: string;
   lastEligibleAtMs: number;
   hitCount: number;
 }
 
-interface ContestStoreState {
+export interface ContestStoreState {
   version: 1;
   activeMonthKey: string;
   months: ContestMonthRecord[];
@@ -63,6 +75,8 @@ interface ContestStoreState {
   viewBuckets: ContestViewBucketRecord[];
   alerts: ContestSuspiciousAlert[];
   auditLogs: ContestAuditLogRecord[];
+  contentConfig: ContestEditableContent;
+  diagnostics: ContestSystemDiagnosticRecord[];
 }
 
 interface RateHitSample {
@@ -75,6 +89,7 @@ const VISITOR_COOKIE_TTL_SEC = 180 * 24 * 60 * 60; // 180 days
 const MAX_STORED_VIEW_BUCKETS = 30_000;
 const MAX_AUDIT_LOGS = 500;
 const MAX_ALERTS = 300;
+const MAX_DIAGNOSTICS = 200;
 
 function makeId(prefix: string): string {
   return `${prefix}_${Date.now().toString(36)}_${crypto.randomBytes(5).toString('hex')}`;
@@ -131,6 +146,13 @@ export class ContestBackend {
   private readonly ipEntrySamples = new Map<string, RateHitSample[]>();
   private readonly articleSamples = new Map<string, number[]>();
   private readonly ipBucketTracker = new Map<string, number[]>();
+  private cloudSync?: AppsScriptCommunityContestCoordinator;
+  private stateVersion = 0;
+  private cachedPublicOverview: {
+    fingerprint: string;
+    cachedAtMs: number;
+    payload: ContestPublicOverview;
+  } | null = null;
 
   constructor(
     dataDir: string,
@@ -147,6 +169,58 @@ export class ContestBackend {
     this.communityBackend.onPostDeleted((postId) => {
       this.handlePostDeleted(postId);
     });
+  }
+
+  public attachCloudSync(sync: AppsScriptCommunityContestCoordinator): void {
+    this.cloudSync = sync;
+  }
+
+  public getStoreState(): {
+    activeMonthKey: string;
+    months: ContestMonthRecord[];
+    entries: ContestEntryRecord[];
+    viewBuckets: ContestViewBucketRecord[];
+    alerts: ContestSuspiciousAlert[];
+    auditLogs: ContestAuditLogRecord[];
+    contentConfig: ContestEditableContent;
+    diagnostics: ContestSystemDiagnosticRecord[];
+  } {
+    return {
+      activeMonthKey: this.state.activeMonthKey,
+      months: this.state.months,
+      entries: this.state.entries,
+      viewBuckets: this.state.viewBuckets,
+      alerts: this.state.alerts,
+      auditLogs: this.state.auditLogs,
+      contentConfig: this.state.contentConfig,
+      diagnostics: this.state.diagnostics,
+    };
+  }
+
+  public applyMergedStoreState(next: {
+    activeMonthKey: string;
+    months: ContestMonthRecord[];
+    entries: ContestEntryRecord[];
+    viewBuckets: ContestViewBucketRecord[];
+    alerts: ContestSuspiciousAlert[];
+    auditLogs: ContestAuditLogRecord[];
+    contentConfig: ContestEditableContent;
+    diagnostics: ContestSystemDiagnosticRecord[];
+  }): void {
+    this.state = {
+      version: 1,
+      activeMonthKey: next.activeMonthKey,
+      months: next.months,
+      entries: next.entries,
+      viewBuckets: next.viewBuckets,
+      alerts: next.alerts,
+      auditLogs: next.auditLogs,
+      contentConfig: next.contentConfig,
+      diagnostics: next.diagnostics,
+    };
+    this.stateVersion += 1;
+    this.cachedPublicOverview = null;
+    this.persistState();
   }
 
   private handlePostDeleted(postId: string): void {
@@ -178,6 +252,8 @@ export class ContestBackend {
       viewBuckets: [],
       alerts: [],
       auditLogs: [],
+      contentConfig: createDefaultContestEditableContent(),
+      diagnostics: [],
     };
   }
 
@@ -197,6 +273,12 @@ export class ContestBackend {
         months.some((m) => m.monthKey === parsed.activeMonthKey)
           ? parsed.activeMonthKey
           : months[0].monthKey;
+      const contentConfig = sanitizeContestEditableContent(
+        parsed.contentConfig,
+        createDefaultContestEditableContent(),
+        parsed.contentConfig?.updatedBy || 'system',
+        false
+      );
       return {
         version: 1,
         activeMonthKey,
@@ -205,6 +287,8 @@ export class ContestBackend {
         viewBuckets: Array.isArray(parsed.viewBuckets) ? parsed.viewBuckets : [],
         alerts: Array.isArray(parsed.alerts) ? parsed.alerts : [],
         auditLogs: Array.isArray(parsed.auditLogs) ? parsed.auditLogs : [],
+        contentConfig,
+        diagnostics: Array.isArray(parsed.diagnostics) ? parsed.diagnostics : [],
       };
     };
 
@@ -245,6 +329,48 @@ export class ContestBackend {
     const tmp = `${this.storePath}.${process.pid}.${Date.now()}.${crypto.randomBytes(3).toString('hex')}.tmp`;
     fs.writeFileSync(tmp, serialized, 'utf8');
     fs.renameSync(tmp, this.storePath);
+    this.stateVersion += 1;
+    this.cachedPublicOverview = null;
+  }
+
+  private getUserDirectory(): Map<string, { fullName: string; status: 'active' | 'suspended' }> {
+    const map = new Map<string, { fullName: string; status: 'active' | 'suspended' }>();
+    for (const u of this.communityBackend.getAllUsersInternal()) {
+      if (u?.id) {
+        map.set(u.id, { fullName: u.fullName, status: u.status });
+      }
+    }
+    return map;
+  }
+
+  private isLinkedPostPublished(postId: string): boolean {
+    const post = this.communityBackend.getInternalPostByIdOrSlug(postId);
+    return Boolean(post && post.status === 'published');
+  }
+
+  private freezeMonthUserLeaderboard(month: ContestMonthRecord, nowIso: string): void {
+    const entries = this.getEntriesForMonth(month.monthKey);
+    month.frozenUserLeaderboard = buildUserViewsLeaderboard({
+      month,
+      entries,
+      isPostPublished: (postId) => this.isLinkedPostPublished(postId),
+      userDirectory: this.getUserDirectory(),
+      forceRecompute: true,
+    });
+    month.frozenAt = nowIso;
+  }
+
+  private computePublicOverviewFingerprint(nowMs: number): string {
+    const commState = this.communityBackend.getStoreState();
+    const postSig = commState.posts
+      .filter((p) => p.category === 'monthly-news-contest')
+      .map((p) => `${p.id}:${p.status}:${p.updatedAt}`)
+      .join('|');
+    const userSig = commState.users
+      .map((u) => `${u.id}:${u.status}:${u.fullName}`)
+      .join('|');
+    const minuteBucket = Math.floor(nowMs / 60_000);
+    return `${this.stateVersion}#${minuteBucket}#${postSig}#${userSig}`;
   }
 
   private hashVisitor(rawValue: string): string {
@@ -311,6 +437,30 @@ export class ContestBackend {
     }
   }
 
+  public appendDiagnostic(
+    operationType: ContestSystemDiagnosticRecord['operationType'],
+    category: ContestSystemDiagnosticRecord['category'],
+    message: string,
+    recoveryStatus: ContestSystemDiagnosticRecord['recoveryStatus'] = 'verified',
+    recordId?: string
+  ): void {
+    if (!Array.isArray(this.state.diagnostics)) {
+      this.state.diagnostics = [];
+    }
+    this.state.diagnostics.unshift({
+      id: makeId('cdiag'),
+      timestamp: new Date().toISOString(),
+      operationType,
+      recordId,
+      category,
+      message: cleanSingleLine(message, 400),
+      recoveryStatus,
+    });
+    if (this.state.diagnostics.length > MAX_DIAGNOSTICS) {
+      this.state.diagnostics = this.state.diagnostics.slice(0, MAX_DIAGNOSTICS);
+    }
+  }
+
   private ensureActiveMonthSynced(now = new Date()): ContestMonthRecord {
     let changed = false;
     const nowMs = now.getTime();
@@ -343,7 +493,12 @@ export class ContestBackend {
 
     for (const month of this.state.months) {
       if (month.status === 'open' && nowMs > Date.parse(month.endsAtIso)) {
+        this.freezeMonthUserLeaderboard(month, now.toISOString());
         month.status = 'closed';
+        month.updatedAt = now.toISOString();
+        changed = true;
+      }
+      if (upgradeActiveMonthPrizesIfLegacy(month)) {
         month.updatedAt = now.toISOString();
         changed = true;
       }
@@ -412,10 +567,33 @@ export class ContestBackend {
   }
 
   private buildPublicOverview(now = new Date()): ContestPublicOverview {
+    const nowMs = now.getTime();
     const activeMonth = this.ensureActiveMonthSynced(now);
+    const fingerprint = this.computePublicOverviewFingerprint(nowMs);
+    if (
+      this.cachedPublicOverview &&
+      this.cachedPublicOverview.fingerprint === fingerprint &&
+      nowMs - this.cachedPublicOverview.cachedAtMs < 3_000
+    ) {
+      return {
+        ...this.cachedPublicOverview.payload,
+        serverNowIso: now.toISOString(),
+      };
+    }
+
     const monthEntries = this.getEntriesForMonth(activeMonth.monthKey);
-    const publicEntries: PublicContestEntry[] = rankEligibleContestEntries(monthEntries);
-    const topFour = publicEntries.slice(0, 4);
+    const publishedMonthEntries = monthEntries.filter((e) =>
+      this.isLinkedPostPublished(e.postId)
+    );
+    const publicEntries: PublicContestEntry[] = rankEligibleContestEntries(publishedMonthEntries);
+    const topThree = publicEntries.slice(0, 3);
+    const userDirectory = this.getUserDirectory();
+    const userLeaderboard = buildUserViewsLeaderboard({
+      month: activeMonth,
+      entries: monthEntries,
+      isPostPublished: (postId) => this.isLinkedPostPublished(postId),
+      userDirectory,
+    });
 
     const publishedWinners: PublicContestWinner[] = activeMonth.winnersPublished
       ? [...activeMonth.winners]
@@ -423,50 +601,84 @@ export class ContestBackend {
           .map((w) => toPublicContestWinner(w))
       : [];
 
-    const fifthQualityWinner =
+    const qualityWinner =
       publishedWinners.find((w) => w.prizeType === 'quality') || null;
 
     const totalBudgetInr = activeMonth.prizes.reduce((s, p) => s + p.amountInr, 0);
 
     const previousMonths = this.state.months
-      .filter((m) => m.winnersPublished && m.winners.length > 0)
+      .filter(
+        (m) =>
+          (m.winnersPublished && m.winners.length > 0) ||
+          (m.monthKey !== activeMonth.monthKey &&
+            m.status !== 'open' &&
+            Array.isArray(m.frozenUserLeaderboard) &&
+            m.frozenUserLeaderboard.length > 0)
+      )
       .sort((a, b) => b.monthKey.localeCompare(a.monthKey))
       .map((m) => ({
         monthKey: m.monthKey,
+        periodId: m.periodId || m.monthKey,
         displayLabelEn: m.displayLabelEn,
         displayLabelKn: m.displayLabelKn,
+        startsAtIso: m.startsAtIso,
+        endsAtIso: m.endsAtIso,
         status: m.status,
-        winners: [...m.winners]
-          .sort((a, b) => a.rank - b.rank)
-          .map((w) => toPublicContestWinner(w)),
+        winners: m.winnersPublished
+          ? [...m.winners]
+              .sort((a, b) => a.rank - b.rank)
+              .map((w) => toPublicContestWinner(w))
+          : [],
+        userLeaderboard: Array.isArray(m.frozenUserLeaderboard)
+          ? m.frozenUserLeaderboard
+          : undefined,
       }));
 
-    return {
-      competitionName: CONTEST_OFFICIAL_NAME,
-      kannadaHeading: CONTEST_KANNADA_HEADING,
-      kannadaSubtitle: CONTEST_KANNADA_SUBTITLE,
-      targetArea: CONTEST_TARGET_AREA,
+    const contentConfig = upgradeLegacyContestContentDefaults(
+      this.state.contentConfig || createDefaultContestEditableContent(now.toISOString())
+    );
+
+    const payload: ContestPublicOverview = {
+      competitionName: contentConfig.mainHeadingEn || CONTEST_OFFICIAL_NAME,
+      kannadaHeading: contentConfig.mainHeadingKn || CONTEST_KANNADA_HEADING,
+      kannadaSubtitle: contentConfig.subtitleKn || CONTEST_KANNADA_SUBTITLE,
+      targetArea: contentConfig.introEn || CONTEST_TARGET_AREA,
       contestUrl: CONTEST_PUBLIC_URL,
+      contentConfig,
       activeMonth: {
         monthKey: activeMonth.monthKey,
+        periodId: activeMonth.periodId || activeMonth.monthKey,
+        durationDays: activeMonth.durationDays || 30,
         displayLabelEn: activeMonth.displayLabelEn,
         displayLabelKn: activeMonth.displayLabelKn,
         startsAtIso: activeMonth.startsAtIso,
         endsAtIso: activeMonth.endsAtIso,
         status: activeMonth.status,
-        isAcceptingEntries: isContestMonthOpen(activeMonth, now.getTime()),
+        participationEnabled: activeMonth.participationEnabled !== false,
+        isAcceptingEntries: isContestAcceptingEntries(activeMonth, nowMs),
         totalBudgetInr,
         prizes: activeMonth.prizes,
         winnersPublished: activeMonth.winnersPublished,
         publishedWinners,
       },
-      topFour,
-      fifthQualityWinner,
+      userLeaderboard,
+      totalParticipantsCount: userLeaderboard.length,
+      topThree,
+      topFour: topThree,
+      fourthQualityWinner: qualityWinner,
+      fifthQualityWinner: qualityWinner,
       allEligibleEntries: publicEntries,
       totalEligibleCount: publicEntries.length,
       previousMonths,
       serverNowIso: now.toISOString(),
     };
+
+    this.cachedPublicOverview = {
+      fingerprint,
+      cachedAtMs: nowMs,
+      payload,
+    };
+    return payload;
   }
 
   private buildAdminOverview(requestedMonthKey?: string): ContestAdminOverview {
@@ -561,17 +773,41 @@ export class ContestBackend {
       b.monthKey.localeCompare(a.monthKey)
     );
 
+    const allUsers = this.communityBackend.getAllUsersInternal();
+    const userDirectory = this.getUserDirectory();
+    const userLeaderboard = buildUserViewsLeaderboard({
+      month: selectedMonth,
+      entries: rawMonthEntries,
+      isPostPublished: (postId) => this.isLinkedPostPublished(postId),
+      userDirectory,
+    });
+    const participants = buildAdminContestParticipants({
+      month: selectedMonth,
+      entriesWithMobile,
+      allUsers,
+      userLeaderboard,
+    });
+    const eligibleParticipants = userLeaderboard.length;
+
     return {
       activeMonthKey: activeMonth.monthKey,
       months: monthsSorted,
       selectedMonth,
+      contentConfig: upgradeLegacyContestContentDefaults(
+        this.state.contentConfig || createDefaultContestEditableContent()
+      ),
+      diagnostics: (this.state.diagnostics || []).slice(0, 80),
       entries: entriesWithMobile,
+      participants,
+      userLeaderboard,
       alerts,
       auditLogs: this.state.auditLogs.slice(0, 120),
       summary: {
         totalEntries: entriesWithMobile.length,
         eligibleEntries,
         disqualifiedEntries,
+        totalParticipants: participants.filter((p) => p.totalArticleCount > 0).length,
+        eligibleParticipants,
         totalPageViews,
         totalEligibleViews,
         totalCompetitionDisplayScore,
@@ -625,8 +861,9 @@ export class ContestBackend {
     // -------------------------------------------------------------------------
     // PUBLIC CONTEST OVERVIEW & LEADERBOARD (STRICT PRIVACY WALL, ZERO ADS)
     // -------------------------------------------------------------------------
-    app.get('/api/public/contest/overview', (_req, res) => {
+    app.get('/api/public/contest/overview', async (_req, res) => {
       try {
+        await this.cloudSync?.syncIfNeeded();
         res.json({ ok: true, ...this.buildPublicOverview(new Date()) });
       } catch (err) {
         console.error('[ContestBackend] public overview failed:', err);
@@ -634,8 +871,9 @@ export class ContestBackend {
       }
     });
 
-    app.get('/api/public/contest/entries/:slugOrId', (req, res) => {
+    app.get('/api/public/contest/entries/:slugOrId', async (req, res) => {
       try {
+        await this.cloudSync?.syncIfNeeded();
         const entry = this.findEntryBySlugOrId(req.params.slugOrId);
         if (!entry) {
           res.status(404).json({ ok: false, error: 'Contest entry not found.' });
@@ -659,8 +897,9 @@ export class ContestBackend {
     // -------------------------------------------------------------------------
     // SECURE SERVER-SIDE VIEW COUNTER (ROLLING 24H DEDUPE + ANTI-ABUSE)
     // -------------------------------------------------------------------------
-    app.post('/api/public/contest/entries/:slugOrId/view', (req, res) => {
+    app.post('/api/public/contest/entries/:slugOrId/view', async (req, res) => {
       try {
+      await this.cloudSync?.syncIfNeeded();
       const entry = this.findEntryBySlugOrId(req.params.slugOrId);
       if (!entry) {
         res.status(404).json({ ok: false, error: 'Contest entry not found.' });
@@ -721,6 +960,7 @@ export class ContestBackend {
       }
       if (!month || !isContestMonthOpen(month, nowMs)) {
         if (month && month.status === 'open' && nowMs > Date.parse(month.endsAtIso)) {
+          this.freezeMonthUserLeaderboard(month, now.toISOString());
           month.status = 'closed';
           month.updatedAt = now.toISOString();
         }
@@ -819,6 +1059,7 @@ export class ContestBackend {
 
       // Eligible unique view!
       entry.eligibleViews = (entry.eligibleViews || 0) + 1;
+      entry.lastEligibleViewAt = now.toISOString();
       normalizeEntryScoreFields(entry);
       this.communityBackend.syncContestPostTotalViews(
         entry.postId,
@@ -845,6 +1086,10 @@ export class ContestBackend {
       }
 
       this.persistState();
+      void this.cloudSync?.pushDelta({
+        contestEntry: entry,
+        viewBuckets: this.state.viewBuckets.filter((b) => b.entryId === entry.id).slice(-20),
+      });
       respond(true, 'counted');
       } catch (err) {
         console.error('[ContestBackend] view counter failed:', err);
@@ -857,10 +1102,11 @@ export class ContestBackend {
     // -------------------------------------------------------------------------
     // PUBLIC CONTEST NEWS SUBMISSION (REUSES EXISTING COMMUNITY USER & POST STORE)
     // -------------------------------------------------------------------------
-    app.post('/api/public/contest/submit', (req, res) => {
+    app.post('/api/public/contest/submit', async (req, res) => {
       try {
+      await this.cloudSync?.syncIfNeeded();
       const ip = getClientIp(req);
-      if (!this.checkSimpleIpRate(`csub:${ip}`, 15, 60 * 60 * 1000)) {
+      if (!this.checkSimpleIpRate(`csub:${ip}`, 40, 60 * 60 * 1000)) {
         res.status(429).json({
           ok: false,
           error: 'ದಯವಿಟ್ಟು ಸ್ವಲ್ಪ ಸಮಯದ ನಂತರ ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ.',
@@ -870,11 +1116,19 @@ export class ContestBackend {
 
       const now = new Date();
       const activeMonth = this.ensureActiveMonthSynced(now);
-      if (!isContestMonthOpen(activeMonth, now.getTime())) {
+      if (activeMonth.participationEnabled === false) {
+        res.status(403).json({
+          ok: false,
+          error:
+            'ಈ ಸ್ಪರ್ಧೆಯ ಸುದ್ದಿ ಸ್ವೀಕಾರವನ್ನು ಆಡ್ಮಿನ್ ತಾತ್ಕಾಲಿಕವಾಗಿ ನಿಲ್ಲಿಸಿದ್ದಾರೆ. (Competition participation is currently paused by administrator.)',
+        });
+        return;
+      }
+      if (!isContestAcceptingEntries(activeMonth, now.getTime())) {
         res.status(400).json({
           ok: false,
           error:
-            'ಈ ತಿಂಗಳ ಸುದ್ದಿ ಸ್ಪರ್ಧೆಯ ಅವಧಿ ಮುಕ್ತಾಯಗೊಂಡಿದೆ. ಮುಂದಿನ ತಿಂಗಳ ಸ್ಪರ್ಧೆ ಆರಂಭವಾದಾಗ ದಯವಿಟ್ಟು ಪ್ರಕಟಿಸಿ.',
+            'ಈ ತಿಂಗಳ ಸುದ್ದಿ ಸ್ಪರ್ಧೆಯ ಅವಧಿ ಮುಕ್ತಾಯಗೊಂಡಿದೆ. ಮುಂದಿನ ಸ್ಪರ್ಧೆ ಆರಂಭವಾದಾಗ ದಯವಿಟ್ಟು ಪ್ರಕಟಿಸಿ.',
         });
         return;
       }
@@ -905,7 +1159,53 @@ export class ContestBackend {
         return;
       }
 
-      const postRes = this.communityBackend.createContestPostInternal(
+      const rawSubmissionId = cleanSingleLine(req.body?.clientSubmissionId, 80);
+      const clientSubmissionId = /^[a-zA-Z0-9_-]{8,80}$/.test(rawSubmissionId)
+        ? rawSubmissionId
+        : undefined;
+
+      // Idempotent duplicate-retry check by clientSubmissionId (prevents double-click / retry duplicates
+      // while allowing unlimited distinct articles by the same registered user).
+      if (clientSubmissionId) {
+        const existingIdempotentEntry = this.state.entries.find(
+          (e) =>
+            e.contributorUserId === contributorRes.user.id &&
+            e.clientSubmissionId === clientSubmissionId
+        );
+        if (existingIdempotentEntry) {
+          const existingPost = this.communityBackend.getInternalPostByIdOrSlug(
+            existingIdempotentEntry.postId
+          );
+          if (existingPost) {
+            res.status(200).json({
+              ok: true,
+              duplicatePrevented: true,
+              token: contributorRes.token,
+              profile: contributorRes.profile,
+              post: {
+                id: existingPost.id,
+                slug: existingPost.slug,
+                authorName: existingPost.authorName,
+                title: existingPost.title,
+                category: existingPost.category,
+                description: existingPost.description,
+                location: existingPost.location,
+                photos: existingPost.photos,
+                createdAt: existingPost.createdAt,
+                updatedAt: existingPost.updatedAt,
+                viewsCount: existingPost.viewsCount,
+                sharesCount: existingPost.sharesCount,
+                isOwner: true,
+              },
+              entry: toPublicContestEntry(existingIdempotentEntry),
+              permanentPath: `/community/${encodeURIComponent(existingPost.slug)}`,
+            });
+            return;
+          }
+        }
+      }
+
+      const postRes = await this.communityBackend.createContestPostInternal(
         req,
         contributorRes.user,
         {
@@ -944,12 +1244,24 @@ export class ContestBackend {
           eligibleViews: 0,
           suspiciousBlockedViews: 0,
           suspiciousFlagged: false,
+          clientSubmissionId,
           createdAt: nowIso,
           updatedAt: nowIso,
         };
         this.state.entries.unshift(entry);
         this.persistState();
       }
+
+      await this.cloudSync?.pushDelta(
+        {
+          user: contributorRes.user,
+          post: postRes.post,
+          contestEntry: entry,
+          contestMonth: activeMonth,
+          activeMonthKey: this.state.activeMonthKey,
+        },
+        { awaitRemote: true }
+      );
 
       res.status(postRes.duplicatePrevented ? 200 : 201).json({
         ok: true,
@@ -977,8 +1289,9 @@ export class ContestBackend {
     app.get(
       '/api/admin2/contest/overview',
       this.authFactory('dashboard.view'),
-      (req, res) => {
+      async (req, res) => {
         try {
+          await this.cloudSync?.syncIfNeeded();
           const monthParam =
             typeof req.query.month === 'string' ? req.query.month.trim() : undefined;
           res.json({ ok: true, ...this.buildAdminOverview(monthParam) });
@@ -992,8 +1305,9 @@ export class ContestBackend {
     app.patch(
       '/api/admin2/contest/entries/:id/eligibility',
       this.authFactory('news.edit'),
-      (req, res) => {
+      async (req, res) => {
         try {
+          await this.cloudSync?.syncIfNeeded();
           const targetKey = decodeURIComponent(String(req.params.id || '')).trim();
           const entry = this.state.entries.find(
             (e) => e.id === targetKey || e.postId === targetKey
@@ -1048,6 +1362,15 @@ export class ContestBackend {
             entry.id
           );
           this.persistState();
+          const syncedPost = this.communityBackend.getInternalPostByIdOrSlug(entry.postId) || undefined;
+          await this.cloudSync?.pushDelta(
+            {
+              contestEntry: entry,
+              post: syncedPost,
+              contestAuditLog: this.state.auditLogs[0],
+            },
+            { adminEmail: actor, awaitRemote: true }
+          );
 
           res.json({ ok: true, entry });
         } catch (err) {
@@ -1066,8 +1389,9 @@ export class ContestBackend {
     app.patch(
       '/api/admin2/contest/entries/:id/score',
       this.authFactory('news.edit'),
-      (req, res) => {
+      async (req, res) => {
         try {
+          await this.cloudSync?.syncIfNeeded();
           const targetKey = decodeURIComponent(String(req.params.id || '')).trim();
           const entry = this.state.entries.find(
             (e) => e.id === targetKey || e.postId === targetKey || e.slug === targetKey
@@ -1175,6 +1499,13 @@ export class ContestBackend {
             entry.id
           );
           this.persistState();
+          await this.cloudSync?.pushDelta(
+            {
+              contestEntry: entry,
+              contestAuditLog: this.state.auditLogs[0],
+            },
+            { adminEmail: actor, awaitRemote: true }
+          );
 
           res.json({
             ok: true,
@@ -1206,8 +1537,9 @@ export class ContestBackend {
     app.post(
       '/api/admin2/contest/months/:monthKey/reset-scores',
       this.authFactory('news.edit'),
-      (req, res) => {
+      async (req, res) => {
         try {
+          await this.cloudSync?.syncIfNeeded();
           const monthKey = String(req.params.monthKey || '').trim();
           const monthEntries = this.state.entries.filter(
             (e) => e.competitionMonth === monthKey
@@ -1215,6 +1547,7 @@ export class ContestBackend {
           const actor = this.getAdminActorEmail(req);
           const nowIso = new Date().toISOString();
           let resetCount = 0;
+          const touched: ContestEntryRecord[] = [];
 
           for (const entry of monthEntries) {
             if (getManualScoreAdjustment(entry) !== 0) {
@@ -1224,6 +1557,7 @@ export class ContestBackend {
               entry.manualScoreUpdatedAt = nowIso;
               entry.updatedAt = nowIso;
               normalizeEntryScoreFields(entry);
+              touched.push(entry);
               resetCount += 1;
             }
           }
@@ -1235,6 +1569,13 @@ export class ContestBackend {
             monthKey
           );
           this.persistState();
+          await this.cloudSync?.pushDelta(
+            {
+              extraContestEntries: touched,
+              contestAuditLog: this.state.auditLogs[0],
+            },
+            { adminEmail: actor, awaitRemote: true }
+          );
           res.json({ ok: true, resetCount });
         } catch (err) {
           console.error('[ContestBackend] reset month scores failed:', err);
@@ -1251,8 +1592,9 @@ export class ContestBackend {
     app.patch(
       '/api/admin2/contest/alerts/:id',
       this.authFactory('security.view'),
-      (req, res) => {
+      async (req, res) => {
         try {
+          await this.cloudSync?.syncIfNeeded();
           const alert = this.state.alerts.find((a) => a.id === req.params.id);
           if (!alert) {
             res.status(404).json({ ok: false, error: 'Suspicious alert not found.' });
@@ -1280,6 +1622,10 @@ export class ContestBackend {
             alert.id
           );
           this.persistState();
+          await this.cloudSync?.pushDelta(
+            { contestAlert: alert, contestAuditLog: this.state.auditLogs[0] },
+            { adminEmail: actor, awaitRemote: true }
+          );
           res.json({ ok: true, alert });
         } catch (err) {
           console.error('[ContestBackend] alert review failed:', err);
@@ -1293,8 +1639,9 @@ export class ContestBackend {
     app.put(
       '/api/admin2/contest/months/:monthKey/config',
       this.authFactory('settings.manage'),
-      (req, res) => {
+      async (req, res) => {
         try {
+        await this.cloudSync?.syncIfNeeded();
         const month = this.state.months.find((m) => m.monthKey === req.params.monthKey);
         if (!month) {
           res.status(404).json({ ok: false, error: 'Competition month not found.' });
@@ -1322,23 +1669,46 @@ export class ContestBackend {
         const requestedStatus = allowedStatuses.includes(req.body?.status)
           ? (req.body.status as ContestMonthStatus)
           : month.status;
+        const wasOpen = month.status === 'open';
+        const nowIso = new Date().toISOString();
 
         month.startsAtIso = startsAtIso;
         month.endsAtIso = endsAtIso;
         month.prizes = nextPrizes;
         month.status = requestedStatus;
+        if (typeof req.body?.participationEnabled === 'boolean') {
+          month.participationEnabled = req.body.participationEnabled;
+        }
+        if (req.body?.durationDays !== undefined) {
+          const parsedDays = Math.round(Number(req.body.durationDays));
+          if (Number.isFinite(parsedDays) && parsedDays >= 1 && parsedDays <= 365) {
+            month.durationDays = parsedDays;
+          }
+        }
+        if (wasOpen && requestedStatus !== 'open') {
+          this.freezeMonthUserLeaderboard(month, nowIso);
+        } else if (requestedStatus === 'open') {
+          month.frozenUserLeaderboard = undefined;
+          month.frozenAt = undefined;
+        }
         month.allowCarryOver = Boolean(req.body?.allowCarryOver);
-        month.updatedAt = new Date().toISOString();
+        month.updatedAt = nowIso;
 
         const budget = nextPrizes.reduce((s, p) => s + p.amountInr, 0);
         const actor = this.getAdminActorEmail(req);
         this.appendAuditLog(
           actor,
           'month.config',
-          `Updated ${month.displayLabelEn} dates/prizes (Budget: ₹${budget}, Status: ${month.status})`,
+          `Updated ${month.displayLabelEn} dates/prizes (Budget: ₹${budget}, Status: ${month.status}, Participation: ${
+            month.participationEnabled === false ? 'Disabled' : 'Enabled'
+          })`,
           month.monthKey
         );
         this.persistState();
+        await this.cloudSync?.pushDelta(
+          { contestMonth: month, contestAuditLog: this.state.auditLogs[0] },
+          { adminEmail: actor, awaitRemote: true }
+        );
         res.json({ ok: true, month });
         } catch (err) {
           console.error('[ContestBackend] month config failed:', err);
@@ -1349,11 +1719,122 @@ export class ContestBackend {
       }
     );
 
+    app.patch(
+      '/api/admin2/contest/months/:monthKey/participation',
+      this.authFactory('settings.manage'),
+      async (req, res) => {
+        try {
+          await this.cloudSync?.syncIfNeeded();
+          const month = this.state.months.find((m) => m.monthKey === req.params.monthKey);
+          if (!month) {
+            res.status(404).json({ ok: false, error: 'Competition period not found.' });
+            return;
+          }
+          const enabled = Boolean(req.body?.enabled);
+          const actor = this.getAdminActorEmail(req);
+          month.participationEnabled = enabled;
+          month.updatedAt = new Date().toISOString();
+
+          this.appendAuditLog(
+            actor,
+            enabled ? 'month.participation_enabled' : 'month.participation_disabled',
+            `${enabled ? 'Enabled' : 'Disabled'} public competition participation for ${month.displayLabelEn}`,
+            month.monthKey
+          );
+          this.persistState();
+          await this.cloudSync?.pushDelta(
+            { contestMonth: month, contestAuditLog: this.state.auditLogs[0] },
+            { adminEmail: actor, awaitRemote: true }
+          );
+          res.json({ ok: true, month });
+        } catch (err) {
+          console.error('[ContestBackend] participation toggle failed:', err);
+          if (!res.headersSent) {
+            res.status(500).json({ ok: false, error: 'Failed to update participation status.' });
+          }
+        }
+      }
+    );
+
+    app.patch(
+      '/api/admin2/contest/months/:monthKey/participants/:userId/eligibility',
+      this.authFactory('news.edit'),
+      async (req, res) => {
+        try {
+          await this.cloudSync?.syncIfNeeded();
+          const month = this.state.months.find((m) => m.monthKey === req.params.monthKey);
+          if (!month) {
+            res.status(404).json({ ok: false, error: 'Competition period not found.' });
+            return;
+          }
+          const userId = decodeURIComponent(String(req.params.userId || '')).trim();
+          if (!userId) {
+            res.status(400).json({ ok: false, error: 'Missing participant userId.' });
+            return;
+          }
+          const eligible = req.body?.eligible === true;
+          const reason = cleanSingleLine(req.body?.reason, 240);
+          if (!eligible && reason.length < 3) {
+            res.status(400).json({
+              ok: false,
+              error: 'Please enter a brief reason (min 3 chars) for excluding this participant.',
+            });
+            return;
+          }
+
+          const excluded = new Set(Array.isArray(month.excludedUserIds) ? month.excludedUserIds : []);
+          const reasons: Record<string, string> = { ...(month.excludedUserReasons || {}) };
+          if (eligible) {
+            excluded.delete(userId);
+            delete reasons[userId];
+          } else {
+            excluded.add(userId);
+            reasons[userId] = reason;
+          }
+
+          const nowIso = new Date().toISOString();
+          month.excludedUserIds = Array.from(excluded);
+          month.excludedUserReasons = reasons;
+          if (month.status !== 'open') {
+            this.freezeMonthUserLeaderboard(month, nowIso);
+          }
+          month.updatedAt = nowIso;
+
+          const actor = this.getAdminActorEmail(req);
+          const userRec = this.communityBackend
+            .getAllUsersInternal()
+            .find((u) => u.id === userId);
+          const displayName = userRec?.fullName || userId;
+          this.appendAuditLog(
+            actor,
+            eligible ? 'participant.reinstate' : 'participant.exclude',
+            `${eligible ? 'Reinstated' : 'Excluded'} participant "${displayName}" on ${month.displayLabelEn} leaderboard${
+              !eligible ? ` (${reason})` : ''
+            }`,
+            month.monthKey,
+            userId
+          );
+          this.persistState();
+          await this.cloudSync?.pushDelta(
+            { contestMonth: month, contestAuditLog: this.state.auditLogs[0] },
+            { adminEmail: actor, awaitRemote: true }
+          );
+          res.json({ ok: true, month });
+        } catch (err) {
+          console.error('[ContestBackend] participant eligibility update failed:', err);
+          if (!res.headersSent) {
+            res.status(500).json({ ok: false, error: 'Failed to update participant eligibility.' });
+          }
+        }
+      }
+    );
+
     app.put(
       '/api/admin2/contest/months/:monthKey/winners',
       this.authFactory('news.publish'),
-      (req, res) => {
+      async (req, res) => {
         try {
+        await this.cloudSync?.syncIfNeeded();
         const month = this.state.months.find((m) => m.monthKey === req.params.monthKey);
         if (!month) {
           res.status(404).json({ ok: false, error: 'Competition month not found.' });
@@ -1366,20 +1847,32 @@ export class ContestBackend {
         const updatedWinners: ContestWinnerRecord[] = [];
         const defaultPrizes = createDefaultContestPrizes();
 
+        const allowedRanks = month.status === 'finalized' ? [1, 2, 3, 4, 5] : [1, 2, 3, 4];
         for (const item of rawWinners) {
           const rank = Number(item?.rank);
-          if (![1, 2, 3, 4, 5].includes(rank)) continue;
+          if (!allowedRanks.includes(rank)) continue;
           const entryId = String(item?.entryId || '').trim();
           const entry = this.state.entries.find(
             (e) => e.id === entryId && e.competitionMonth === month.monthKey
           );
           if (!entry) continue;
+          if (entry.eligibility !== 'eligible') {
+            res.status(400).json({
+              ok: false,
+              error: `Disqualified article "${entry.title}" cannot be selected as a contest winner.`,
+            });
+            return;
+          }
 
           const tier =
-            month.prizes.find((p) => p.rank === rank) || defaultPrizes[rank - 1];
-          const amountInr = Number.isFinite(Number(item?.prizeAmountInr))
-            ? Math.max(0, Math.round(Number(item.prizeAmountInr)))
-            : tier.amountInr;
+            month.prizes.find((p) => p.rank === rank) ||
+            defaultPrizes[Math.min(rank - 1, defaultPrizes.length - 1)];
+          const isQualityPrize =
+            tier.type === 'quality' || (month.status !== 'finalized' && rank === 4) || rank === 5;
+          const amountInr =
+            item?.prizeAmountInr !== undefined && Number.isFinite(Number(item?.prizeAmountInr))
+              ? Math.max(0, Math.round(Number(item.prizeAmountInr)))
+              : tier.amountInr;
 
           const paymentStatus =
             item?.paymentStatus === 'paid'
@@ -1390,7 +1883,7 @@ export class ContestBackend {
 
           updatedWinners.push({
             rank: rank as 1 | 2 | 3 | 4 | 5,
-            prizeType: rank === 5 ? 'quality' : 'views',
+            prizeType: isQualityPrize ? 'quality' : 'views',
             prizeLabelEn: tier.labelEn,
             prizeLabelKn: tier.labelKn,
             prizeAmountInr: amountInr,
@@ -1422,6 +1915,10 @@ export class ContestBackend {
           month.monthKey
         );
         this.persistState();
+        await this.cloudSync?.pushDelta(
+          { contestMonth: month, contestAuditLog: this.state.auditLogs[0] },
+          { adminEmail: actor, awaitRemote: true }
+        );
         res.json({ ok: true, month });
         } catch (err) {
           console.error('[ContestBackend] winners save failed:', err);
@@ -1435,8 +1932,9 @@ export class ContestBackend {
     app.post(
       '/api/admin2/contest/months/:monthKey/finalize',
       this.authFactory('news.publish'),
-      (req, res) => {
+      async (req, res) => {
         try {
+        await this.cloudSync?.syncIfNeeded();
         const month = this.state.months.find((m) => m.monthKey === req.params.monthKey);
         if (!month) {
           res.status(404).json({ ok: false, error: 'Competition month not found.' });
@@ -1452,10 +1950,10 @@ export class ContestBackend {
           );
           const defaultPrizes = createDefaultContestPrizes();
           const autoWinners: ContestWinnerRecord[] = [];
-          rankedPublic.slice(0, 4).forEach((pub, idx) => {
+          rankedPublic.slice(0, 3).forEach((pub, idx) => {
             const rawEntry = this.state.entries.find((e) => e.id === pub.id);
             if (!rawEntry) return;
-            const rank = (idx + 1) as 1 | 2 | 3 | 4;
+            const rank = (idx + 1) as 1 | 2 | 3;
             const tier = month.prizes.find((p) => p.rank === rank) || defaultPrizes[idx];
             autoWinners.push({
               rank,
@@ -1480,6 +1978,7 @@ export class ContestBackend {
           month.winners = autoWinners;
         }
 
+        this.freezeMonthUserLeaderboard(month, nowIso);
         month.status = 'finalized';
         month.finalizedAt = nowIso;
         month.finalizedBy = actor;
@@ -1491,10 +1990,14 @@ export class ContestBackend {
         this.appendAuditLog(
           actor,
           'month.finalize',
-          `Finalized ${month.displayLabelEn} winners (Publicly announced: ${month.winnersPublished ? 'Yes' : 'No'})`,
+          `Finalized ${month.displayLabelEn} winners & froze 30-day leaderboard (${month.frozenUserLeaderboard?.length ?? 0} participants; Publicly announced: ${month.winnersPublished ? 'Yes' : 'No'})`,
           month.monthKey
         );
         this.persistState();
+        await this.cloudSync?.pushDelta(
+          { contestMonth: month, contestAuditLog: this.state.auditLogs[0] },
+          { adminEmail: actor, awaitRemote: true }
+        );
         res.json({ ok: true, month });
         } catch (err) {
           console.error('[ContestBackend] finalize failed:', err);
@@ -1508,8 +2011,9 @@ export class ContestBackend {
     app.patch(
       '/api/admin2/contest/months/:monthKey/publish-winners',
       this.authFactory('news.publish'),
-      (req, res) => {
+      async (req, res) => {
         try {
+        await this.cloudSync?.syncIfNeeded();
         const month = this.state.months.find((m) => m.monthKey === req.params.monthKey);
         if (!month) {
           res.status(404).json({ ok: false, error: 'Competition month not found.' });
@@ -1527,6 +2031,10 @@ export class ContestBackend {
           month.monthKey
         );
         this.persistState();
+        await this.cloudSync?.pushDelta(
+          { contestMonth: month, contestAuditLog: this.state.auditLogs[0] },
+          { adminEmail: actor, awaitRemote: true }
+        );
         res.json({ ok: true, month });
         } catch (err) {
           console.error('[ContestBackend] publish winners failed:', err);
@@ -1540,17 +2048,46 @@ export class ContestBackend {
     app.post(
       '/api/admin2/contest/months/open-next',
       this.authFactory('settings.manage'),
-      (req, res) => {
+      async (req, res) => {
         try {
+        await this.cloudSync?.syncIfNeeded();
         const actor = this.getAdminActorEmail(req);
         const nowIso = new Date().toISOString();
-        const requestedKey = cleanSingleLine(req.body?.monthKey, 16);
-        const nextKey = /^\d{4}-\d{2}$/.test(requestedKey)
-          ? requestedKey
-          : getNextIstMonthKey(this.state.activeMonthKey);
+        const requestedKey = cleanSingleLine(req.body?.monthKey, 32);
+        const startDateIso = cleanSingleLine(req.body?.startDateIso, 40);
+        const rawDurationDays = Number(req.body?.durationDays);
+        const use30DayCustom =
+          Boolean(startDateIso) ||
+          (Number.isFinite(rawDurationDays) && rawDurationDays >= 1 && rawDurationDays <= 365);
+
+        let nextKey: string;
+        let bounds: {
+          startsAtIso: string;
+          endsAtIso: string;
+          displayLabelEn: string;
+          displayLabelKn: string;
+          periodId?: string;
+          durationDays?: number;
+        };
+
+        if (use30DayCustom) {
+          const p = compute30DayPeriodBounds(
+            startDateIso || undefined,
+            Number.isFinite(rawDurationDays) ? rawDurationDays : 30
+          );
+          nextKey = /^[a-zA-Z0-9_-]{4,32}$/.test(requestedKey) ? requestedKey : p.periodId;
+          bounds = p;
+        } else {
+          nextKey = /^\d{4}-\d{2}$/.test(requestedKey)
+            ? requestedKey
+            : getNextIstMonthKey(this.state.activeMonthKey);
+          const calBounds = getIstMonthBounds(nextKey);
+          bounds = { ...calBounds, periodId: nextKey, durationDays: 30 };
+        }
 
         for (const m of this.state.months) {
           if (m.status === 'open' && m.monthKey !== nextKey) {
+            this.freezeMonthUserLeaderboard(m, nowIso);
             m.status = 'closed';
             m.updatedAt = nowIso;
           }
@@ -1561,16 +2098,20 @@ export class ContestBackend {
           const prev = this.state.months.find(
             (m) => m.monthKey === this.state.activeMonthKey
           );
-          const bounds = getIstMonthBounds(nextKey);
           const prizes = normalizeContestPrizes(req.body?.prizes ?? prev?.prizes);
           nextMonth = {
             monthKey: nextKey,
+            periodId: bounds.periodId || nextKey,
+            durationDays: bounds.durationDays || 30,
             competitionName: CONTEST_OFFICIAL_NAME,
             displayLabelEn: bounds.displayLabelEn,
             displayLabelKn: bounds.displayLabelKn,
             startsAtIso: bounds.startsAtIso,
             endsAtIso: bounds.endsAtIso,
             status: 'open',
+            participationEnabled: true,
+            excludedUserIds: [],
+            excludedUserReasons: {},
             prizes,
             winners: [],
             winnersPublished: false,
@@ -1581,6 +2122,9 @@ export class ContestBackend {
           this.state.months.unshift(nextMonth);
         } else {
           nextMonth.status = 'open';
+          nextMonth.participationEnabled = true;
+          nextMonth.frozenUserLeaderboard = undefined;
+          nextMonth.frozenAt = undefined;
           nextMonth.updatedAt = nowIso;
         }
 
@@ -1589,10 +2133,18 @@ export class ContestBackend {
         this.appendAuditLog(
           actor,
           'month.open_next',
-          `Opened new competition month ${nextMonth.displayLabelEn} (previous articles preserved in archive, zero automatic carry-over)`,
+          `Opened new competition period ${nextMonth.displayLabelEn} (previous period leaderboard frozen & archived, zero automatic carry-over)`,
           nextMonth.monthKey
         );
         this.persistState();
+        await this.cloudSync?.pushDelta(
+          {
+            activeMonthKey: this.state.activeMonthKey,
+            contestMonth: nextMonth,
+            contestAuditLog: this.state.auditLogs[0],
+          },
+          { adminEmail: actor, awaitRemote: true }
+        );
         res.status(201).json({ ok: true, month: nextMonth });
         } catch (err) {
           console.error('[ContestBackend] open-next failed:', err);
@@ -1613,7 +2165,80 @@ export class ContestBackend {
             : this.state.activeMonthKey;
         const format =
           String(req.query.format || 'csv').toLowerCase() === 'json' ? 'json' : 'csv';
+        const scope =
+          String(req.query.scope || 'entries').toLowerCase() === 'leaderboard'
+            ? 'leaderboard'
+            : 'entries';
         const overview = this.buildAdminOverview(monthKey);
+
+        if (scope === 'leaderboard') {
+          if (format === 'json') {
+            res.setHeader(
+              'Content-Disposition',
+              `attachment; filename="coffeenadu-leaderboard-${overview.selectedMonth.monthKey}.json"`
+            );
+            res.json({
+              exportedAt: new Date().toISOString(),
+              scope: 'leaderboard',
+              period: {
+                monthKey: overview.selectedMonth.monthKey,
+                periodId: overview.selectedMonth.periodId || overview.selectedMonth.monthKey,
+                displayLabelEn: overview.selectedMonth.displayLabelEn,
+                startsAtIso: overview.selectedMonth.startsAtIso,
+                endsAtIso: overview.selectedMonth.endsAtIso,
+                status: overview.selectedMonth.status,
+              },
+              summary: overview.summary,
+              userLeaderboard: overview.userLeaderboard || [],
+              participants: overview.participants || [],
+            });
+            return;
+          }
+
+          const lbHeader = [
+            'Rank',
+            'Competition Period',
+            'Participant Name',
+            'Mobile (Admin Only)',
+            'Leaderboard Eligibility',
+            'Total Verified Views',
+            'Total Genuine Views',
+            'Eligible News Published',
+            'Total News Published',
+            'Disqualified News',
+            'Last View Achieved At',
+            'Exclusion Reason',
+          ];
+          const lbRows = [lbHeader.map(csvEscape).join(',')];
+          for (const p of overview.participants || []) {
+            if (p.totalArticleCount === 0 && p.rank === null) continue;
+            lbRows.push(
+              [
+                p.rank !== null ? String(p.rank) : '-',
+                overview.selectedMonth.displayLabelEn,
+                p.displayName,
+                p.mobileNumber,
+                p.leaderboardEligible ? 'eligible' : 'excluded',
+                p.totalVerifiedViews,
+                p.totalGenuineViews,
+                p.eligibleArticleCount,
+                p.totalArticleCount,
+                p.disqualifiedArticleCount,
+                p.lastViewAchievedAt || '',
+                p.exclusionReason || '',
+              ]
+                .map(csvEscape)
+                .join(',')
+            );
+          }
+          res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+          res.setHeader(
+            'Content-Disposition',
+            `attachment; filename="coffeenadu-leaderboard-${overview.selectedMonth.monthKey}.csv"`
+          );
+          res.send(`\uFEFF${lbRows.join('\n')}`);
+          return;
+        }
 
         if (format === 'json') {
           res.setHeader(
@@ -1624,6 +2249,8 @@ export class ContestBackend {
             exportedAt: new Date().toISOString(),
             month: overview.selectedMonth,
             summary: overview.summary,
+            userLeaderboard: overview.userLeaderboard || [],
+            participants: overview.participants || [],
             entries: overview.entries,
             alerts: overview.alerts,
           });
@@ -1676,6 +2303,96 @@ export class ContestBackend {
           `attachment; filename="coffeenadu-contest-${overview.selectedMonth.monthKey}.csv"`
         );
         res.send(`\uFEFF${rows.join('\n')}`);
+      }
+    );
+
+    app.put(
+      '/api/admin2/contest/content',
+      this.authFactory('settings.manage'),
+      async (req, res) => {
+        try {
+          await this.cloudSync?.syncIfNeeded();
+          const actor = this.getAdminActorEmail(req);
+          const updated = sanitizeContestEditableContent(
+            req.body as Partial<ContestEditableContent>,
+            this.state.contentConfig,
+            actor,
+            true
+          );
+          this.state.contentConfig = updated;
+          this.appendAuditLog(
+            actor,
+            'content.update',
+            `Published Contest Content & Settings v${updated.version} (Heading: "${updated.mainHeadingKn.slice(0, 48)}")`,
+            this.state.activeMonthKey
+          );
+          this.appendDiagnostic(
+            'content_update',
+            'info',
+            `Published contest content v${updated.version} by ${actor}`,
+            'verified'
+          );
+          this.persistState();
+          await this.cloudSync?.pushDelta(
+            { contentConfig: updated, contestAuditLog: this.state.auditLogs[0] },
+            { adminEmail: actor, awaitRemote: true }
+          );
+          res.json({ ok: true, contentConfig: updated });
+        } catch (err) {
+          console.error('[ContestBackend] content update failed:', err);
+          if (!res.headersSent) {
+            res.status(500).json({ ok: false, error: 'Failed to save contest content settings.' });
+          }
+        }
+      }
+    );
+
+    app.post(
+      '/api/admin2/contest/content/restore',
+      this.authFactory('settings.manage'),
+      async (req, res) => {
+        try {
+          await this.cloudSync?.syncIfNeeded();
+          const actor = this.getAdminActorEmail(req);
+          const rawVersion = Number(req.body?.version);
+          const targetVersion = Number.isFinite(rawVersion) ? rawVersion : undefined;
+          const restored = restoreContestContentFromHistory(
+            this.state.contentConfig,
+            targetVersion,
+            actor
+          );
+          if (!restored) {
+            res.status(400).json({
+              ok: false,
+              error: 'No previous content version is available to restore.',
+            });
+            return;
+          }
+          this.state.contentConfig = restored;
+          this.appendAuditLog(
+            actor,
+            'content.restore',
+            `Restored previous Contest Content & Settings (now v${restored.version})`,
+            this.state.activeMonthKey
+          );
+          this.appendDiagnostic(
+            'content_update',
+            'info',
+            `Restored previous contest content snapshot (now v${restored.version}) by ${actor}`,
+            'verified'
+          );
+          this.persistState();
+          await this.cloudSync?.pushDelta(
+            { contentConfig: restored, contestAuditLog: this.state.auditLogs[0] },
+            { adminEmail: actor, awaitRemote: true }
+          );
+          res.json({ ok: true, contentConfig: restored });
+        } catch (err) {
+          console.error('[ContestBackend] content restore failed:', err);
+          if (!res.headersSent) {
+            res.status(500).json({ ok: false, error: 'Failed to restore previous contest content.' });
+          }
+        }
       }
     );
   }

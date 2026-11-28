@@ -21,6 +21,17 @@
  */
 
 var CONFIG = {
+  ROOT_DATA_FOLDER_NAME: 'COFFEENADU_DATA',
+  DATA_SUBFOLDERS: {
+    NEWS_ARTICLES: 'NEWS_ARTICLES',
+    NEWS_IMAGES: 'NEWS_IMAGES',
+    CONTEST_SUBMISSIONS: 'CONTEST_SUBMISSIONS',
+    CONTEST_IMAGES: 'CONTEST_IMAGES',
+    USER_DOCUMENTS: 'USER_DOCUMENTS',
+    REPORTS: 'REPORTS',
+    MONTHLY_BACKUPS: 'MONTHLY_BACKUPS',
+    ADMIN_EXPORTS: 'ADMIN_EXPORTS'
+  },
   SPREADSHEET_NAME: 'CoffeeNadu_News_Database',
   IMAGES_FOLDER_NAME: 'CoffeeNadu_News_Images',
   BACKUPS_FOLDER_NAME: 'CoffeeNadu_News_Backups',
@@ -170,7 +181,14 @@ var CONTEST_MONTHS_HEADERS = [
   'finalizedAt',
   'finalizedBy',
   'createdAt',
-  'updatedAt'
+  'updatedAt',
+  'periodId',
+  'durationDays',
+  'participationEnabled',
+  'excludedUserIdsJson',
+  'excludedUserReasonsJson',
+  'frozenUserLeaderboardJson',
+  'frozenAt'
 ];
 
 var CONTEST_ENTRIES_HEADERS = [
@@ -191,11 +209,16 @@ var CONTEST_ENTRIES_HEADERS = [
   'disqualifiedAt',
   'totalPageViews',
   'eligibleViews',
+  'genuineEligibleViews',
+  'manualScoreAdjustment',
+  'competitionDisplayScore',
   'suspiciousBlockedViews',
   'suspiciousFlagged',
   'lastViewedAt',
   'createdAt',
-  'updatedAt'
+  'updatedAt',
+  'lastEligibleViewAt',
+  'clientSubmissionId'
 ];
 
 var CONTEST_ALERTS_HEADERS = [
@@ -268,7 +291,8 @@ function setupCoffeeNaduStorage() {
   var ss = getOrCreateSpreadsheet_();
   ensureAllSheets_(ss);
 
-  // 3. Create or retrieve Drive folders
+  // 3. Create or retrieve Drive folders (including structured COFFEENADU_DATA hierarchy)
+  var dataHierarchy = ensureCoffeenaduDataFolders_();
   var imagesFolder = getOrCreateFolder_(CONFIG.IMAGES_FOLDER_NAME, 'IMAGES_FOLDER_ID');
   var backupsFolder = getOrCreateFolder_(CONFIG.BACKUPS_FOLDER_NAME, 'BACKUPS_FOLDER_ID');
   var monthlyFolder = getOrCreateSubfolder_(backupsFolder, CONFIG.MONTHLY_ARCHIVE_FOLDER_NAME, 'MONTHLY_ARCHIVE_FOLDER_ID');
@@ -929,7 +953,8 @@ function handleUploadImage_(payload, adminEmail) {
     }
   }
 
-  var imagesFolder = getOrCreateFolder_(CONFIG.IMAGES_FOLDER_NAME, 'IMAGES_FOLDER_ID');
+  var isPublicContributor = String(adminEmail || '') === 'public-contributor' || String(payload.category || '') === 'contest';
+  var imagesFolder = getDatedImageUploadFolder_(isPublicContributor ? 'CONTEST_IMAGES' : 'NEWS_IMAGES');
   var blob = Utilities.newBlob(bytes, mimeType, fileName);
   var file = imagesFolder.createFile(blob);
   file.setDescription('CoffeeNadu News published photo | sha256:' + shaHex + ' | by:' + adminEmail);
@@ -2079,8 +2104,37 @@ function ensureSheetWithHeaders_(ss, name, headers) {
   if (sheet.getLastRow() === 0) {
     sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
     sheet.setFrozenRows(1);
+  } else if (sheet.getLastColumn() < headers.length) {
+    sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
   }
   return sheet;
+}
+
+function ensureCoffeenaduDataFolders_() {
+  var root = getOrCreateFolder_(CONFIG.ROOT_DATA_FOLDER_NAME, 'COFFEENADU_DATA_ROOT_ID');
+  var subfolders = {};
+  var keys = Object.keys(CONFIG.DATA_SUBFOLDERS);
+  for (var i = 0; i < keys.length; i++) {
+    var k = keys[i];
+    var folderName = CONFIG.DATA_SUBFOLDERS[k];
+    subfolders[k] = getOrCreateSubfolder_(root, folderName, 'CN_DATA_DIR_' + k);
+  }
+  return {
+    root: root,
+    subfolders: subfolders
+  };
+}
+
+function getDatedImageUploadFolder_(subKey) {
+  try {
+    var root = getOrCreateFolder_(CONFIG.ROOT_DATA_FOLDER_NAME, 'COFFEENADU_DATA_ROOT_ID');
+    var folderName = CONFIG.DATA_SUBFOLDERS[subKey] || 'NEWS_IMAGES';
+    var baseFolder = getOrCreateSubfolder_(root, folderName, 'CN_DATA_DIR_' + subKey);
+    var ym = Utilities.formatDate(new Date(), Session.getScriptTimeZone() || 'Asia/Kolkata', 'yyyy-MM');
+    return getOrCreateSubfolder_(baseFolder, ym, 'CN_IMG_YM_' + subKey + '_' + ym);
+  } catch (err) {
+    return getOrCreateFolder_(CONFIG.IMAGES_FOLDER_NAME, 'IMAGES_FOLDER_ID');
+  }
 }
 
 function getOrCreateFolder_(folderName, propKey) {
@@ -2484,14 +2538,29 @@ function handleGetCommunityContestSnapshot_() {
   });
 
   var months = readSheetObjects_(monthsSheet, CONTEST_MONTHS_HEADERS).map(function (r) {
+    var excludedReasonsObj = {};
+    if (r.excludedUserReasonsJson) {
+      try { excludedReasonsObj = JSON.parse(String(r.excludedUserReasonsJson)) || {}; } catch (ignore) {}
+    }
+    var frozenLb = r.frozenUserLeaderboardJson ? parseJsonArraySafe_(r.frozenUserLeaderboardJson) : undefined;
+    var partEnabled = (r.participationEnabled === '' || r.participationEnabled === undefined || r.participationEnabled === null)
+      ? true
+      : parseBool_(r.participationEnabled);
     return {
       monthKey: String(r.monthKey || ''),
+      periodId: r.periodId ? String(r.periodId) : String(r.monthKey || ''),
+      durationDays: Number(r.durationDays) || 30,
       competitionName: String(r.competitionName || ''),
       displayLabelEn: String(r.displayLabelEn || ''),
       displayLabelKn: String(r.displayLabelKn || ''),
       startsAtIso: String(r.startsAtIso || ''),
       endsAtIso: String(r.endsAtIso || ''),
       status: String(r.status || 'open'),
+      participationEnabled: partEnabled,
+      excludedUserIds: parseJsonArraySafe_(r.excludedUserIdsJson),
+      excludedUserReasons: excludedReasonsObj,
+      frozenUserLeaderboard: (frozenLb && frozenLb.length > 0) ? frozenLb : undefined,
+      frozenAt: r.frozenAt ? String(r.frozenAt) : undefined,
       prizes: parseJsonArraySafe_(r.prizesJson),
       winners: parseJsonArraySafe_(r.winnersJson),
       winnersPublished: parseBool_(r.winnersPublished),
@@ -2504,6 +2573,14 @@ function handleGetCommunityContestSnapshot_() {
   });
 
   var entries = readSheetObjects_(entriesSheet, CONTEST_ENTRIES_HEADERS).map(function (r) {
+    var rawEligible = Number(r.eligibleViews) || 0;
+    var genuine = (r.genuineEligibleViews !== '' && r.genuineEligibleViews !== undefined && r.genuineEligibleViews !== null)
+      ? Math.max(0, Number(r.genuineEligibleViews) || 0)
+      : rawEligible;
+    var adj = (r.manualScoreAdjustment !== '' && r.manualScoreAdjustment !== undefined && r.manualScoreAdjustment !== null)
+      ? (Number(r.manualScoreAdjustment) || 0)
+      : 0;
+    var displayScore = Math.max(0, genuine + adj);
     return {
       id: String(r.id || ''),
       postId: String(r.postId || ''),
@@ -2521,10 +2598,15 @@ function handleGetCommunityContestSnapshot_() {
       disqualifiedBy: r.disqualifiedBy ? String(r.disqualifiedBy) : undefined,
       disqualifiedAt: r.disqualifiedAt ? String(r.disqualifiedAt) : undefined,
       totalPageViews: Number(r.totalPageViews) || 0,
-      eligibleViews: Number(r.eligibleViews) || 0,
+      eligibleViews: displayScore,
+      genuineEligibleViews: genuine,
+      manualScoreAdjustment: adj,
+      competitionDisplayScore: displayScore,
       suspiciousBlockedViews: Number(r.suspiciousBlockedViews) || 0,
       suspiciousFlagged: parseBool_(r.suspiciousFlagged),
       lastViewedAt: r.lastViewedAt ? String(r.lastViewedAt) : undefined,
+      lastEligibleViewAt: r.lastEligibleViewAt ? String(r.lastEligibleViewAt) : undefined,
+      clientSubmissionId: r.clientSubmissionId ? String(r.clientSubmissionId) : undefined,
       createdAt: String(r.createdAt || ''),
       updatedAt: String(r.updatedAt || '')
     };
@@ -2569,7 +2651,14 @@ function handleGetCommunityContestSnapshot_() {
     };
   });
 
-  var activeMonthKeySetting = handleGetSettings_().settings.contestActiveMonthKey || '';
+  var allSettings = handleGetSettings_().settings;
+  var activeMonthKeySetting = allSettings.contestActiveMonthKey || '';
+  var contentConfigObj = null;
+  if (allSettings.contestContentConfigJson) {
+    try {
+      contentConfigObj = JSON.parse(allSettings.contestContentConfigJson);
+    } catch (ignore) {}
+  }
 
   return {
     ok: true,
@@ -2585,7 +2674,8 @@ function handleGetCommunityContestSnapshot_() {
       entries: entries,
       alerts: alerts,
       auditLogs: auditLogs,
-      viewBuckets: viewBuckets
+      viewBuckets: viewBuckets,
+      contentConfig: contentConfigObj
     }
   };
 }
@@ -2718,36 +2808,65 @@ function handleUpsertCommunityContestDelta_(payload) {
       finalizedAt: payload.contestMonth.finalizedAt || '',
       finalizedBy: payload.contestMonth.finalizedBy || '',
       createdAt: payload.contestMonth.createdAt || '',
-      updatedAt: payload.contestMonth.updatedAt || ''
+      updatedAt: payload.contestMonth.updatedAt || '',
+      periodId: payload.contestMonth.periodId || payload.contestMonth.monthKey || '',
+      durationDays: Number(payload.contestMonth.durationDays) || 30,
+      participationEnabled: payload.contestMonth.participationEnabled === false ? 'FALSE' : 'TRUE',
+      excludedUserIdsJson: JSON.stringify(payload.contestMonth.excludedUserIds || []),
+      excludedUserReasonsJson: JSON.stringify(payload.contestMonth.excludedUserReasons || {}),
+      frozenUserLeaderboardJson: payload.contestMonth.frozenUserLeaderboard ? JSON.stringify(payload.contestMonth.frozenUserLeaderboard) : '',
+      frozenAt: payload.contestMonth.frozenAt || ''
+    });
+  }
+
+  if (payload.contestContentConfig) {
+    upsertSetting_(ss, 'contestContentConfigJson', JSON.stringify(payload.contestContentConfig), 'contest-admin');
+  }
+
+  function upsertSingleContestEntryRow_(ce) {
+    if (!ce || !ce.id) return;
+    var eSheet = ensureSheetWithHeaders_(ss, 'ContestEntries', CONTEST_ENTRIES_HEADERS);
+    var genuine = ce.genuineEligibleViews !== undefined ? Number(ce.genuineEligibleViews) || 0 : (Number(ce.eligibleViews) || 0);
+    var adj = ce.manualScoreAdjustment !== undefined ? Number(ce.manualScoreAdjustment) || 0 : 0;
+    var disp = ce.competitionDisplayScore !== undefined ? Number(ce.competitionDisplayScore) || 0 : Math.max(0, genuine + adj);
+    upsertRowByKey_(eSheet, CONTEST_ENTRIES_HEADERS, 'id', ce.id, {
+      id: ce.id,
+      postId: ce.postId || '',
+      slug: ce.slug || '',
+      competitionMonth: ce.competitionMonth || '',
+      contributorUserId: ce.contributorUserId || '',
+      contributorName: ce.contributorName || '',
+      title: ce.title || '',
+      summary: ce.summary || '',
+      location: ce.location || '',
+      thumbnailUrl: ce.thumbnailUrl || '',
+      publishedAt: ce.publishedAt || '',
+      eligibility: ce.eligibility || 'eligible',
+      disqualificationReason: ce.disqualificationReason || '',
+      disqualifiedBy: ce.disqualifiedBy || '',
+      disqualifiedAt: ce.disqualifiedAt || '',
+      totalPageViews: Number(ce.totalPageViews) || 0,
+      eligibleViews: disp,
+      genuineEligibleViews: genuine,
+      manualScoreAdjustment: adj,
+      competitionDisplayScore: disp,
+      suspiciousBlockedViews: Number(ce.suspiciousBlockedViews) || 0,
+      suspiciousFlagged: ce.suspiciousFlagged ? 'TRUE' : 'FALSE',
+      lastViewedAt: ce.lastViewedAt || '',
+      createdAt: ce.createdAt || '',
+      updatedAt: ce.updatedAt || '',
+      lastEligibleViewAt: ce.lastEligibleViewAt || '',
+      clientSubmissionId: ce.clientSubmissionId || ''
     });
   }
 
   if (payload.contestEntry && payload.contestEntry.id) {
-    var eSheet = ensureSheetWithHeaders_(ss, 'ContestEntries', CONTEST_ENTRIES_HEADERS);
-    upsertRowByKey_(eSheet, CONTEST_ENTRIES_HEADERS, 'id', payload.contestEntry.id, {
-      id: payload.contestEntry.id,
-      postId: payload.contestEntry.postId || '',
-      slug: payload.contestEntry.slug || '',
-      competitionMonth: payload.contestEntry.competitionMonth || '',
-      contributorUserId: payload.contestEntry.contributorUserId || '',
-      contributorName: payload.contestEntry.contributorName || '',
-      title: payload.contestEntry.title || '',
-      summary: payload.contestEntry.summary || '',
-      location: payload.contestEntry.location || '',
-      thumbnailUrl: payload.contestEntry.thumbnailUrl || '',
-      publishedAt: payload.contestEntry.publishedAt || '',
-      eligibility: payload.contestEntry.eligibility || 'eligible',
-      disqualificationReason: payload.contestEntry.disqualificationReason || '',
-      disqualifiedBy: payload.contestEntry.disqualifiedBy || '',
-      disqualifiedAt: payload.contestEntry.disqualifiedAt || '',
-      totalPageViews: Number(payload.contestEntry.totalPageViews) || 0,
-      eligibleViews: Number(payload.contestEntry.eligibleViews) || 0,
-      suspiciousBlockedViews: Number(payload.contestEntry.suspiciousBlockedViews) || 0,
-      suspiciousFlagged: payload.contestEntry.suspiciousFlagged ? 'TRUE' : 'FALSE',
-      lastViewedAt: payload.contestEntry.lastViewedAt || '',
-      createdAt: payload.contestEntry.createdAt || '',
-      updatedAt: payload.contestEntry.updatedAt || ''
-    });
+    upsertSingleContestEntryRow_(payload.contestEntry);
+  }
+  if (Array.isArray(payload.extraContestEntries)) {
+    for (var x = 0; x < payload.extraContestEntries.length; x++) {
+      upsertSingleContestEntryRow_(payload.extraContestEntries[x]);
+    }
   }
 
   if (payload.deleteContestEntryByPostId) {

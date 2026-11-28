@@ -63,7 +63,7 @@ export const ADMIN2_NAV_ITEMS: AdminNavItem[] = [
   { id: 'ai-studio', label: 'AI News Studio', description: 'Editorial drafting & summarization assistant', group: 'Editorial', icon: Sparkles, requiredPermission: 'ai.use' },
 
   { id: 'platform-hub', label: 'Malnad Services & Listings', description: 'Businesses, Jobs, Marketplace, Agri, Health, Schemes, Tourism, Weather & more', group: 'Platform Ecosystem', icon: Compass, requiredPermission: 'dashboard.view' },
-  { id: 'monthly-contest', label: 'Monthly News Contest (₹500)', description: 'Eligible news rankings, private contributor mobiles, anti-abuse alerts, winners & payouts', group: 'Platform Ecosystem', icon: Trophy, requiredPermission: 'dashboard.view' },
+  { id: 'monthly-contest', label: 'Monthly News Contest (₹1,500)', description: 'Eligible news rankings, private contributor mobiles, anti-abuse alerts, winners & payouts', group: 'Platform Ecosystem', icon: Trophy, requiredPermission: 'dashboard.view' },
   { id: 'community-users', label: 'Community Users', description: 'Private registered mobile numbers, user accounts, live posts & reports', group: 'Platform Ecosystem', icon: Users, requiredPermission: 'dashboard.view' },
   { id: 'platform-moderation', label: 'Submissions & Reports', description: 'Approve or reject user submissions & resolve reports', group: 'Platform Ecosystem', icon: CheckSquare, requiredPermission: 'news.edit' },
   { id: 'platform-homepage', label: 'Homepage & Localities', description: 'Reorder homepage sections, toggle modules & manage villages', group: 'Platform Ecosystem', icon: LayoutTemplate, requiredPermission: 'settings.manage' },

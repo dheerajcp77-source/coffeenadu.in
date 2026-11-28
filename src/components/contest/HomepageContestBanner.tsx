@@ -1,8 +1,11 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { ArrowRight, Award, BookOpen, PenSquare, Trophy } from 'lucide-react';
 import malnadBannerImg from '../../assets/images/malnad_contest_banner_1795833076071.jpg';
+import { fetchContestOverview } from '../../services/contestClient';
+import type { ContestEditableContent, ContestPrizeTier } from '../../types/contest';
 import {
   CONTEST_KANNADA_HEADING,
+  createDefaultContestEditableContent,
   createDefaultContestPrizes,
 } from '../../utils/contestHelpers';
 
@@ -14,10 +17,41 @@ interface HomepageContestBannerProps {
 }
 
 const DEFAULT_PRIZES = createDefaultContestPrizes();
+const DEFAULT_CONTENT = createDefaultContestEditableContent();
 
 export const HomepageContestBanner: React.FC<HomepageContestBannerProps> = ({
   onNavigateContest,
 }) => {
+  const [content, setContent] = useState<ContestEditableContent>(DEFAULT_CONTENT);
+  const [prizes, setPrizes] = useState<ContestPrizeTier[]>(DEFAULT_PRIZES);
+  const [totalBudget, setTotalBudget] = useState<number>(1500);
+
+  useEffect(() => {
+    let mounted = true;
+    const syncBanner = async () => {
+      try {
+        const data = await fetchContestOverview();
+        if (!mounted) return;
+        if (data.contentConfig) setContent(data.contentConfig);
+        if (data.activeMonth?.prizes?.length) setPrizes(data.activeMonth.prizes);
+        if (typeof data.activeMonth?.totalBudgetInr === 'number') {
+          setTotalBudget(data.activeMonth.totalBudgetInr);
+        }
+      } catch {
+        // Keep default banner content on offline/network error
+      }
+    };
+    void syncBanner();
+    const handleMutated = () => {
+      void syncBanner();
+    };
+    window.addEventListener('coffeenadu:data-mutated', handleMutated);
+    return () => {
+      mounted = false;
+      window.removeEventListener('coffeenadu:data-mutated', handleMutated);
+    };
+  }, []);
+
   return (
     <section
       aria-label="Coffeenadu Most Viewed News Challenge"
@@ -40,22 +74,22 @@ export const HomepageContestBanner: React.FC<HomepageContestBannerProps> = ({
             <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-amber-300">
               <span className="inline-flex items-center gap-1.5">
                 <Trophy className="h-3.5 w-3.5" aria-hidden="true" />
-                COFFEENADU MOST VIEWED NEWS CHALLENGE
+                {content.mainHeadingEn || 'COFFEENADU MOST VIEWED NEWS CHALLENGE'}
               </span>
               <span className="text-emerald-300/60" aria-hidden="true">
                 |
               </span>
-              <span className="text-white/90">ಈ ತಿಂಗಳ ₹500 ನಗದು ಬಹುಮಾನ!</span>
+              <span className="text-white/90">
+                {content.homepagePromoBadgeKn || `ಈ ತಿಂಗಳ ₹${totalBudget} ನಗದು ಬಹುಮಾನ!`}
+              </span>
             </div>
 
             <h2 className="font-serif text-xl font-bold leading-snug tracking-tight text-white sm:text-2xl lg:text-[28px]">
-              {CONTEST_KANNADA_HEADING}
+              {content.homepagePromoHeadingKn || CONTEST_KANNADA_HEADING}
             </h2>
 
             <p className="max-w-2xl text-sm leading-relaxed text-emerald-50/90 sm:text-[15px]">
-              ನಿಮ್ಮೂರಿನ ಸುದ್ದಿ ಪ್ರಕಟಿಸಿ, ಎಲ್ಲರೊಂದಿಗೆ ಹಂಚಿಕೊಳ್ಳಿ ಮತ್ತು ತಿಂಗಳ ವಿಜೇತರಾಗಿ — ಕೊಪ್ಪ,
-              ಶೃಂಗೇರಿ, ಜಯಪುರ, ಬಾಳೆಹೊನ್ನೂರು ಮತ್ತು ಸುತ್ತಮುತ್ತಲಿನ ಮಲೆನಾಡು ಗ್ರಾಮಗಳಿಗಾಗಿ ಉಚಿತ ಮಾಸಿಕ
-              ಸ್ಪರ್ಧೆ.
+              {content.homepagePromoSubtitleKn}
             </p>
 
             <div className="flex flex-wrap items-center gap-2.5 pt-1.5">
@@ -65,7 +99,7 @@ export const HomepageContestBanner: React.FC<HomepageContestBannerProps> = ({
                 className="inline-flex min-h-[44px] items-center justify-center gap-2 rounded-lg bg-white px-4 py-2.5 text-sm font-bold text-[#0F3928] transition hover:bg-amber-50 focus:outline-none focus:ring-2 focus:ring-amber-300 cursor-pointer"
               >
                 <PenSquare className="h-4 w-4 shrink-0" aria-hidden="true" />
-                <span>ಸ್ಪರ್ಧೆಯಲ್ಲಿ ಭಾಗವಹಿಸಿ</span>
+                <span>{content.homepagePromoButtonKn || 'ಸ್ಪರ್ಧೆಯಲ್ಲಿ ಭಾಗವಹಿಸಿ'}</span>
                 <ArrowRight className="h-4 w-4 shrink-0" aria-hidden="true" />
               </button>
 
@@ -75,7 +109,7 @@ export const HomepageContestBanner: React.FC<HomepageContestBannerProps> = ({
                 className="inline-flex min-h-[44px] items-center justify-center gap-1.5 rounded-lg border border-white/30 bg-white/10 px-3.5 py-2.5 text-xs font-semibold text-white backdrop-blur-sm transition hover:bg-white/20 sm:text-sm cursor-pointer"
               >
                 <Trophy className="h-3.5 w-3.5 shrink-0 text-amber-300" aria-hidden="true" />
-                <span>View Leaderboard</span>
+                <span>{content.buttonLabels?.leaderboardBtnEn || 'View Leaderboard'}</span>
               </button>
 
               <button
@@ -84,7 +118,7 @@ export const HomepageContestBanner: React.FC<HomepageContestBannerProps> = ({
                 className="inline-flex min-h-[44px] items-center justify-center gap-1.5 rounded-lg border border-white/25 px-3.5 py-2.5 text-xs font-semibold text-emerald-50 transition hover:bg-white/10 sm:text-sm cursor-pointer"
               >
                 <BookOpen className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-                <span>Competition Rules</span>
+                <span>{content.buttonLabels?.rulesBtnEn || 'Competition Rules'}</span>
               </button>
 
               <button
@@ -93,7 +127,7 @@ export const HomepageContestBanner: React.FC<HomepageContestBannerProps> = ({
                 className="inline-flex min-h-[44px] items-center justify-center gap-1.5 rounded-lg border border-white/25 px-3.5 py-2.5 text-xs font-semibold text-emerald-50 transition hover:bg-white/10 sm:text-sm cursor-pointer"
               >
                 <Award className="h-3.5 w-3.5 shrink-0 text-amber-300" aria-hidden="true" />
-                <span>Previous Winners</span>
+                <span>{content.buttonLabels?.previousWinnersBtnEn || 'Previous Winners'}</span>
               </button>
             </div>
           </div>
@@ -104,40 +138,43 @@ export const HomepageContestBanner: React.FC<HomepageContestBannerProps> = ({
                 <p className="text-[11px] font-bold uppercase tracking-[0.1em] text-emerald-800">
                   Monthly Cash Rewards
                 </p>
-                <p className="text-xs text-slate-600">ಪ್ರತಿ ತಿಂಗಳು 5 ವಿಜೇತರಿಗೆ ನಗದು ಬಹುಮಾನ</p>
+                <p className="text-xs text-slate-600">ಪ್ರತಿ ತಿಂಗಳು 4 ವಿಜೇತರಿಗೆ ನಗದು ಬಹುಮಾನ</p>
               </div>
               <span className="font-serif text-2xl font-extrabold tabular-nums text-emerald-900">
-                ₹500
+                ₹{totalBudget.toLocaleString('en-IN')}
               </span>
             </div>
 
-            <div className="mt-3 grid grid-cols-5 gap-1.5 text-center">
-              {DEFAULT_PRIZES.map((tier) => (
-                <div
-                  key={tier.rank}
-                  className={`rounded-md border px-1.5 py-2 ${
-                    tier.rank === 1
-                      ? 'border-amber-400/70 bg-amber-50'
-                      : tier.rank === 5
-                      ? 'border-emerald-700/25 bg-emerald-50/70'
-                      : 'border-slate-200 bg-slate-50/70'
-                  }`}
-                >
-                  <div className="text-[10px] font-bold uppercase tracking-wide text-slate-500">
-                    {tier.rank === 5 ? '5th ★' : `#${tier.rank}`}
+            <div className="mt-3 grid grid-cols-4 gap-2 text-center">
+              {prizes.slice(0, 4).map((tier) => {
+                const isQuality = tier.type === 'quality';
+                return (
+                  <div
+                    key={tier.rank}
+                    className={`rounded-md border px-1.5 py-2 ${
+                      tier.rank === 1
+                        ? 'border-amber-400/70 bg-amber-50'
+                        : isQuality
+                        ? 'border-emerald-700/25 bg-emerald-50/70'
+                        : 'border-slate-200 bg-slate-50/70'
+                    }`}
+                  >
+                    <div className="text-[10px] font-bold uppercase tracking-wide text-slate-500">
+                      {isQuality ? '4th ★' : `#${tier.rank}`}
+                    </div>
+                    <div className="mt-0.5 text-sm font-extrabold tabular-nums text-slate-900 sm:text-base">
+                      ₹{tier.amountInr}
+                    </div>
+                    <div className="mt-0.5 truncate text-[10px] text-slate-600">
+                      {isQuality ? 'Quality' : 'Views'}
+                    </div>
                   </div>
-                  <div className="mt-0.5 text-sm font-extrabold tabular-nums text-slate-900 sm:text-base">
-                    ₹{tier.amountInr}
-                  </div>
-                  <div className="mt-0.5 truncate text-[10px] text-slate-600">
-                    {tier.rank === 5 ? 'Quality' : 'Views'}
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
 
             <p className="mt-2.5 text-[11px] leading-snug text-slate-600">
-              1–4ನೇ ಬಹುಮಾನ: ಅತಿ ಹೆಚ್ಚು ಓದಲ್ಪಟ್ಟ ಮೂಲ ಸುದ್ದಿ · 5ನೇ ಬಹುಮಾನ (₹50): ಆಡ್ಮಿನ್ ಆಯ್ಕೆ
+              1–3ನೇ ಬಹುಮಾನ: ಅತಿ ಹೆಚ್ಚು ಓದಲ್ಪಟ್ಟ ಮೂಲ ಸುದ್ದಿ · 4ನೇ ಬಹುಮಾನ (₹{prizes.find((p) => p.type === 'quality')?.amountInr ?? 100}): ಆಡ್ಮಿನ್ ಆಯ್ಕೆ
               ಮಾಡಿದ ಅತ್ಯುತ್ತಮ ಗುಣಮಟ್ಟದ ಸುದ್ದಿ · ಉಚಿತ ಭಾಗವಹಿಸುವಿಕೆ.
             </p>
           </div>

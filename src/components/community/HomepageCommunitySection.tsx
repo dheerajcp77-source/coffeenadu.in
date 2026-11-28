@@ -103,7 +103,7 @@ export const HomepageCommunitySection: React.FC<HomepageCommunitySectionProps> =
                       >
                         <img
                           src={post.photos[0]}
-                          alt={post.title}
+                          alt={post.title.trim() || `${post.authorName} — ${cat?.labelKn || post.category}`}
                           loading="lazy"
                           className="w-full h-auto max-h-64 object-contain mx-auto block"
                         />
@@ -121,13 +121,15 @@ export const HomepageCommunitySection: React.FC<HomepageCommunitySectionProps> =
                         </span>
                       </div>
 
-                      <button
-                        type="button"
-                        onClick={() => onOpenPost(post.slug)}
-                        className="block text-left font-kannada text-sm sm:text-base font-extrabold text-[#10243D] dark:text-white hover:text-[#176B4A] dark:hover:text-[#D9A441] leading-snug cursor-pointer"
-                      >
-                        {post.title}
-                      </button>
+                      {post.title.trim() && (
+                        <button
+                          type="button"
+                          onClick={() => onOpenPost(post.slug)}
+                          className="block text-left font-kannada text-sm sm:text-base font-extrabold text-[#10243D] dark:text-white hover:text-[#176B4A] dark:hover:text-[#D9A441] leading-snug cursor-pointer"
+                        >
+                          {post.title}
+                        </button>
+                      )}
 
                       {post.price && (
                         <div className="font-kannada text-xs font-extrabold text-[#9A6700] dark:text-[#D9A441]">
@@ -135,9 +137,11 @@ export const HomepageCommunitySection: React.FC<HomepageCommunitySectionProps> =
                         </div>
                       )}
 
-                      <p className="font-kannada text-xs text-[#475569] dark:text-slate-300 line-clamp-2">
-                        {post.description}
-                      </p>
+                      {post.description.trim() && (
+                        <p className="font-kannada text-xs text-[#475569] dark:text-slate-300 line-clamp-2">
+                          {post.description}
+                        </p>
+                      )}
 
                       <div className="flex flex-wrap items-center gap-2 text-[11px] font-kannada text-[#5A677A] dark:text-slate-400 pt-1">
                         <span className="inline-flex items-center gap-1 font-semibold text-[#10243D] dark:text-slate-200">
