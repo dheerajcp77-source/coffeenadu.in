@@ -400,30 +400,28 @@ export const CoffeenaduCommunityPage: React.FC<CoffeenaduCommunityPageProps> = (
           </div>
         ) : (
           <article className="bg-white dark:bg-[#111F33] rounded-2xl border border-slate-200 dark:border-slate-800 overflow-hidden shadow-xs">
-            {/* Photos */}
-            {detailPost.photos.length > 0 && (() => {
-              const activeSrc = detailPost.photos[activePhotoIdx] || detailPost.photos[0];
+            {/* Photos (only displayed when at least one valid photo exists; zero blank boxes) */}
+            {(() => {
+              const validPhotos = detailPost.photos.filter(
+                (src) => Boolean(src) && !brokenImages[src]
+              );
+              if (validPhotos.length === 0) return null;
+              const activeSrc = validPhotos[activePhotoIdx] || validPhotos[0];
               return (
                 <div className="bg-slate-950/5 dark:bg-slate-950/40">
                   <div className="w-full max-h-[520px] overflow-hidden bg-[#F4F1EA] dark:bg-slate-900 flex items-center justify-center">
-                    {activeSrc && !brokenImages[activeSrc] ? (
-                      <img
-                        src={activeSrc}
-                        alt={detailPost.title}
-                        onError={() =>
-                          setBrokenImages((prev) => ({ ...prev, [activeSrc]: true }))
-                        }
-                        className="w-full max-h-[520px] h-auto object-contain bg-[#F4F1EA] dark:bg-slate-950"
-                      />
-                    ) : (
-                      <div className="py-12 px-4 text-center text-xs font-kannada text-[#64748B] dark:text-slate-400">
-                        ಫೋಟೋ ಲಭ್ಯವಿಲ್ಲ
-                      </div>
-                    )}
+                    <img
+                      src={activeSrc}
+                      alt={detailPost.title}
+                      onError={() =>
+                        setBrokenImages((prev) => ({ ...prev, [activeSrc]: true }))
+                      }
+                      className="w-full max-h-[520px] h-auto object-contain bg-[#F4F1EA] dark:bg-slate-950"
+                    />
                   </div>
-                  {detailPost.photos.length > 1 && (
+                  {validPhotos.length > 1 && (
                     <div className="flex items-center gap-2 p-3 border-t border-slate-100 dark:border-slate-800 overflow-x-auto">
-                      {detailPost.photos.map((photoUrl, idx) => (
+                      {validPhotos.map((photoUrl, idx) => (
                         <button
                           key={photoUrl}
                           type="button"
@@ -434,18 +432,14 @@ export const CoffeenaduCommunityPage: React.FC<CoffeenaduCommunityPageProps> = (
                               : 'border-transparent opacity-70 hover:opacity-100'
                           }`}
                         >
-                          {!brokenImages[photoUrl] ? (
-                            <img
-                              src={photoUrl}
-                              alt=""
-                              onError={() =>
-                                setBrokenImages((prev) => ({ ...prev, [photoUrl]: true }))
-                              }
-                              className="w-full h-full object-contain"
-                            />
-                          ) : (
-                            <span className="text-[10px] text-slate-400">N/A</span>
-                          )}
+                          <img
+                            src={photoUrl}
+                            alt=""
+                            onError={() =>
+                              setBrokenImages((prev) => ({ ...prev, [photoUrl]: true }))
+                            }
+                            className="w-full h-full object-contain"
+                          />
                         </button>
                       ))}
                     </div>
@@ -1122,52 +1116,72 @@ export const CoffeenaduCommunityPage: React.FC<CoffeenaduCommunityPageProps> = (
                         </button>
                       )}
 
-                      <div className="p-4 space-y-2.5">
-                        <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] font-kannada">
-                          <span className="font-bold text-[#176B4A] dark:text-[#D9A441]">
-                            {cat?.labelKn || post.category}
-                          </span>
-                          <span className="text-[#64748B] dark:text-slate-400">
-                            {formatCommunityDateKn(post.createdAt)}
-                          </span>
+                      <div className="p-4 flex items-stretch gap-3">
+                        <div className="flex flex-col items-center shrink-0">
+                          <div
+                            aria-hidden="true"
+                            className="w-9 h-9 rounded-full bg-[#176B4A] text-white text-xs font-extrabold flex items-center justify-center shrink-0"
+                          >
+                            {(post.authorName || 'C').trim().charAt(0).toUpperCase()}
+                          </div>
+                          <div
+                            aria-hidden="true"
+                            className="mt-1.5 w-[2px] flex-1 rounded-full bg-slate-200 dark:bg-slate-700"
+                          />
                         </div>
 
-                        <button
-                          type="button"
-                          onClick={() => onNavigatePost(post.slug)}
-                          className="block text-left font-kannada text-base font-extrabold text-[#10243D] dark:text-white hover:text-[#176B4A] dark:hover:text-[#D9A441] leading-snug cursor-pointer"
-                        >
-                          {post.title}
-                        </button>
-
-                        {post.price && (
-                          <div className="font-kannada text-xs font-extrabold text-[#9A6700] dark:text-[#D9A441]">
-                            ಬೆಲೆ: {post.price}
+                        <div className="min-w-0 flex-1 space-y-2">
+                          <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] font-kannada">
+                            <span className="font-bold text-[#10243D] dark:text-slate-100">
+                              {post.authorName}
+                            </span>
+                            <span className="text-[#64748B] dark:text-slate-400">
+                              {formatCommunityDateKn(post.createdAt)}
+                            </span>
                           </div>
-                        )}
 
-                        <p className="font-kannada text-xs text-[#475569] dark:text-slate-300 line-clamp-3 leading-relaxed">
-                          {post.description}
-                        </p>
+                          <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] font-kannada text-[#5A677A] dark:text-slate-400">
+                            <span className="font-bold text-[#176B4A] dark:text-[#D9A441]">
+                              {cat?.labelKn || post.category}
+                            </span>
+                            <span>·</span>
+                            <span className="inline-flex items-center gap-0.5">
+                              <MapPin className="w-3 h-3" />
+                              {post.location}
+                            </span>
+                          </div>
 
-                        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] font-kannada text-[#5A677A] dark:text-slate-400 pt-1">
-                          <span className="inline-flex items-center gap-1 font-semibold text-[#10243D] dark:text-slate-200">
-                            <User className="w-3 h-3 text-[#176B4A]" />
-                            {post.authorName}
-                          </span>
-                          <span>·</span>
-                          <span className="inline-flex items-center gap-0.5">
-                            <MapPin className="w-3 h-3" />
-                            {post.location}
-                          </span>
+                          <button
+                            type="button"
+                            onClick={() => onNavigatePost(post.slug)}
+                            className="block text-left font-kannada text-base font-extrabold text-[#10243D] dark:text-white hover:text-[#176B4A] dark:hover:text-[#D9A441] leading-snug cursor-pointer"
+                          >
+                            {post.title}
+                          </button>
+
+                          {post.price && (
+                            <div className="font-kannada text-xs font-extrabold text-[#9A6700] dark:text-[#D9A441]">
+                              ಬೆಲೆ: {post.price}
+                            </div>
+                          )}
+
+                          <p
+                            className={`font-kannada text-xs text-[#475569] dark:text-slate-300 leading-relaxed whitespace-pre-line ${
+                              post.photos[0] && !brokenImages[post.photos[0]]
+                                ? 'line-clamp-3'
+                                : 'line-clamp-6'
+                            }`}
+                          >
+                            {post.description}
+                          </p>
+
+                          {post.optionalPublicContact && (
+                            <div className="text-[11px] font-kannada font-semibold text-[#176B4A] dark:text-emerald-300 inline-flex items-center gap-1">
+                              <Phone className="w-3 h-3" />
+                              <span>{post.optionalPublicContact}</span>
+                            </div>
+                          )}
                         </div>
-
-                        {post.optionalPublicContact && (
-                          <div className="text-[11px] font-kannada font-semibold text-[#176B4A] dark:text-emerald-300 inline-flex items-center gap-1">
-                            <Phone className="w-3 h-3" />
-                            <span>{post.optionalPublicContact}</span>
-                          </div>
-                        )}
                       </div>
                     </div>
 

@@ -44,6 +44,7 @@ export const ContestSubmitModal: React.FC<ContestSubmitModalProps> = ({
 }) => {
   const [profile, setProfile] = useState<CommunitySelfProfile | null>(null);
   const [loadingProfile, setLoadingProfile] = useState(false);
+  const [switchingContributor, setSwitchingContributor] = useState(false);
 
   const [contributorName, setContributorName] = useState('');
   const [mobileNumber, setMobileNumber] = useState('');
@@ -66,6 +67,7 @@ export const ContestSubmitModal: React.FC<ContestSubmitModalProps> = ({
     setError('');
     setSubmittedResult(null);
     setCopiedLink(false);
+    setSwitchingContributor(false);
     setLoadingProfile(true);
     fetchCommunitySession()
       .then((res) => {
@@ -119,7 +121,8 @@ export const ContestSubmitModal: React.FC<ContestSubmitModalProps> = ({
       setError('ದಯವಿಟ್ಟು ನಿಮ್ಮ ಪೂರ್ಣ ಹೆಸರನ್ನು ನಮೂದಿಸಿ.');
       return;
     }
-    if (!profile && !/^[6-9]\d{9}$/.test(mobileNumber.replace(/\D/g, '').slice(-10))) {
+    const needsMobileInput = !profile || switchingContributor;
+    if (needsMobileInput && !/^[6-9]\d{9}$/.test(mobileNumber.replace(/\D/g, '').slice(-10))) {
       setError('ದಯವಿಟ್ಟು ಸರಿಯಾದ 10 ಅಂಕಿಯ ಮೊಬೈಲ್ ಸಂಖ್ಯೆಯನ್ನು ನಮೂದಿಸಿ (ಬಹುಮಾನ ಸಂಪರ್ಕಕ್ಕಾಗಿ ಅಗತ್ಯ).');
       return;
     }
@@ -146,13 +149,16 @@ export const ContestSubmitModal: React.FC<ContestSubmitModalProps> = ({
     try {
       const result = await submitContestNewsEntry({
         contributorName: contributorName.trim(),
-        mobileNumber: profile ? undefined : mobileNumber.trim(),
+        mobileNumber: needsMobileInput ? mobileNumber.trim() : undefined,
+        switchContributor: switchingContributor || undefined,
         title: title.trim(),
         description: description.trim(),
         location: finalLocation,
         photos,
         confirmOriginalNews: true,
       });
+      setProfile(result.profile);
+      setSwitchingContributor(false);
       setSubmittedResult(result);
       onSubmitted(result);
     } catch (err) {
@@ -172,6 +178,7 @@ export const ContestSubmitModal: React.FC<ContestSubmitModalProps> = ({
     setPhotos([]);
     setConfirmOriginalNews(false);
     setSubmittedResult(null);
+    setSwitchingContributor(false);
     setError('');
     onClose();
   };
@@ -352,10 +359,21 @@ export const ContestSubmitModal: React.FC<ContestSubmitModalProps> = ({
                     <div className="flex h-[42px] items-center rounded-lg border border-slate-200 bg-slate-50 px-3 text-xs text-slate-500">
                       ಪರಿಶೀಲಿಸಲಾಗುತ್ತಿದೆ...
                     </div>
-                  ) : profile ? (
-                    <div className="flex h-[42px] items-center justify-between rounded-lg border border-emerald-200 bg-emerald-50 px-3 text-xs font-semibold text-emerald-900">
-                      <span>ನೋಂದಾಯಿತ: {profile.maskedMobile}</span>
-                      <Lock className="h-3.5 w-3.5 text-emerald-700" />
+                  ) : profile && !switchingContributor ? (
+                    <div className="flex h-[42px] items-center justify-between gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 text-xs font-semibold text-emerald-900">
+                      <span className="truncate">ನೋಂದಾಯಿತ: {profile.maskedMobile}</span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSwitchingContributor(true);
+                          setContributorName('');
+                          setMobileNumber('');
+                          setError('');
+                        }}
+                        className="shrink-0 rounded border border-emerald-700/25 bg-white px-2 py-0.5 text-[11px] font-bold text-emerald-900 hover:bg-emerald-100 cursor-pointer"
+                      >
+                        ಬೇರೆ ಲೇಖಕರು (Switch)
+                      </button>
                     </div>
                   ) : (
                     <input

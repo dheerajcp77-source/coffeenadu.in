@@ -1,6 +1,7 @@
 /**
  * Standalone Cloudflare Pages handler for /api/community/* and /api/admin2/community/*
- * Preserves full feature parity and strict privacy wall when deployed on Cloudflare Pages.
+ * Shares unified Community + Contest state via _cfCommunityContestStore and persists
+ * durably to Google Apps Script + Drive whenever configured.
  */
 
 import type {
@@ -15,83 +16,25 @@ import type {
   CommunityUserStatus,
 } from '../src/types/community';
 import {
-  MAX_COMMUNITY_PHOTOS,
   filterCommunityPosts,
   generateCommunitySlug,
   isValidCommunityCategory,
   maskMobileNumber,
   normalizeCommunityMobile,
   toPublicCommunityPost,
-  validateCommunityPhotoInput,
 } from '../src/utils/communityHelpers';
+import {
+  handlePostDeletedInSharedState,
+  loadSharedCommunityContestState,
+  persistPublicPhotosOnCf,
+  persistSharedCommunityContestDelta,
+  syncContestEntriesWithPost,
+  type CfSharedCommunityContestState,
+  type PagesEnvLike,
+} from './_cfCommunityContestStore';
 
-interface CfCommunitySession {
-  tokenHash: string;
-  userId: string;
-  createdAtMs: number;
-  expiresAtMs: number;
-}
-
-interface CfCommunityState {
-  users: CommunityUserPrivate[];
-  sessions: CfCommunitySession[];
-  posts: CommunityPostRecord[];
-  reports: CommunityReportRecord[];
-}
-
-const CF_COMMUNITY_CACHE_KEY = 'https://coffeenadu.internal/cf-community-state-v1';
 const SESSION_COOKIE_NAME = 'cn_community_sid';
 const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
-
-let cfCommunityState: CfCommunityState | null = null;
-
-function createEmptyState(): CfCommunityState {
-  return { users: [], sessions: [], posts: [], reports: [] };
-}
-
-async function ensureState(): Promise<CfCommunityState> {
-  if (cfCommunityState) return cfCommunityState;
-  try {
-    const cache = (caches as unknown as { default?: Cache }).default;
-    if (cache) {
-      const hit = await cache.match(CF_COMMUNITY_CACHE_KEY);
-      if (hit) {
-        const parsed = (await hit.json()) as Partial<CfCommunityState>;
-        cfCommunityState = {
-          users: Array.isArray(parsed.users) ? parsed.users : [],
-          sessions: Array.isArray(parsed.sessions) ? parsed.sessions : [],
-          posts: Array.isArray(parsed.posts) ? parsed.posts : [],
-          reports: Array.isArray(parsed.reports) ? parsed.reports : [],
-        };
-        return cfCommunityState;
-      }
-    }
-  } catch {
-    // ignore edge cache read error
-  }
-  cfCommunityState = createEmptyState();
-  return cfCommunityState;
-}
-
-async function persistState(state: CfCommunityState): Promise<void> {
-  cfCommunityState = state;
-  try {
-    const cache = (caches as unknown as { default?: Cache }).default;
-    if (cache) {
-      await cache.put(
-        CF_COMMUNITY_CACHE_KEY,
-        new Response(JSON.stringify(state), {
-          headers: {
-            'Content-Type': 'application/json',
-            'Cache-Control': 'public, max-age=86400',
-          },
-        })
-      );
-    }
-  } catch {
-    // ignore edge cache write error
-  }
-}
 
 function cleanSingleLine(raw: unknown, maxLen = 200): string {
   return String(raw ?? '')
@@ -126,7 +69,7 @@ function jsonResp(data: unknown, status = 200, extraHeaders: Record<string, stri
     status,
     headers: {
       'Content-Type': 'application/json; charset=utf-8',
-      'Cache-Control': 'no-store',
+      'Cache-Control': 'no-store, no-cache, must-revalidate',
       ...extraHeaders,
     },
   });
@@ -151,7 +94,7 @@ function parseCookies(request: Request): Record<string, string> {
 
 async function resolveSession(
   request: Request,
-  state: CfCommunityState,
+  state: CfSharedCommunityContestState,
   requireCsrf = false
 ): Promise<{ user: CommunityUserPrivate; tokenHash: string } | null> {
   const authHeader = (request.headers.get('authorization') || '').trim();
@@ -180,7 +123,10 @@ async function resolveSession(
   return { user, tokenHash: hash };
 }
 
-function buildSelfProfile(user: CommunityUserPrivate, state: CfCommunityState): CommunitySelfProfile {
+function buildSelfProfile(
+  user: CommunityUserPrivate,
+  state: CfSharedCommunityContestState
+): CommunitySelfProfile {
   return {
     fullName: user.fullName,
     maskedMobile: maskMobileNumber(user.mobileNumber),
@@ -191,26 +137,11 @@ function buildSelfProfile(user: CommunityUserPrivate, state: CfCommunityState): 
   };
 }
 
-function validateCfPhotos(rawPhotos: unknown): { ok: boolean; photos: string[]; error?: string } {
-  if (!Array.isArray(rawPhotos) || rawPhotos.length === 0) return { ok: true, photos: [] };
-  if (rawPhotos.length > MAX_COMMUNITY_PHOTOS) {
-    return { ok: false, photos: [], error: `ಗರಿಷ್ಠ ${MAX_COMMUNITY_PHOTOS} ಫೋಟೋಗಳು ಮಾತ್ರ.` };
-  }
-  const photos: string[] = [];
-  for (const item of rawPhotos) {
-    const check = validateCommunityPhotoInput(item);
-    if (!check.ok) {
-      return { ok: false, photos: [], error: check.error || 'ಅಮಾನ್ಯ ಫೋಟೋ ಫೈಲ್.' };
-    }
-    photos.push(String(item).trim());
-  }
-  return { ok: true, photos };
-}
-
 export async function handleCfCommunityApi(
   request: Request,
   url: URL,
-  isAuthorizedAdmin: () => Promise<{ ok: boolean; email?: string }>
+  isAuthorizedAdmin: () => Promise<{ ok: boolean; email?: string }>,
+  env?: PagesEnvLike
 ): Promise<Response | null> {
   const pathname = url.pathname;
   const method = request.method.toUpperCase();
@@ -219,7 +150,10 @@ export async function handleCfCommunityApi(
     return null;
   }
 
-  const state = await ensureState();
+  const isMutation = method !== 'GET' && method !== 'HEAD';
+  const isAdminRoute = pathname.startsWith('/api/admin2/community');
+  const state = await loadSharedCommunityContestState(env, isMutation || isAdminRoute);
+
   const readJson = async () => {
     try {
       return (await request.json()) as Record<string, unknown>;
@@ -266,13 +200,28 @@ export async function handleCfCommunityApi(
     const rawToken = randomHex(32);
     const nowMs = Date.now();
     state.sessions = state.sessions.filter((s) => s.expiresAtMs > nowMs);
-    state.sessions.push({
+    const session = {
       tokenHash: await sha256Hex(rawToken),
       userId: user.id,
       createdAtMs: nowMs,
       expiresAtMs: nowMs + SESSION_TTL_MS,
-    });
-    await persistState(state);
+    };
+    state.sessions.push(session);
+
+    try {
+      await persistSharedCommunityContestDelta(env, state, { user, session });
+    } catch (err) {
+      return jsonResp(
+        {
+          ok: false,
+          error:
+            err instanceof Error
+              ? err.message
+              : 'ನೋಂದಣಿ ಮಾಹಿತಿಯನ್ನು ಶಾಶ್ವತವಾಗಿ ಉಳಿಸಲು ಸಾಧ್ಯವಾಗಲಿಲ್ಲ.',
+        },
+        502
+      );
+    }
 
     const maxAgeSec = Math.floor(SESSION_TTL_MS / 1000);
     const isHttps = url.protocol === 'https:';
@@ -313,10 +262,25 @@ export async function handleCfCommunityApi(
     }
     resolved.user.fullName = fullName;
     resolved.user.lastActiveAt = new Date().toISOString();
+    const updatedPosts: CommunityPostRecord[] = [];
+    const updatedEntries = [];
     for (const p of state.posts) {
-      if (p.authorUserId === resolved.user.id) p.authorName = fullName;
+      if (p.authorUserId === resolved.user.id) {
+        p.authorName = fullName;
+        p.updatedAt = resolved.user.lastActiveAt;
+        updatedPosts.push(p);
+        updatedEntries.push(...syncContestEntriesWithPost(state, p));
+      }
     }
-    await persistState(state);
+    try {
+      await persistSharedCommunityContestDelta(env, state, {
+        user: resolved.user,
+        extraPosts: updatedPosts,
+        extraContestEntries: updatedEntries,
+      });
+    } catch {
+      return jsonResp({ ok: false, error: 'ಪ್ರೊಫೈಲ್ ನವೀಕರಿಸಲು ಸಾಧ್ಯವಾಗಲಿಲ್ಲ.' }, 502);
+    }
     return jsonResp({ ok: true, profile: buildSelfProfile(resolved.user, state) });
   }
 
@@ -324,7 +288,12 @@ export async function handleCfCommunityApi(
     const resolved = await resolveSession(request, state, true);
     if (resolved) {
       state.sessions = state.sessions.filter((s) => s.tokenHash !== resolved.tokenHash);
-      await persistState(state);
+      await persistSharedCommunityContestDelta(
+        env,
+        state,
+        { revokeSessionTokenHash: resolved.tokenHash },
+        { bestEffort: true }
+      );
     }
     return jsonResp({ ok: true }, 200, {
       'Set-Cookie': `${SESSION_COOKIE_NAME}=; Path=/; Max-Age=0; HttpOnly`,
@@ -380,8 +349,10 @@ export async function handleCfCommunityApi(
       return jsonResp({ ok: false, error: 'ದಯವಿಟ್ಟು ಎಲ್ಲಾ ಅಗತ್ಯ ವಿವರಗಳನ್ನು ಸರಿಯಾಗಿ ಭರ್ತಿ ಮಾಡಿ.' }, 400);
     }
 
-    const photoResult = validateCfPhotos(body.photos);
-    if (!photoResult.ok) return jsonResp({ ok: false, error: photoResult.error }, 400);
+    const photoResult = await persistPublicPhotosOnCf(env, body.photos);
+    if (!photoResult.ok) {
+      return jsonResp({ ok: false, error: photoResult.error }, photoResult.storageFailure ? 502 : 400);
+    }
 
     const nowIso = new Date().toISOString();
     const post: CommunityPostRecord = {
@@ -405,7 +376,21 @@ export async function handleCfCommunityApi(
 
     state.posts.unshift(post);
     resolved.user.lastActiveAt = nowIso;
-    await persistState(state);
+
+    try {
+      await persistSharedCommunityContestDelta(env, state, {
+        user: resolved.user,
+        post,
+      });
+    } catch {
+      return jsonResp(
+        {
+          ok: false,
+          error: 'ಮಾಹಿತಿಯನ್ನು ಶಾಶ್ವತವಾಗಿ ಉಳಿಸಲು ಸಾಧ್ಯವಾಗಲಿಲ್ಲ. ದಯವಿಟ್ಟು ಸ್ವಲ್ಪ ಸಮಯದ ನಂತರ ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ.',
+        },
+        502
+      );
+    }
     return jsonResp({ ok: true, post: toPublicCommunityPost(post, resolved.user.id) }, 201);
   }
 
@@ -413,15 +398,16 @@ export async function handleCfCommunityApi(
   if (singlePostMatch) {
     const key = decodeURIComponent(singlePostMatch[1]);
     if (method === 'GET') {
-      const resolved = await resolveSession(request, state, false);
-      const post = state.posts.find(
+      const freshState = await loadSharedCommunityContestState(env, true);
+      const resolved = await resolveSession(request, freshState, false);
+      const post = freshState.posts.find(
         (p) =>
           p.status === 'published' &&
           (p.slug.toLowerCase() === key.toLowerCase() || p.id.toLowerCase() === key.toLowerCase())
       );
       if (!post) return jsonResp({ ok: false, error: 'ಪ್ರಕಟಣೆ ಲಭ್ಯವಿಲ್ಲ.' }, 404);
       post.viewsCount = (post.viewsCount || 0) + 1;
-      await persistState(state);
+      await persistSharedCommunityContestDelta(env, freshState, { post }, { bestEffort: true });
       return jsonResp({ ok: true, post: toPublicCommunityPost(post, resolved?.user.id || null) });
     }
 
@@ -442,12 +428,22 @@ export async function handleCfCommunityApi(
         post.optionalPublicContact = cleanSingleLine(body.optionalPublicContact, 80) || undefined;
       }
       if (body.photos !== undefined) {
-        const photoResult = validateCfPhotos(body.photos);
-        if (!photoResult.ok) return jsonResp({ ok: false, error: photoResult.error }, 400);
+        const photoResult = await persistPublicPhotosOnCf(env, body.photos);
+        if (!photoResult.ok) {
+          return jsonResp({ ok: false, error: photoResult.error }, photoResult.storageFailure ? 502 : 400);
+        }
         post.photos = photoResult.photos;
       }
       post.updatedAt = new Date().toISOString();
-      await persistState(state);
+      const updatedEntries = syncContestEntriesWithPost(state, post);
+      try {
+        await persistSharedCommunityContestDelta(env, state, {
+          post,
+          extraContestEntries: updatedEntries,
+        });
+      } catch {
+        return jsonResp({ ok: false, error: 'ಪ್ರಕಟಣೆ ನವೀಕರಿಸಲು ಸಾಧ್ಯವಾಗಲಿಲ್ಲ.' }, 502);
+      }
       return jsonResp({ ok: true, post: toPublicCommunityPost(post, resolved.user.id) });
     }
 
@@ -459,8 +455,18 @@ export async function handleCfCommunityApi(
       if (state.posts[idx].authorUserId !== resolved.user.id) {
         return jsonResp({ ok: false, error: 'Forbidden' }, 403);
       }
+      const deletedId = state.posts[idx].id;
       state.posts.splice(idx, 1);
-      await persistState(state);
+      const syncRes = handlePostDeletedInSharedState(state, deletedId);
+      try {
+        await persistSharedCommunityContestDelta(env, state, {
+          deletePostId: deletedId,
+          deleteContestEntryByPostId: syncRes.deletedByPostId,
+          extraContestEntries: syncRes.updatedEntries,
+        });
+      } catch {
+        return jsonResp({ ok: false, error: 'ಪ್ರಕಟಣೆ ಅಳಿಸಲು ಸಾಧ್ಯವಾಗಲಿಲ್ಲ.' }, 502);
+      }
       return jsonResp({ ok: true });
     }
   }
@@ -471,7 +477,7 @@ export async function handleCfCommunityApi(
     const post = state.posts.find((p) => p.id === key || p.slug === key);
     if (post && post.status === 'published') {
       post.sharesCount = (post.sharesCount || 0) + 1;
-      await persistState(state);
+      await persistSharedCommunityContestDelta(env, state, { post }, { bestEffort: true });
     }
     return jsonResp({ ok: true });
   }
@@ -494,16 +500,21 @@ export async function handleCfCommunityApi(
       status: 'open',
     };
     state.reports.unshift(rep);
-    await persistState(state);
+    try {
+      await persistSharedCommunityContestDelta(env, state, { report: rep });
+    } catch {
+      return jsonResp({ ok: false, error: 'ವರದಿ ಸಲ್ಲಿಸಲು ಸಾಧ್ಯವಾಗಲಿಲ್ಲ.' }, 502);
+    }
     return jsonResp({ ok: true, id: rep.id }, 201);
   }
 
   // ---------------- ADMIN-ONLY ENDPOINTS ----------------
-  if (pathname.startsWith('/api/admin2/community')) {
+  if (isAdminRoute) {
     const admin = await isAuthorizedAdmin();
     if (!admin.ok) {
       return jsonResp({ ok: false, error: 'Admin authorization required.' }, 401);
     }
+    const adminEmail = admin.email || 'admin@coffeenadu.in';
 
     if (pathname === '/api/admin2/community/users' && method === 'GET') {
       const q = (url.searchParams.get('q') || '').trim().toLowerCase();
@@ -570,7 +581,15 @@ export async function handleCfCommunityApi(
       if (nextStatus === 'suspended') {
         state.sessions = state.sessions.filter((s) => s.userId !== user.id);
       }
-      await persistState(state);
+      await persistSharedCommunityContestDelta(
+        env,
+        state,
+        {
+          user,
+          revokeSessionsForUserId: nextStatus === 'suspended' ? user.id : undefined,
+        },
+        { adminEmail }
+      );
       return jsonResp({ ok: true, user });
     }
 
@@ -597,7 +616,16 @@ export async function handleCfCommunityApi(
       post.hiddenReason =
         post.status !== 'published' ? cleanSingleLine(body.reason, 200) || undefined : undefined;
       post.updatedAt = new Date().toISOString();
-      await persistState(state);
+      const updatedEntries = syncContestEntriesWithPost(state, post);
+      await persistSharedCommunityContestDelta(
+        env,
+        state,
+        {
+          post,
+          extraContestEntries: updatedEntries,
+        },
+        { adminEmail }
+      );
       return jsonResp({ ok: true, post });
     }
 
@@ -605,8 +633,19 @@ export async function handleCfCommunityApi(
     if (adminPostDel && method === 'DELETE') {
       const idx = state.posts.findIndex((p) => p.id === decodeURIComponent(adminPostDel[1]));
       if (idx === -1) return jsonResp({ ok: false, error: 'Post not found' }, 404);
+      const deletedId = state.posts[idx].id;
       state.posts.splice(idx, 1);
-      await persistState(state);
+      const syncRes = handlePostDeletedInSharedState(state, deletedId);
+      await persistSharedCommunityContestDelta(
+        env,
+        state,
+        {
+          deletePostId: deletedId,
+          deleteContestEntryByPostId: syncRes.deletedByPostId,
+          extraContestEntries: syncRes.updatedEntries,
+        },
+        { adminEmail }
+      );
       return jsonResp({ ok: true });
     }
 
@@ -621,8 +660,8 @@ export async function handleCfCommunityApi(
       const body = await readJson();
       rep.status = body.status === 'dismissed' ? 'dismissed' : 'resolved';
       rep.resolvedAt = new Date().toISOString();
-      rep.resolvedBy = admin.email || 'admin';
-      await persistState(state);
+      rep.resolvedBy = adminEmail;
+      await persistSharedCommunityContestDelta(env, state, { report: rep }, { adminEmail });
       return jsonResp({ ok: true, report: rep });
     }
 

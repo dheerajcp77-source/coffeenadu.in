@@ -133,6 +133,16 @@ function isSafeImageSrc(src?: string): boolean {
   if (!src || typeof src !== 'string') return false;
   const trimmed = src.trim();
   if (!trimmed) return false;
+  const lower = trimmed.toLowerCase();
+  if (
+    lower === 'none' ||
+    lower === 'null' ||
+    lower === 'undefined' ||
+    lower.endsWith('/api/og-default-image') ||
+    lower.includes('placeholder')
+  ) {
+    return false;
+  }
   return (
     trimmed.startsWith('https://') ||
     trimmed.startsWith('http://') ||

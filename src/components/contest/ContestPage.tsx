@@ -496,6 +496,9 @@ export const ContestPage: React.FC<ContestPageProps> = ({
               {topFour.map((entry, idx) => {
                 const rank = idx + 1;
                 const tier = prizes.find((p) => p.rank === rank);
+                const hasThumb = Boolean(entry.thumbnailUrl && !failedThumbIds[entry.id]);
+                const authorInitial =
+                  (entry.contributorName || 'C').trim().charAt(0).toUpperCase() || 'C';
                 return (
                   <article
                     key={entry.id}
@@ -503,62 +506,83 @@ export const ContestPage: React.FC<ContestPageProps> = ({
                       rank === 1 ? 'border-amber-400 shadow-sm' : 'border-slate-200'
                     }`}
                   >
-                    <div className="flex gap-4 p-4">
-                      <div className="relative h-24 w-24 shrink-0 overflow-hidden rounded-lg border border-slate-200 bg-[#F4F1EA] flex items-center justify-center sm:h-28 sm:w-28">
-                        {entry.thumbnailUrl && !failedThumbIds[entry.id] ? (
-                          <img
-                            src={entry.thumbnailUrl}
-                            alt={entry.title}
-                            className="h-full w-full object-contain"
-                            loading="lazy"
-                            onError={() =>
-                              setFailedThumbIds((prev) => ({ ...prev, [entry.id]: true }))
-                            }
-                          />
-                        ) : (
-                          <div className="flex h-full w-full flex-col items-center justify-center bg-[#0F3928]/10 text-emerald-900">
-                            <Trophy className="h-6 w-6 opacity-70" />
-                            <span className="mt-1 text-[10px] font-bold">CONTEST</span>
-                          </div>
-                        )}
-                        <div
-                          className={`absolute left-0 top-0 px-2.5 py-1 text-xs font-extrabold tabular-nums ${
-                            rank === 1
-                              ? 'bg-amber-400 text-slate-950'
-                              : 'bg-[#0F3928] text-white'
-                          }`}
-                        >
-                          #{rank}
-                        </div>
-                      </div>
-
-                      <div className="min-w-0 flex-1">
-                        <div className="flex flex-wrap items-center justify-between gap-1 text-[11px] font-bold text-emerald-800">
-                          <span>
+                    <div className="p-4 space-y-3">
+                      {/* Rank & Prize Header */}
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div className="flex items-center gap-2">
+                          <span
+                            className={`inline-flex items-center rounded-md px-2 py-0.5 text-xs font-extrabold tabular-nums ${
+                              rank === 1
+                                ? 'bg-amber-400 text-slate-950'
+                                : 'bg-[#0F3928] text-white'
+                            }`}
+                          >
+                            #{rank}
+                          </span>
+                          <span className="text-[11px] font-bold text-emerald-800">
                             {tier ? `${tier.labelKn} · ₹${tier.amountInr}` : `Rank #${rank}`}
                           </span>
-                          <span className="font-medium text-slate-500">
-                            {formatDateKn(entry.publishedAt)}
-                          </span>
+                        </div>
+                        <span className="text-[11px] font-medium text-slate-500">
+                          {formatDateKn(entry.publishedAt)}
+                        </span>
+                      </div>
+
+                      {/* Threads-style Post Body (with image only when user uploaded a real photo) */}
+                      <div className="flex items-start gap-3">
+                        <div className="flex flex-col items-center self-stretch shrink-0">
+                          <div className="flex h-9 w-9 items-center justify-center rounded-full bg-[#0F3928] text-xs font-extrabold text-amber-300">
+                            {authorInitial}
+                          </div>
+                          <div className="mt-1.5 w-[2px] flex-1 rounded-full bg-slate-200" />
                         </div>
 
-                        <button
-                          type="button"
-                          onClick={() => onOpenCommunityPost(entry.slug)}
-                          className="mt-1 block text-left font-serif text-base font-bold leading-snug text-slate-900 transition hover:text-emerald-800 line-clamp-2 cursor-pointer"
-                        >
-                          {entry.title}
-                        </button>
+                        <div className="min-w-0 flex-1 space-y-1.5 pb-0.5">
+                          <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs">
+                            <span className="font-bold text-slate-900">
+                              {entry.contributorName}
+                            </span>
+                            <span className="text-slate-300">·</span>
+                            <span className="inline-flex items-center gap-0.5 text-slate-600">
+                              <MapPin className="h-3 w-3 text-slate-400" />
+                              {entry.location}
+                            </span>
+                          </div>
 
-                        <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-600">
-                          <span className="inline-flex items-center gap-1 font-semibold text-slate-800">
-                            <User className="h-3.5 w-3.5 text-emerald-700" />
-                            {entry.contributorName}
-                          </span>
-                          <span className="inline-flex items-center gap-1">
-                            <MapPin className="h-3.5 w-3.5 text-slate-400" />
-                            {entry.location}
-                          </span>
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="min-w-0 flex-1 space-y-1">
+                              <button
+                                type="button"
+                                onClick={() => onOpenCommunityPost(entry.slug)}
+                                className="block text-left font-serif text-base font-bold leading-snug text-slate-900 transition hover:text-emerald-800 line-clamp-2 cursor-pointer"
+                              >
+                                {entry.title}
+                              </button>
+                              {entry.summary && (
+                                <p className="text-xs leading-relaxed text-slate-600 line-clamp-3 whitespace-pre-line">
+                                  {entry.summary}
+                                </p>
+                              )}
+                            </div>
+
+                            {hasThumb && (
+                              <button
+                                type="button"
+                                onClick={() => onOpenCommunityPost(entry.slug)}
+                                className="h-20 w-24 shrink-0 overflow-hidden rounded-lg border border-slate-200 bg-[#F4F1EA] flex items-center justify-center cursor-pointer sm:h-24 sm:w-28"
+                              >
+                                <img
+                                  src={entry.thumbnailUrl}
+                                  alt={entry.title}
+                                  className="h-full w-full object-contain"
+                                  loading="lazy"
+                                  onError={() =>
+                                    setFailedThumbIds((prev) => ({ ...prev, [entry.id]: true }))
+                                  }
+                                />
+                              </button>
+                            )}
+                          </div>
                         </div>
                       </div>
                     </div>

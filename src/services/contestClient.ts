@@ -114,6 +114,7 @@ export async function recordContestArticleView(
 export interface SubmitContestNewsInput {
   contributorName: string;
   mobileNumber?: string;
+  switchContributor?: boolean;
   title: string;
   description: string;
   location: string;

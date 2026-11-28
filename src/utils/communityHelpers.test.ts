@@ -85,6 +85,10 @@ test('validateCommunityPhotoInput accepts valid images and rejects SVG/oversized
   const tinyPng = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PchI7wAAAABJRU5ErkJggg==';
   assert.equal(validateCommunityPhotoInput(tinyPng).ok, true);
   assert.equal(validateCommunityPhotoInput('/api/community/media/img_123.webp').ok, true);
+  assert.equal(
+    validateCommunityPhotoInput('/api/media/drive/1AbCdEfGhIjKlMnOpQrSt').ok,
+    true
+  );
 
   // Reject SVG / XSS / path traversal
   assert.equal(validateCommunityPhotoInput('data:image/svg+xml;base64,PHN2Zz48L3N2Zz4=').ok, false);

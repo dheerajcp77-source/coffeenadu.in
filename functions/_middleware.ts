@@ -12,6 +12,7 @@
 
 import {
   callAppsScriptGet,
+  callAppsScriptPost,
   getAppsScriptConfig,
   resolveConfiguredBackendOrigin,
   resolvePublicOrigin,
@@ -349,6 +350,88 @@ async function resolveEventMetadata(
   return null;
 }
 
+interface RawCommunityPublicPostForOg {
+  slug?: string;
+  authorName?: string;
+  title?: string;
+  description?: string;
+  location?: string;
+  photos?: string[];
+  createdAt?: string;
+}
+
+function buildCommunityPostMeta(
+  post: RawCommunityPublicPostForOg,
+  slug: string,
+  publicOrigin: string
+): ResolvedPageMetadata | null {
+  const cleanTitle = stripMarkupToPlainText(post.title);
+  if (!cleanTitle) return null;
+  const cleanDesc =
+    stripMarkupToPlainText(post.description) ||
+    `${cleanTitle}${post.location ? ` · ${post.location}` : ''}`;
+  const canonicalSlug = (post.slug || slug).trim();
+  const canonicalUrl = `${publicOrigin}/community/${encodeURIComponent(canonicalSlug)}`;
+
+  const firstPhoto = Array.isArray(post.photos)
+    ? post.photos.find((p) => typeof p === 'string' && p.trim().length > 0)?.trim() || ''
+    : '';
+  let imageUrl = `${publicOrigin}/api/og-default-image`;
+  if (firstPhoto.startsWith('/api/') || firstPhoto.startsWith('/')) {
+    imageUrl = `${publicOrigin}${firstPhoto}`;
+  } else if (/^https:\/\//i.test(firstPhoto)) {
+    imageUrl = firstPhoto;
+  }
+
+  return {
+    pageTitle: `${cleanTitle} — Coffeenadu Community`,
+    ogTitle: cleanTitle,
+    description: truncateText(cleanDesc, 280),
+    imageUrl,
+    imageAlt: cleanTitle,
+    canonicalUrl,
+    ogType: 'article',
+    publishedDate: typeof post.createdAt === 'string' ? post.createdAt : undefined,
+  };
+}
+
+async function resolveCommunityPostMetadata(
+  slug: string,
+  backendOrigin: URL | null,
+  env: PagesEnv | undefined,
+  publicOrigin: string
+): Promise<ResolvedPageMetadata | null> {
+  if (backendOrigin) {
+    const postUrl = new URL(
+      `/api/community/posts/${encodeURIComponent(slug)}`,
+      backendOrigin
+    ).toString();
+    const payload = await fetchJsonWithTimeout<{
+      ok?: boolean;
+      post?: RawCommunityPublicPostForOg;
+    }>(postUrl);
+    if (payload?.ok && payload.post) {
+      return buildCommunityPostMeta(payload.post, slug, publicOrigin);
+    }
+  }
+
+  if (getAppsScriptConfig(env).configured) {
+    try {
+      const res = await callAppsScriptPost<{
+        ok?: boolean;
+        post?: RawCommunityPublicPostForOg;
+      }>(env, 'getCommunityPostPublicForOg', { slug });
+      if (res?.ok && res.post) {
+        return buildCommunityPostMeta(res.post, slug, publicOrigin);
+      }
+    } catch {
+      // Fall through gracefully
+    }
+  }
+
+  return null;
+}
+
 function injectMetadataIntoHtml(
   html: string,
   meta: ResolvedPageMetadata,
@@ -464,6 +547,21 @@ export async function onRequest(context: PagesMiddlewareContext): Promise<Respon
 
   const normalizedPath = pathname.replace(/\/+$/, '') || '/';
   const isContestRoute = normalizedPath === '/contest';
+  let communityPostSlug = '';
+  if (
+    normalizedPath.startsWith('/community/') &&
+    normalizedPath !== '/community/dashboard'
+  ) {
+    const rawSlug = normalizedPath.slice('/community/'.length);
+    try {
+      communityPostSlug = decodeURIComponent(rawSlug).trim();
+    } catch {
+      communityPostSlug = rawSlug.trim();
+    }
+  }
+  const hasValidCommunitySlug = Boolean(
+    communityPostSlug && /^[a-zA-Z0-9_-]{1,180}$/.test(communityPostSlug)
+  );
   const rawArticleId =
     normalizedPath === '/' ? (url.searchParams.get('article') || '').trim() : '';
   const rawEventId =
@@ -472,7 +570,7 @@ export async function onRequest(context: PagesMiddlewareContext): Promise<Respon
   const hasValidArticleId = Boolean(rawArticleId && VALID_ID_PATTERN.test(rawArticleId));
   const hasValidEventId = Boolean(rawEventId && VALID_ID_PATTERN.test(rawEventId));
 
-  if (!hasValidArticleId && !hasValidEventId && !isContestRoute) {
+  if (!hasValidArticleId && !hasValidEventId && !isContestRoute && !hasValidCommunitySlug) {
     return next();
   }
 
@@ -497,6 +595,8 @@ export async function onRequest(context: PagesMiddlewareContext): Promise<Respon
         canonicalUrl: `${publicOrigin}/contest`,
         ogType: 'website' as const,
       }
+    : hasValidCommunitySlug
+    ? await resolveCommunityPostMetadata(communityPostSlug, backendOrigin, env, publicOrigin)
     : hasValidArticleId
     ? await resolveArticleMetadata(rawArticleId, backendOrigin, env, publicOrigin)
     : await resolveEventMetadata(rawEventId, backendOrigin, env, publicOrigin);
@@ -507,7 +607,9 @@ export async function onRequest(context: PagesMiddlewareContext): Promise<Respon
     description: DEFAULT_SITE_DESCRIPTION,
     imageUrl: `${publicOrigin}/api/og-default-image`,
     imageAlt: DEFAULT_SITE_TITLE,
-    canonicalUrl: hasValidArticleId
+    canonicalUrl: hasValidCommunitySlug
+      ? `${publicOrigin}/community/${encodeURIComponent(communityPostSlug)}`
+      : hasValidArticleId
       ? `${publicOrigin}/?article=${encodeURIComponent(rawArticleId)}`
       : `${publicOrigin}/events?event=${encodeURIComponent(rawEventId)}`,
     ogType: 'website',

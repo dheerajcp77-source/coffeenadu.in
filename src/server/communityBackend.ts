@@ -442,7 +442,7 @@ export class CommunityBackend {
   public resolveOrRegisterContestContributor(
     req: Request,
     res: Response,
-    input: { fullName?: unknown; mobileNumber?: unknown }
+    input: { fullName?: unknown; mobileNumber?: unknown; switchContributor?: boolean }
   ):
     | {
         ok: true;
@@ -451,11 +451,15 @@ export class CommunityBackend {
         profile: CommunitySelfProfile;
       }
     | { ok: false; status: number; error: string } {
-    const existingSession = this.resolveSessionUser(req, false);
+    const existingSession =
+      input.switchContributor === true ? null : this.resolveSessionUser(req, false);
     const providedName = cleanSingleLine(input.fullName, 80);
     const providedMobile = normalizeCommunityMobile(input.mobileNumber);
 
-    if (existingSession) {
+    if (
+      existingSession &&
+      (!providedMobile || providedMobile === existingSession.user.mobileNumber)
+    ) {
       if (existingSession.user.status === 'suspended') {
         return {
           ok: false,
@@ -464,13 +468,8 @@ export class CommunityBackend {
             'ನಿಮ್ಮ ಖಾತೆಯನ್ನು ತಾತ್ಕಾಲಿಕವಾಗಿ ನಿರ್ಬಂಧಿಸಲಾಗಿದೆ. ಹೆಚ್ಚಿನ ಮಾಹಿತಿಗಾಗಿ ಕಾಫಿನಾಡು ಆಡ್ಮಿನ್ ಸಂಪರ್ಕಿಸಿ.',
         };
       }
-      if (providedName.length >= 2 && providedName !== existingSession.user.fullName) {
+      if (providedName.length >= 2) {
         existingSession.user.fullName = providedName;
-        for (const post of this.state.posts) {
-          if (post.authorUserId === existingSession.user.id) {
-            post.authorName = providedName;
-          }
-        }
       }
       existingSession.user.lastActiveAt = new Date().toISOString();
       this.persistState();
@@ -570,6 +569,7 @@ export class CommunityBackend {
       description: unknown;
       location: unknown;
       photos?: unknown;
+      contributorName?: unknown;
     }
   ):
     | {
@@ -591,6 +591,7 @@ export class CommunityBackend {
     const title = cleanSingleLine(input.title, 160);
     const description = cleanMultiline(input.description, 4000);
     const location = cleanSingleLine(input.location, 100);
+    const providedAuthorName = cleanSingleLine(input.contributorName, 80);
 
     if (title.length < 5) {
       return {
@@ -649,7 +650,7 @@ export class CommunityBackend {
       id,
       slug,
       authorUserId: user.id,
-      authorName: user.fullName,
+      authorName: providedAuthorName.length >= 2 ? providedAuthorName : user.fullName,
       title,
       category: 'monthly-news-contest',
       description,

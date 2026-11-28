@@ -404,9 +404,10 @@ export const UnifiedCommunityFeed: React.FC<UnifiedCommunityFeedProps> = ({
                       : 'border-[#E7DFCE] dark:border-[#2E2922] hover:border-[#C5932B]/60 dark:hover:border-[#E2B44B]/50'
                   }`}
                 >
-                  {/* Card Header: Contributor / Editorial Publisher + Unboxed Metadata */}
-                  <div className="px-4 pt-4 pb-2.5 sm:px-5 sm:pt-5 flex items-start justify-between gap-3">
-                    <div className="flex items-start gap-3 min-w-0">
+                  {/* Threads-Style Post Layout: Avatar + Thread Line + Author/Content/Optional Media */}
+                  <div className="px-4 pt-4 pb-4 sm:px-5 sm:pt-5 flex items-stretch gap-3">
+                    {/* Left Thread Column */}
+                    <div className="flex flex-col items-center shrink-0">
                       {item.isOfficialBrand ? (
                         <CoffeeCupLogo className="w-10 h-10 shrink-0" />
                       ) : (
@@ -417,158 +418,171 @@ export const UnifiedCommunityFeed: React.FC<UnifiedCommunityFeedProps> = ({
                           {getAuthorInitials(item.authorName)}
                         </div>
                       )}
-
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-1.5 flex-wrap">
-                          <span className="text-sm font-extrabold text-[#1C1917] dark:text-[#FBF9F5] truncate">
-                            {item.authorName}
-                          </span>
-                          {item.verified && (
-                            <ShieldCheck
-                              className="w-4 h-4 text-[#B88623] dark:text-[#E6BC5C] shrink-0"
-                              aria-label="Verified editorial desk"
-                            />
-                          )}
-                          <span className="text-[11px] font-bold text-[#926710] dark:text-[#E6BC5C]">
-                            ·{' '}
-                            {item.isContestEntry
-                              ? language === 'kn'
-                                ? 'ಸ್ಪರ್ಧಾ ಸುದ್ದಿ · Contest Entry'
-                                : 'Contest Entry'
-                              : isEditorialNews
-                                ? language === 'kn'
-                                  ? 'ಸುದ್ದಿ'
-                                  : 'Editorial'
-                                : language === 'kn'
-                                  ? 'ಸಮುದಾಯ'
-                                  : 'Community'}
-                          </span>
-                        </div>
-
-                        <p className="text-xs text-[#6B6052] dark:text-[#A89C8B] mt-0.5 flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
-                          <span className="font-bold text-[#926710] dark:text-[#E2B44B] font-kannada">
-                            {categoryLabel}
-                          </span>
-                          <span aria-hidden="true">·</span>
-                          <span className="inline-flex items-center gap-0.5 font-kannada">
-                            <MapPin
-                              className="w-3 h-3 shrink-0 text-[#8B7D6B] dark:text-[#A89C8B]"
-                              aria-hidden="true"
-                            />
-                            {item.location}
-                          </span>
-                          <span aria-hidden="true">·</span>
-                          <span className="tabular-nums text-[#7C7060] dark:text-[#988C7B]">
-                            {item.publishedDateLabel}
-                          </span>
-                        </p>
-                      </div>
+                      <div
+                        aria-hidden="true"
+                        className="mt-2 w-[2px] flex-1 rounded-full bg-[#EAE2D0] dark:bg-[#2E2922]"
+                      />
                     </div>
 
-                    <button
-                      type="button"
-                      onClick={() => onToggleSaveItem(item)}
-                      aria-label={saved ? 'Remove bookmark' : 'Save post'}
-                      title={saved ? 'Saved' : 'Save post'}
-                      className={`p-2 rounded-xl border transition-colors cursor-pointer min-h-[40px] min-w-[40px] inline-flex items-center justify-center shrink-0 ${
-                        saved
-                          ? 'bg-[#FBF4E3] dark:bg-[#D4A238]/15 border-[#DFC996] dark:border-[#D4A238]/40 text-[#926710] dark:text-[#E6BC5C]'
-                          : 'bg-transparent border-transparent hover:bg-[#F5F0E4] dark:hover:bg-[#26221B] text-[#6B6052] dark:text-[#A89C8B]'
-                      }`}
-                    >
-                      {saved ? (
-                        <BookmarkCheck className="w-4 h-4" />
-                      ) : (
-                        <Bookmark className="w-4 h-4" />
-                      )}
-                    </button>
-                  </div>
+                    {/* Right Thread Content Column */}
+                    <div className="min-w-0 flex-1 space-y-2.5">
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <span className="text-sm font-extrabold text-[#1C1917] dark:text-[#FBF9F5] truncate">
+                              {item.authorName}
+                            </span>
+                            {item.verified && (
+                              <ShieldCheck
+                                className="w-4 h-4 text-[#B88623] dark:text-[#E6BC5C] shrink-0"
+                                aria-label="Verified editorial desk"
+                              />
+                            )}
+                            <span className="text-[11px] font-bold text-[#926710] dark:text-[#E6BC5C]">
+                              ·{' '}
+                              {item.isContestEntry
+                                ? language === 'kn'
+                                  ? 'ಸ್ಪರ್ಧಾ ಸುದ್ದಿ · Contest Entry'
+                                  : 'Contest Entry'
+                                : isEditorialNews
+                                  ? language === 'kn'
+                                    ? 'ಸುದ್ದಿ'
+                                    : 'Editorial'
+                                  : language === 'kn'
+                                    ? 'ಸಮುದಾಯ'
+                                    : 'Community'}
+                            </span>
+                          </div>
 
-                  {/* Card Content: Headline, Clean Summary, Optional Price (NO phone numbers exposed on feed cards) */}
-                  <div className="px-4 sm:px-5 pb-3.5 space-y-2">
-                    <h2 className="font-kannada text-base sm:text-lg font-extrabold text-[#1C1917] dark:text-[#FBF9F5] leading-snug">
-                      <button
-                        type="button"
-                        onClick={() => handleOpenItem(item)}
-                        className="text-left hover:text-[#926710] dark:hover:text-[#E6BC5C] transition-colors cursor-pointer focus-visible:outline-none focus-visible:underline"
-                      >
-                        {item.title}
-                      </button>
-                    </h2>
+                          <p className="text-xs text-[#6B6052] dark:text-[#A89C8B] mt-0.5 flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
+                            <span className="font-bold text-[#926710] dark:text-[#E2B44B] font-kannada">
+                              {categoryLabel}
+                            </span>
+                            <span aria-hidden="true">·</span>
+                            <span className="inline-flex items-center gap-0.5 font-kannada">
+                              <MapPin
+                                className="w-3 h-3 shrink-0 text-[#8B7D6B] dark:text-[#A89C8B]"
+                                aria-hidden="true"
+                              />
+                              {item.location}
+                            </span>
+                            <span aria-hidden="true">·</span>
+                            <span className="tabular-nums text-[#7C7060] dark:text-[#988C7B]">
+                              {item.publishedDateLabel}
+                            </span>
+                          </p>
+                        </div>
 
-                    {item.description && (
-                      <p className="font-kannada text-sm text-[#4A4137] dark:text-[#D1C7B7] leading-relaxed line-clamp-3 whitespace-pre-line">
-                        {item.description}
-                      </p>
-                    )}
-
-                    {item.priceLabel && (
-                      <div className="pt-0.5 text-xs sm:text-sm">
-                        <span className="font-extrabold text-[#926710] dark:text-[#E6BC5C] tabular-nums">
-                          {language === 'kn' ? 'ಬೆಲೆ:' : 'Price:'} {item.priceLabel}
-                        </span>
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Card Media: 100% UNCROPED Original Image Preservation (object-contain, natural aspect ratio) */}
-                  {validImages.length > 0 && (
-                    <div className="px-4 sm:px-5 pb-3.5">
-                      {validImages.length === 1 ? (
                         <button
                           type="button"
-                          onClick={() => handleOpenItem(item)}
-                          className="block w-full overflow-hidden rounded-xl border border-[#EAE2D1] dark:border-[#2E2922] bg-[#F5F1E8] dark:bg-[#14120F] cursor-pointer"
+                          onClick={() => onToggleSaveItem(item)}
+                          aria-label={saved ? 'Remove bookmark' : 'Save post'}
+                          title={saved ? 'Saved' : 'Save post'}
+                          className={`p-2 rounded-xl border transition-colors cursor-pointer min-h-[40px] min-w-[40px] inline-flex items-center justify-center shrink-0 ${
+                            saved
+                              ? 'bg-[#FBF4E3] dark:bg-[#D4A238]/15 border-[#DFC996] dark:border-[#D4A238]/40 text-[#926710] dark:text-[#E6BC5C]'
+                              : 'bg-transparent border-transparent hover:bg-[#F5F0E4] dark:hover:bg-[#26221B] text-[#6B6052] dark:text-[#A89C8B]'
+                          }`}
                         >
-                          <img
-                            src={validImages[0]}
-                            alt={item.title}
-                            loading="lazy"
-                            decoding="async"
-                            data-testid="feed-card-image"
-                            onError={() =>
-                              setBrokenImages((prev) => ({
-                                ...prev,
-                                [`${item.key}:${validImages[0]}`]: true,
-                              }))
-                            }
-                            className="w-full h-auto max-h-[640px] object-contain mx-auto block"
-                          />
+                          {saved ? (
+                            <BookmarkCheck className="w-4 h-4" />
+                          ) : (
+                            <Bookmark className="w-4 h-4" />
+                          )}
                         </button>
-                      ) : (
-                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                          {validImages.slice(0, 3).map((imgSrc, imgIdx) => (
+                      </div>
+
+                      {/* Threads Text Body */}
+                      <div className="space-y-1.5">
+                        <h2 className="font-kannada text-base sm:text-lg font-extrabold text-[#1C1917] dark:text-[#FBF9F5] leading-snug">
+                          <button
+                            type="button"
+                            onClick={() => handleOpenItem(item)}
+                            className="text-left hover:text-[#926710] dark:hover:text-[#E6BC5C] transition-colors cursor-pointer focus-visible:outline-none focus-visible:underline"
+                          >
+                            {item.title}
+                          </button>
+                        </h2>
+
+                        {item.description && (
+                          <p
+                            className={`font-kannada text-sm text-[#3F3830] dark:text-[#D9D0C1] leading-relaxed whitespace-pre-line ${
+                              validImages.length === 0 ? 'line-clamp-6' : 'line-clamp-3'
+                            }`}
+                          >
+                            {item.description}
+                          </p>
+                        )}
+
+                        {item.priceLabel && (
+                          <div className="pt-0.5 text-xs sm:text-sm">
+                            <span className="font-extrabold text-[#926710] dark:text-[#E6BC5C] tabular-nums">
+                              {language === 'kn' ? 'ಬೆಲೆ:' : 'Price:'} {item.priceLabel}
+                            </span>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Card Media: ONLY rendered when user uploaded a real, valid image */}
+                      {validImages.length > 0 && (
+                        <div className="pt-1">
+                          {validImages.length === 1 ? (
                             <button
-                              key={imgSrc}
                               type="button"
                               onClick={() => handleOpenItem(item)}
-                              className="relative aspect-[4/3] overflow-hidden rounded-xl border border-[#EAE2D1] dark:border-[#2E2922] bg-[#F5F1E8] dark:bg-[#14120F] flex items-center justify-center cursor-pointer"
+                              className="block w-full overflow-hidden rounded-xl border border-[#EAE2D1] dark:border-[#2E2922] bg-[#F5F1E8] dark:bg-[#14120F] cursor-pointer"
                             >
                               <img
-                                src={imgSrc}
-                                alt={`${item.title} (${imgIdx + 1})`}
+                                src={validImages[0]}
+                                alt={item.title}
                                 loading="lazy"
                                 decoding="async"
                                 data-testid="feed-card-image"
                                 onError={() =>
                                   setBrokenImages((prev) => ({
                                     ...prev,
-                                    [`${item.key}:${imgSrc}`]: true,
+                                    [`${item.key}:${validImages[0]}`]: true,
                                   }))
                                 }
-                                className="w-full h-full object-contain"
+                                className="w-full h-auto max-h-[640px] object-contain mx-auto block"
                               />
-                              {imgIdx === 2 && validImages.length > 3 && (
-                                <span className="absolute inset-0 bg-[#1C1917]/75 text-[#E6BC5C] font-extrabold text-sm flex items-center justify-center">
-                                  +{validImages.length - 3}
-                                </span>
-                              )}
                             </button>
-                          ))}
+                          ) : (
+                            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                              {validImages.slice(0, 3).map((imgSrc, imgIdx) => (
+                                <button
+                                  key={imgSrc}
+                                  type="button"
+                                  onClick={() => handleOpenItem(item)}
+                                  className="relative aspect-[4/3] overflow-hidden rounded-xl border border-[#EAE2D1] dark:border-[#2E2922] bg-[#F5F1E8] dark:bg-[#14120F] flex items-center justify-center cursor-pointer"
+                                >
+                                  <img
+                                    src={imgSrc}
+                                    alt={`${item.title} (${imgIdx + 1})`}
+                                    loading="lazy"
+                                    decoding="async"
+                                    data-testid="feed-card-image"
+                                    onError={() =>
+                                      setBrokenImages((prev) => ({
+                                        ...prev,
+                                        [`${item.key}:${imgSrc}`]: true,
+                                      }))
+                                    }
+                                    className="w-full h-full object-contain"
+                                  />
+                                  {imgIdx === 2 && validImages.length > 3 && (
+                                    <span className="absolute inset-0 bg-[#1C1917]/75 text-[#E6BC5C] font-extrabold text-sm flex items-center justify-center">
+                                      +{validImages.length - 3}
+                                    </span>
+                                  )}
+                                </button>
+                              ))}
+                            </div>
+                          )}
                         </div>
                       )}
                     </div>
-                  )}
+                  </div>
 
                   {/* Card Action Bar (NO view counts shown unless admin explicitly turns showViewCounts ON) */}
                   <div className="px-3.5 sm:px-5 py-2.5 border-t border-[#EFE8D8] dark:border-[#2A251E] bg-[#FAF7F0]/80 dark:bg-[#151310]/90 flex flex-wrap items-center justify-between gap-1.5">

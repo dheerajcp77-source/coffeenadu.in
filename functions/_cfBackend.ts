@@ -2584,18 +2584,39 @@ export async function handleApiDirectOnCloudflare(
     );
   }
 
+  const resolveEffectiveCfEnv = (): PagesEnv | undefined => {
+    const cfg = getAppsScriptConfig(env);
+    return cfg.configured
+      ? {
+          ...env,
+          APPS_SCRIPT_WEBAPP_URL: cfg.webAppUrl,
+          APPS_SCRIPT_API_SECRET: cfg.apiSecret,
+        }
+      : env;
+  };
+
   if (pathname.startsWith('/api/platform/')) {
     const platformResp = await handleCfPublicPlatformRoute(request, url);
     if (platformResp) return platformResp;
   }
 
   if (pathname.startsWith('/api/community/')) {
-    const communityResp = await handleCfCommunityApi(request, url, async () => ({ ok: false }));
+    const communityResp = await handleCfCommunityApi(
+      request,
+      url,
+      async () => ({ ok: false }),
+      resolveEffectiveCfEnv()
+    );
     if (communityResp) return communityResp;
   }
 
   if (pathname.startsWith('/api/public/contest/')) {
-    const contestResp = await handleCfContestApi(request, url, async () => ({ ok: false }));
+    const contestResp = await handleCfContestApi(
+      request,
+      url,
+      async () => ({ ok: false }),
+      resolveEffectiveCfEnv()
+    );
     if (contestResp) return contestResp;
   }
 
@@ -2610,27 +2631,6 @@ export async function handleApiDirectOnCloudflare(
     }
     const admin = authResult.admin;
 
-    if (pathname.startsWith('/api/admin2/platform/')) {
-      const adminPlatformResp = await handleCfAdminPlatformRoute(request, url, admin.email);
-      if (adminPlatformResp) return adminPlatformResp;
-    }
-
-    if (pathname.startsWith('/api/admin2/community/')) {
-      const adminCommunityResp = await handleCfCommunityApi(request, url, async () => ({
-        ok: true,
-        email: admin.email,
-      }));
-      if (adminCommunityResp) return adminCommunityResp;
-    }
-
-    if (pathname.startsWith('/api/admin2/contest/')) {
-      const adminContestResp = await handleCfContestApi(request, url, async () => ({
-        ok: true,
-        email: admin.email,
-      }));
-      if (adminContestResp) return adminContestResp;
-    }
-
     // Allow verified admin requests to supply X-Apps-Script-Url and X-Apps-Script-Secret headers
     const hdrAppsScriptUrl = (request.headers.get('x-apps-script-url') || '').trim();
     const hdrAppsScriptSecret = (request.headers.get('x-apps-script-secret') || '').trim();
@@ -2640,6 +2640,37 @@ export async function handleApiDirectOnCloudflare(
     }
     const activeAppsScriptCfg = getAppsScriptConfig(env);
     appsScriptCfg = activeAppsScriptCfg;
+
+    if (pathname.startsWith('/api/admin2/platform/')) {
+      const adminPlatformResp = await handleCfAdminPlatformRoute(request, url, admin.email);
+      if (adminPlatformResp) return adminPlatformResp;
+    }
+
+    if (pathname.startsWith('/api/admin2/community/')) {
+      const adminCommunityResp = await handleCfCommunityApi(
+        request,
+        url,
+        async () => ({
+          ok: true,
+          email: admin.email,
+        }),
+        resolveEffectiveCfEnv()
+      );
+      if (adminCommunityResp) return adminCommunityResp;
+    }
+
+    if (pathname.startsWith('/api/admin2/contest/')) {
+      const adminContestResp = await handleCfContestApi(
+        request,
+        url,
+        async () => ({
+          ok: true,
+          email: admin.email,
+        }),
+        resolveEffectiveCfEnv()
+      );
+      if (adminContestResp) return adminContestResp;
+    }
 
     if (pathname === '/api/admin2/auth/me' && method === 'GET') {
       return jsonResponse({ ok: true, user: admin });

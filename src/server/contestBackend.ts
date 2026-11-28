@@ -818,6 +818,7 @@ export class ContestBackend {
         {
           fullName: req.body?.contributorName,
           mobileNumber: req.body?.mobileNumber,
+          switchContributor: req.body?.switchContributor === true,
         }
       );
       if (!contributorRes.ok) {
@@ -836,6 +837,7 @@ export class ContestBackend {
           description: req.body?.description,
           location: req.body?.location,
           photos: req.body?.photos,
+          contributorName: req.body?.contributorName,
         }
       );
       if (!postRes.ok) {
@@ -855,7 +857,7 @@ export class ContestBackend {
           slug: postRes.post.slug,
           competitionMonth: activeMonth.monthKey,
           contributorUserId: contributorRes.user.id,
-          contributorName: contributorRes.user.fullName,
+          contributorName: postRes.post.authorName,
           title: postRes.post.title,
           summary: postRes.post.description.slice(0, 220),
           location: postRes.post.location,
