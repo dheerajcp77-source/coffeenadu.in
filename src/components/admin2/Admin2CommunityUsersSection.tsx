@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import {
   CheckCircle2,
   Download,
+  ExternalLink,
   Eye,
   EyeOff,
   Flag,
@@ -82,6 +83,12 @@ export const Admin2CommunityUsersSection: React.FC<Admin2CommunityUsersSectionPr
   const [busyId, setBusyId] = useState<string | null>(null);
   const [confirmDeletePostId, setConfirmDeletePostId] = useState<string | null>(null);
 
+  const notifyPublicDataMutated = () => {
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('coffeenadu:data-mutated'));
+    }
+  };
+
   const loadAll = useCallback(async () => {
     setLoading(true);
     setError('');
@@ -136,6 +143,7 @@ export const Admin2CommunityUsersSection: React.FC<Admin2CommunityUsersSectionPr
           : `Restored ${user.fullName}'s account to active.`
       );
       await loadAll();
+      notifyPublicDataMutated();
       if (historyUser && historyUser.id === user.id) {
         setHistoryUser({ ...historyUser, status: nextStatus });
       }
@@ -161,6 +169,7 @@ export const Admin2CommunityUsersSection: React.FC<Admin2CommunityUsersSectionPr
           : 'Community post hidden from public feed.'
       );
       await loadAll();
+      notifyPublicDataMutated();
       if (historyUser) {
         await handleOpenHistory(historyUser.id);
       }
@@ -179,6 +188,7 @@ export const Admin2CommunityUsersSection: React.FC<Admin2CommunityUsersSectionPr
       setConfirmDeletePostId(null);
       setNotice('Community post permanently removed.');
       await loadAll();
+      notifyPublicDataMutated();
       if (historyUser) {
         await handleOpenHistory(historyUser.id);
       }
@@ -195,6 +205,7 @@ export const Admin2CommunityUsersSection: React.FC<Admin2CommunityUsersSectionPr
       await resolveAdminCommunityReport(reportId, status);
       setNotice(`Report marked as ${status}.`);
       await loadAll();
+      notifyPublicDataMutated();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to update report.');
     } finally {
@@ -625,62 +636,120 @@ export const Admin2CommunityUsersSection: React.FC<Admin2CommunityUsersSectionPr
               No community reports submitted yet.
             </p>
           ) : (
-            reports.map((rep) => (
-              <div
-                key={rep.id}
-                className="p-4 rounded-xl border border-slate-200 dark:border-slate-800 flex flex-wrap items-center justify-between gap-3"
-              >
-                <div className="space-y-1">
-                  <div className="flex items-center gap-2 text-xs">
-                    <span
-                      className={`px-2 py-0.5 rounded font-bold text-[10px] uppercase ${
-                        rep.status === 'open'
-                          ? 'bg-red-100 text-red-800'
-                          : 'bg-slate-100 text-slate-600'
-                      }`}
-                    >
-                      {rep.status}
-                    </span>
-                    <span className="font-kannada font-bold">{rep.postTitle}</span>
+            reports.map((rep) => {
+              const linkedPost = posts.find((p) => p.id === rep.postId);
+              const targetUrl =
+                rep.targetType === 'news'
+                  ? `/?article=${encodeURIComponent(rep.postId)}`
+                  : `/community/${encodeURIComponent(
+                      rep.postSlug || linkedPost?.slug || rep.postId
+                    )}?preview=1`;
+              return (
+                <div
+                  key={rep.id}
+                  data-testid={`admin-report-card-${rep.id}`}
+                  className="p-4 rounded-xl border border-slate-200 dark:border-slate-800 flex flex-wrap items-center justify-between gap-3"
+                >
+                  <div className="space-y-1">
+                    <div className="flex flex-wrap items-center gap-2 text-xs">
+                      <span
+                        className={`px-2 py-0.5 rounded font-bold text-[10px] uppercase ${
+                          rep.status === 'open'
+                            ? 'bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-200'
+                            : rep.status === 'resolved'
+                            ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-200'
+                            : 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300'
+                        }`}
+                      >
+                        {rep.status}
+                      </span>
+                      {rep.targetType && (
+                        <span className="px-2 py-0.5 rounded bg-blue-50 text-blue-700 dark:bg-blue-950/60 dark:text-blue-200 font-bold text-[10px] uppercase">
+                          {rep.targetType}
+                        </span>
+                      )}
+                      <a
+                        href={targetUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="font-kannada font-bold hover:underline inline-flex items-center gap-1"
+                      >
+                        <span>{rep.postTitle}</span>
+                        <ExternalLink className="w-3 h-3 opacity-70" />
+                      </a>
+                    </div>
+                    <p className="font-kannada text-xs font-semibold text-red-700 dark:text-red-300">
+                      Reason: {rep.reason}
+                    </p>
+                    {rep.details && (
+                      <p className="font-kannada text-xs text-slate-600 dark:text-slate-300">
+                        Details: {rep.details}
+                      </p>
+                    )}
+                    <p className="text-[11px] text-slate-400">
+                      Submitted: {new Date(rep.createdAt).toLocaleString()}
+                      {rep.resolvedAt
+                        ? ` · ${rep.status === 'resolved' ? 'Resolved' : 'Dismissed'}: ${new Date(
+                            rep.resolvedAt
+                          ).toLocaleString()}${rep.resolvedBy ? ` by ${rep.resolvedBy}` : ''}`
+                        : ''}
+                    </p>
                   </div>
-                  <p className="font-kannada text-xs font-semibold text-red-700 dark:text-red-300">
-                    Reason: {rep.reason}
-                  </p>
-                  {rep.details && (
-                    <p className="font-kannada text-xs text-slate-500">{rep.details}</p>
-                  )}
-                  <p className="text-[11px] text-slate-400">
-                    {new Date(rep.createdAt).toLocaleString()}
-                  </p>
-                </div>
 
-                {rep.status === 'open' && (
                   <div className="flex flex-wrap items-center gap-1.5">
-                    <button
-                      type="button"
-                      disabled={busyId === rep.id}
-                      onClick={async () => {
-                        await handleSetPostStatus(rep.postId, 'hidden');
-                        await handleResolveReport(rep.id, 'resolved');
-                      }}
-                      className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-red-600 text-white text-xs font-bold cursor-pointer"
+                    <a
+                      href={targetUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      data-testid={`admin-report-open-article-${rep.id}`}
+                      className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 text-xs font-bold hover:bg-slate-50 dark:hover:bg-slate-800"
                     >
-                      <EyeOff className="w-3.5 h-3.5" />
-                      <span>Hide Post & Resolve</span>
-                    </button>
-                    <button
-                      type="button"
-                      disabled={busyId === rep.id}
-                      onClick={() => void handleResolveReport(rep.id, 'dismissed')}
-                      className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 text-xs font-bold cursor-pointer"
-                    >
-                      <CheckCircle2 className="w-3.5 h-3.5" />
-                      <span>Dismiss</span>
-                    </button>
+                      <ExternalLink className="w-3.5 h-3.5" />
+                      <span>Open Article</span>
+                    </a>
+                    {rep.status === 'open' && (
+                      <>
+                        <button
+                          type="button"
+                          disabled={busyId === rep.id}
+                          data-testid={`admin-report-resolve-btn-${rep.id}`}
+                          onClick={() => void handleResolveReport(rep.id, 'resolved')}
+                          className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold cursor-pointer"
+                        >
+                          <CheckCircle2 className="w-3.5 h-3.5" />
+                          <span>Mark Resolved</span>
+                        </button>
+                        {rep.targetType !== 'news' && (
+                          <button
+                            type="button"
+                            disabled={busyId === rep.id}
+                            data-testid={`admin-report-hide-resolve-btn-${rep.id}`}
+                            onClick={async () => {
+                              await handleSetPostStatus(rep.postId, 'hidden');
+                              await handleResolveReport(rep.id, 'resolved');
+                            }}
+                            className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-red-600 hover:bg-red-700 text-white text-xs font-bold cursor-pointer"
+                          >
+                            <EyeOff className="w-3.5 h-3.5" />
+                            <span>Hide Post & Resolve</span>
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          disabled={busyId === rep.id}
+                          data-testid={`admin-report-dismiss-btn-${rep.id}`}
+                          onClick={() => void handleResolveReport(rep.id, 'dismissed')}
+                          className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 text-xs font-bold cursor-pointer"
+                        >
+                          <X className="w-3.5 h-3.5" />
+                          <span>Dismiss</span>
+                        </button>
+                      </>
+                    )}
                   </div>
-                )}
-              </div>
-            ))
+                </div>
+              );
+            })
           )}
         </div>
       )}

@@ -241,15 +241,27 @@ export function trackCommunityPostShare(postId: string): void {
 export async function reportCommunityPost(
   postId: string,
   reason: string,
-  details?: string
-): Promise<void> {
+  details?: string,
+  meta?: { postTitle?: string; postSlug?: string; targetType?: 'community' | 'contest' | 'news' }
+): Promise<{ duplicatePrevented?: boolean; id?: string }> {
   const resp = await fetch(`/api/community/posts/${encodeURIComponent(postId)}/report`, {
     method: 'POST',
     credentials: 'same-origin',
     headers: buildCommunityHeaders({ 'Content-Type': 'application/json' }),
-    body: JSON.stringify({ reason, details }),
+    body: JSON.stringify({
+      reason,
+      details,
+      postTitle: meta?.postTitle,
+      postSlug: meta?.postSlug,
+      targetType: meta?.targetType,
+    }),
   });
-  await parseJsonSafe<{ ok: true }>(resp, 'ವರದಿ ಸಲ್ಲಿಸಲು ಸಾಧ್ಯವಾಗಲಿಲ್ಲ.');
+  const json = await parseJsonSafe<{
+    ok: true;
+    id?: string;
+    duplicatePrevented?: boolean;
+  }>(resp, 'ವರದಿ ಸಲ್ಲಿಸಲು ಸಾಧ್ಯವಾಗಲಿಲ್ಲ. ದಯವಿಟ್ಟು ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ.');
+  return { duplicatePrevented: json.duplicatePrevented, id: json.id };
 }
 
 /**

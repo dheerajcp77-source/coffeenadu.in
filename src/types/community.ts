@@ -112,7 +112,9 @@ export interface PublicCommunityPost {
 export interface CommunityReportRecord {
   id: string;
   postId: string;
+  postSlug?: string;
   postTitle: string;
+  targetType?: 'community' | 'contest' | 'news';
   reason: string;
   details?: string;
   createdAt: string;

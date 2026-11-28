@@ -646,8 +646,15 @@ const REPORT_REASONS_KN = [
   'ಇತರೆ ಕಾರಣ',
 ];
 
+export interface CommunityReportTarget {
+  id: string;
+  slug?: string;
+  title: string;
+  targetType?: 'community' | 'contest' | 'news';
+}
+
 interface CommunityReportModalProps {
-  post: PublicCommunityPost | null;
+  post: CommunityReportTarget | PublicCommunityPost | null;
   onClose: () => void;
 }
 
@@ -674,7 +681,17 @@ export const CommunityReportModal: React.FC<CommunityReportModalProps> = ({ post
     setSubmitting(true);
     setError('');
     try {
-      await reportCommunityPost(post.id, reason, details.trim() || undefined);
+      const targetType: 'community' | 'contest' | 'news' =
+        'targetType' in post && post.targetType
+          ? post.targetType
+          : 'category' in post && post.category === 'monthly-news-contest'
+          ? 'contest'
+          : 'community';
+      await reportCommunityPost(post.id, reason, details.trim() || undefined, {
+        postTitle: post.title,
+        postSlug: post.slug,
+        targetType,
+      });
       setDone(true);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'ವರದಿ ಸಲ್ಲಿಸಲು ಸಾಧ್ಯವಾಗಲಿಲ್ಲ.');
@@ -689,6 +706,7 @@ export const CommunityReportModal: React.FC<CommunityReportModalProps> = ({ post
       role="dialog"
       aria-modal="true"
       aria-labelledby="community-report-title"
+      data-testid="community-report-modal"
     >
       <div className="w-full max-w-md bg-white dark:bg-[#101D30] rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xl overflow-hidden">
         <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100 dark:border-slate-800">
@@ -698,7 +716,7 @@ export const CommunityReportModal: React.FC<CommunityReportModalProps> = ({ post
               id="community-report-title"
               className="font-kannada text-sm font-extrabold text-[#10243D] dark:text-white"
             >
-              ಪ್ರಕಟಣೆ ವರದಿ ಮಾಡಿ
+              ಪ್ರಕಟಣೆ / ಸುದ್ದಿ ವರದಿ ಮಾಡಿ (Report Content)
             </h2>
           </div>
           <button
@@ -713,10 +731,10 @@ export const CommunityReportModal: React.FC<CommunityReportModalProps> = ({ post
 
         <div className="p-5">
           {done ? (
-            <div className="space-y-4 text-center py-2">
+            <div className="space-y-4 text-center py-2" data-testid="community-report-success">
               <CheckCircle2 className="w-10 h-10 text-[#176B4A] mx-auto" />
               <p className="font-kannada text-sm font-bold text-[#10243D] dark:text-white">
-                ನಿಮ್ಮ ವರದಿಯನ್ನು ಸ್ವೀಕರಿಸಲಾಗಿದೆ.
+                ನಿಮ್ಮ ವರದಿಯನ್ನು ಸ್ವೀಕರಿಸಲಾಗಿದೆ (Report Submitted).
               </p>
               <p className="font-kannada text-xs text-[#5A677A] dark:text-slate-400">
                 ಕಾಫಿನಾಡು ಆಡ್ಮಿನ್ ತಂಡವು ಶೀಘ್ರದಲ್ಲೇ ಇದನ್ನು ಪರಿಶೀಲಿಸುತ್ತದೆ.
@@ -732,7 +750,10 @@ export const CommunityReportModal: React.FC<CommunityReportModalProps> = ({ post
           ) : (
             <form onSubmit={(e) => void handleSubmit(e)} className="space-y-4">
               {error && (
-                <div className="p-2.5 rounded-lg bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-900 text-xs font-kannada text-red-700 dark:text-red-300">
+                <div
+                  role="alert"
+                  className="p-2.5 rounded-lg bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-900 text-xs font-kannada text-red-700 dark:text-red-300"
+                >
                   {error}
                 </div>
               )}
@@ -764,6 +785,7 @@ export const CommunityReportModal: React.FC<CommunityReportModalProps> = ({ post
                 value={details}
                 onChange={(e) => setDetails(e.target.value)}
                 placeholder="ಹೆಚ್ಚುವರಿ ವಿವರ (ಐಚ್ಛಿಕ)"
+                data-testid="community-report-details-input"
                 className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs font-kannada text-[#10243D] dark:text-white placeholder:text-slate-500 dark:placeholder:text-slate-400"
               />
               <div className="flex justify-end gap-2">
@@ -777,6 +799,7 @@ export const CommunityReportModal: React.FC<CommunityReportModalProps> = ({ post
                 <button
                   type="submit"
                   disabled={submitting}
+                  data-testid="community-report-submit-btn"
                   className="px-4 py-2 rounded-xl bg-red-600 hover:bg-red-700 text-white text-xs font-kannada font-bold cursor-pointer disabled:opacity-60"
                 >
                   {submitting ? 'ಸಲ್ಲಿಸಲಾಗುತ್ತಿದೆ...' : 'ವರದಿ ಸಲ್ಲಿಸಿ'}

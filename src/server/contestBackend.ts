@@ -970,7 +970,7 @@ export class ContestBackend {
 
           if (eligibility === 'disqualified' && hidePost) {
             this.communityBackend.setPostStatusInternal(entry.postId, 'hidden', reason);
-          } else if (eligibility === 'eligible') {
+          } else {
             const linkedPost = this.communityBackend.getInternalPostByIdOrSlug(entry.postId);
             if (linkedPost && linkedPost.status === 'hidden') {
               this.communityBackend.setPostStatusInternal(entry.postId, 'published');
@@ -982,7 +982,13 @@ export class ContestBackend {
             eligibility === 'disqualified' ? 'entry.disqualify' : 'entry.reinstate',
             `${eligibility === 'disqualified' ? 'Disqualified' : 'Reinstated'} "${entry.title}"${
               reason ? ` (${reason})` : ''
-            }${eligibility === 'disqualified' && hidePost ? ' [post hidden from feed]' : ''}`,
+            }${
+              eligibility === 'disqualified'
+                ? hidePost
+                  ? ' [unpublished from Community Feed]'
+                  : ' [kept published in Community Feed]'
+                : ' [published in Community Feed]'
+            }`,
             entry.competitionMonth,
             entry.id
           );

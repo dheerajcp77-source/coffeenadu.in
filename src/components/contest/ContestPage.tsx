@@ -9,6 +9,7 @@ import {
   Copy,
   Eye,
   ExternalLink,
+  Flag,
   MapPin,
   PenSquare,
   Search,
@@ -30,6 +31,10 @@ import {
   computeCountdownParts,
   createDefaultContestPrizes,
 } from '../../utils/contestHelpers';
+import {
+  CommunityReportModal,
+  type CommunityReportTarget,
+} from '../community/CommunityModals';
 import { ContestSubmitModal } from './ContestSubmitModal';
 
 interface ContestPageProps {
@@ -73,6 +78,7 @@ export const ContestPage: React.FC<ContestPageProps> = ({
   const [searchQuery, setSearchQuery] = useState('');
   const [copiedContestUrl, setCopiedContestUrl] = useState(false);
   const [failedThumbIds, setFailedThumbIds] = useState<Record<string, boolean>>({});
+  const [reportingEntry, setReportingEntry] = useState<CommunityReportTarget | null>(null);
   const [countdown, setCountdown] = useState({
     days: 0,
     hours: 0,
@@ -107,6 +113,14 @@ export const ContestPage: React.FC<ContestPageProps> = ({
 
   useEffect(() => {
     void loadOverview();
+  }, [loadOverview]);
+
+  useEffect(() => {
+    const handleMutated = () => {
+      void loadOverview();
+    };
+    window.addEventListener('coffeenadu:data-mutated', handleMutated);
+    return () => window.removeEventListener('coffeenadu:data-mutated', handleMutated);
   }, [loadOverview]);
 
   useEffect(() => {
@@ -626,6 +640,23 @@ export const ContestPage: React.FC<ContestPageProps> = ({
                           <span>ಓದಿ</span>
                           <ExternalLink className="h-3.5 w-3.5" />
                         </button>
+                        <button
+                          type="button"
+                          data-testid={`contest-report-btn-${entry.id}`}
+                          onClick={() =>
+                            setReportingEntry({
+                              id: entry.postId,
+                              slug: entry.slug,
+                              title: entry.title,
+                              targetType: 'contest',
+                            })
+                          }
+                          title="Report this entry"
+                          aria-label="Report this entry"
+                          className="inline-flex min-h-[38px] items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-500 transition hover:border-rose-300 hover:text-rose-600 cursor-pointer"
+                        >
+                          <Flag className="h-3.5 w-3.5" />
+                        </button>
                       </div>
                     </div>
                   </article>
@@ -747,6 +778,23 @@ export const ContestPage: React.FC<ContestPageProps> = ({
                       >
                         <Share2 className="h-3.5 w-3.5" />
                         <span>Share</span>
+                      </button>
+                      <button
+                        type="button"
+                        data-testid={`contest-list-report-btn-${entry.id}`}
+                        onClick={() =>
+                          setReportingEntry({
+                            id: entry.postId,
+                            slug: entry.slug,
+                            title: entry.title,
+                            targetType: 'contest',
+                          })
+                        }
+                        title="Report this entry"
+                        aria-label="Report this entry"
+                        className="inline-flex min-h-[38px] items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-500 transition hover:border-rose-300 hover:text-rose-600 cursor-pointer"
+                      >
+                        <Flag className="h-3.5 w-3.5" />
                       </button>
                     </div>
                   </div>
@@ -908,8 +956,16 @@ export const ContestPage: React.FC<ContestPageProps> = ({
         onSubmitted={() => {
           void loadOverview();
           onContestSubmitted?.();
+          if (typeof window !== 'undefined') {
+            window.dispatchEvent(new CustomEvent('coffeenadu:data-mutated'));
+          }
         }}
         onOpenArticle={onOpenCommunityPost}
+      />
+
+      <CommunityReportModal
+        post={reportingEntry}
+        onClose={() => setReportingEntry(null)}
       />
     </div>
   );

@@ -153,7 +153,11 @@ export async function handleCfCommunityApi(
   try {
   const isMutation = method !== 'GET' && method !== 'HEAD';
   const isAdminRoute = pathname.startsWith('/api/admin2/community');
-  const state = await loadSharedCommunityContestState(env, isMutation || isAdminRoute);
+  const isPublicPostsList = pathname === '/api/community/posts' && method === 'GET';
+  const state = await loadSharedCommunityContestState(
+    env,
+    isMutation || isAdminRoute || isPublicPostsList
+  );
 
   const readJson = async () => {
     try {
@@ -407,8 +411,10 @@ export async function handleCfCommunityApi(
           (p.slug.toLowerCase() === key.toLowerCase() || p.id.toLowerCase() === key.toLowerCase())
       );
       if (!post) return jsonResp({ ok: false, error: 'ಪ್ರಕಟಣೆ ಲಭ್ಯವಿಲ್ಲ.' }, 404);
-      post.viewsCount = (post.viewsCount || 0) + 1;
-      await persistSharedCommunityContestDelta(env, freshState, { post }, { bestEffort: true });
+      if (post.category !== 'monthly-news-contest') {
+        post.viewsCount = (post.viewsCount || 0) + 1;
+        await persistSharedCommunityContestDelta(env, freshState, { post }, { bestEffort: true });
+      }
       return jsonResp({ ok: true, post: toPublicCommunityPost(post, resolved?.user.id || null) });
     }
 
@@ -485,16 +491,58 @@ export async function handleCfCommunityApi(
 
   const reportMatch = pathname.match(/^\/api\/community\/posts\/([^/]+)\/report$/);
   if (reportMatch && method === 'POST') {
-    const key = decodeURIComponent(reportMatch[1]);
-    const post = state.posts.find((p) => p.id === key || p.slug === key);
-    if (!post) return jsonResp({ ok: false, error: 'Not found' }, 404);
+    const key = cleanSingleLine(decodeURIComponent(reportMatch[1]), 160);
     const body = await readJson();
+    const post = state.posts.find((p) => p.id === key || p.slug === key);
+    const fallbackTitle = cleanSingleLine(body.postTitle, 240);
+    const fallbackSlug = cleanSingleLine(body.postSlug, 160);
+    const rawTargetType = cleanSingleLine(body.targetType, 32);
+    const targetType: 'community' | 'contest' | 'news' =
+      rawTargetType === 'news'
+        ? 'news'
+        : post?.category === 'monthly-news-contest' || rawTargetType === 'contest'
+        ? 'contest'
+        : 'community';
+
+    if (!post && !fallbackTitle) {
+      return jsonResp(
+        { ok: false, error: 'ವರದಿ ಮಾಡಬೇಕಾದ ಸುದ್ದಿ ಅಥವಾ ಪ್ರಕಟಣೆ ಕಂಡುಬಂದಿಲ್ಲ.' },
+        404
+      );
+    }
     const reason = cleanSingleLine(body.reason, 180);
-    if (!reason) return jsonResp({ ok: false, error: 'Reason required.' }, 400);
+    if (!reason || reason.length < 2) {
+      return jsonResp({ ok: false, error: 'ದಯವಿಟ್ಟು ವರದಿಯ ಕಾರಣವನ್ನು ಆಯ್ಕೆಮಾಡಿ.' }, 400);
+    }
+
+    const resolvedPostId = post ? post.id : key;
+    const resolvedTitle = post ? post.title : fallbackTitle;
+    const resolvedSlug = post ? post.slug : fallbackSlug || undefined;
+
+    const nowMs = Date.now();
+    const existingDuplicate = state.reports.find((r) => {
+      if (r.postId !== resolvedPostId || r.status !== 'open') return false;
+      if (r.reason !== reason) return false;
+      const createdMs = Date.parse(r.createdAt);
+      return Number.isFinite(createdMs) && nowMs - createdMs < 10 * 60 * 1000;
+    });
+    if (existingDuplicate) {
+      return jsonResp(
+        {
+          ok: true,
+          duplicatePrevented: true,
+          id: existingDuplicate.id,
+        },
+        200
+      );
+    }
+
     const rep: CommunityReportRecord = {
       id: `crep-${Date.now().toString(36)}-${randomHex(4)}`,
-      postId: post.id,
-      postTitle: post.title,
+      postId: resolvedPostId,
+      postSlug: resolvedSlug,
+      postTitle: resolvedTitle,
+      targetType,
       reason,
       details: cleanMultiline(body.details, 800) || undefined,
       createdAt: new Date().toISOString(),
@@ -506,7 +554,7 @@ export async function handleCfCommunityApi(
     } catch {
       return jsonResp({ ok: false, error: 'ವರದಿ ಸಲ್ಲಿಸಲು ಸಾಧ್ಯವಾಗಲಿಲ್ಲ.' }, 502);
     }
-    return jsonResp({ ok: true, id: rep.id }, 201);
+    return jsonResp({ ok: true, duplicatePrevented: false, id: rep.id }, 201);
   }
 
   // ---------------- ADMIN-ONLY ENDPOINTS ----------------

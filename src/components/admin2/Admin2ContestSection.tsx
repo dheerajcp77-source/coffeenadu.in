@@ -33,6 +33,7 @@ import {
   updateAdminContestMonthConfig,
   type AdminWinnerSelectionInput,
 } from '../../services/contestClient';
+import { setAdminCommunityPostStatus } from '../../services/communityClient';
 import type {
   AdminContestEntryView,
   ContestAdminOverview,
@@ -83,7 +84,7 @@ export const Admin2ContestSection: React.FC<Admin2ContestSectionProps> = ({ dark
 
   const [disqualifyTarget, setDisqualifyTarget] = useState<AdminContestEntryView | null>(null);
   const [disqualifyReason, setDisqualifyReason] = useState('');
-  const [disqualifyHidePost, setDisqualifyHidePost] = useState(true);
+  const [disqualifyHidePost, setDisqualifyHidePost] = useState(false);
   const [disqualifyModalError, setDisqualifyModalError] = useState('');
 
   const [winnerDrafts, setWinnerDrafts] = useState<WinnerDraftRow[]>([]);
@@ -136,6 +137,12 @@ export const Admin2ContestSection: React.FC<Admin2ContestSectionProps> = ({ dark
     void loadData(selectedMonthKey || undefined);
   }, [loadData, selectedMonthKey]);
 
+  const notifyPublicDataMutated = () => {
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('coffeenadu:data-mutated'));
+    }
+  };
+
   const runAction = async (fn: () => Promise<void>, successMessage: string) => {
     setBusy(true);
     setError('');
@@ -144,6 +151,7 @@ export const Admin2ContestSection: React.FC<Admin2ContestSectionProps> = ({ dark
       await fn();
       setFeedback(successMessage);
       await loadData(selectedMonthKey || undefined);
+      notifyPublicDataMutated();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Action failed.');
     } finally {
@@ -173,9 +181,14 @@ export const Admin2ContestSection: React.FC<Admin2ContestSectionProps> = ({ dark
       );
       setDisqualifyTarget(null);
       setDisqualifyReason('');
-      setDisqualifyHidePost(true);
-      setFeedback(`Disqualified "${targetTitle}" and recorded audit entry.`);
+      setDisqualifyHidePost(false);
+      setFeedback(
+        disqualifyHidePost
+          ? `Disqualified "${targetTitle}" from contest and unpublished from Community Feed.`
+          : `Disqualified "${targetTitle}" from contest leaderboard (kept published in Community Feed).`
+      );
       await loadData(selectedMonthKey || undefined);
+      notifyPublicDataMutated();
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Failed to disqualify entry.';
       setDisqualifyModalError(msg);
@@ -188,7 +201,24 @@ export const Admin2ContestSection: React.FC<Admin2ContestSectionProps> = ({ dark
   const handleReinstate = async (entry: AdminContestEntryView) => {
     await runAction(
       () => updateAdminContestEntryEligibility(entry.id, 'eligible'),
-      `Reinstated "${entry.title}" as eligible.`
+      `Reinstated "${entry.title}" as contest eligible and published in Community Feed.`
+    );
+  };
+
+  const handleToggleFeedStatus = async (entry: AdminContestEntryView) => {
+    const isCurrentlyPublished = entry.postStatus === 'published';
+    const nextStatus = isCurrentlyPublished ? 'hidden' : 'published';
+    await runAction(
+      async () => {
+        await setAdminCommunityPostStatus(
+          entry.postId,
+          nextStatus,
+          nextStatus === 'hidden' ? 'Unpublished by admin from contest panel' : undefined
+        );
+      },
+      nextStatus === 'published'
+        ? `Published "${entry.title}" to the Community Feed.`
+        : `Unpublished "${entry.title}" from the public Community Feed.`
     );
   };
 
@@ -539,45 +569,88 @@ export const Admin2ContestSection: React.FC<Admin2ContestSectionProps> = ({ dark
                           {entry.suspiciousBlockedViews.toLocaleString('en-IN')}
                         </td>
                         <td className="px-4 py-3">
-                          <span
-                            className={`inline-block rounded px-2 py-0.5 text-[11px] font-bold ${
-                              isEligible
-                                ? 'bg-emerald-100 text-emerald-900 dark:bg-emerald-900/40 dark:text-emerald-200'
-                                : 'bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-200'
-                            }`}
-                          >
-                            {isEligible ? 'Eligible' : 'Disqualified'}
-                          </span>
+                          <div className="flex flex-col items-start gap-1">
+                            <span
+                              className={`inline-block rounded px-2 py-0.5 text-[11px] font-bold ${
+                                isEligible
+                                  ? 'bg-emerald-100 text-emerald-900 dark:bg-emerald-900/40 dark:text-emerald-200'
+                                  : 'bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-200'
+                              }`}
+                            >
+                              {isEligible ? 'Contest Eligible' : 'Contest Disqualified'}
+                            </span>
+                            <span
+                              className={`inline-block rounded px-2 py-0.5 text-[10px] font-bold ${
+                                entry.postStatus === 'published'
+                                  ? 'bg-blue-100 text-blue-900 dark:bg-blue-950/60 dark:text-blue-200'
+                                  : 'bg-amber-100 text-amber-900 dark:bg-amber-950/60 dark:text-amber-200'
+                              }`}
+                            >
+                              {entry.postStatus === 'published'
+                                ? 'Feed: Published'
+                                : 'Feed: Unpublished'}
+                            </span>
+                          </div>
                         </td>
                         <td className="px-4 py-3 text-right">
-                          {isEligible ? (
+                          <div className="flex flex-wrap items-center justify-end gap-1.5">
+                            {isEligible ? (
+                              <button
+                                type="button"
+                                disabled={busy}
+                                data-testid={`contest-disqualify-btn-${entry.id}`}
+                                onClick={() => {
+                                  setDisqualifyTarget(entry);
+                                  setDisqualifyReason('');
+                                  setDisqualifyHidePost(false);
+                                  setDisqualifyModalError('');
+                                }}
+                                className="inline-flex items-center gap-1 rounded border border-red-300 px-2.5 py-1 text-[11px] font-bold text-red-700 hover:bg-red-50 dark:border-red-800 dark:text-red-300"
+                              >
+                                <Ban className="h-3 w-3" />
+                                <span>Disqualify</span>
+                              </button>
+                            ) : (
+                              <button
+                                type="button"
+                                disabled={busy}
+                                data-testid={`contest-reinstate-btn-${entry.id}`}
+                                onClick={() => void handleReinstate(entry)}
+                                className="inline-flex items-center gap-1 rounded border border-emerald-400 px-2.5 py-1 text-[11px] font-bold text-emerald-800 hover:bg-emerald-50 dark:text-emerald-300"
+                              >
+                                <CheckCircle2 className="h-3 w-3" />
+                                <span>Reinstate</span>
+                              </button>
+                            )}
                             <button
                               type="button"
                               disabled={busy}
-                              data-testid={`contest-disqualify-btn-${entry.id}`}
-                              onClick={() => {
-                                setDisqualifyTarget(entry);
-                                setDisqualifyReason('');
-                                setDisqualifyHidePost(true);
-                                setDisqualifyModalError('');
-                              }}
-                              className="inline-flex items-center gap-1 rounded border border-red-300 px-2.5 py-1 text-[11px] font-bold text-red-700 hover:bg-red-50 dark:border-red-800 dark:text-red-300"
+                              data-testid={`contest-toggle-feed-btn-${entry.id}`}
+                              onClick={() => void handleToggleFeedStatus(entry)}
+                              className={`inline-flex items-center gap-1 rounded border px-2 py-1 text-[11px] font-semibold ${
+                                entry.postStatus === 'published'
+                                  ? 'border-slate-300 text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-300'
+                                  : 'border-blue-400 text-blue-700 hover:bg-blue-50 dark:border-blue-800 dark:text-blue-300'
+                              }`}
+                              title={
+                                entry.postStatus === 'published'
+                                  ? 'Unpublish from public Community Feed'
+                                  : 'Publish back to public Community Feed'
+                              }
                             >
-                              <Ban className="h-3 w-3" />
-                              <span>Disqualify</span>
+                              {entry.postStatus === 'published' ? (
+                                <>
+                                  <EyeOff className="h-3 w-3" />
+                                  <span>Unpublish Feed</span>
+                                </>
+                              ) : (
+                                <>
+                                  <Eye className="h-3 w-3" />
+                                  <span>Publish Feed</span>
+                                </>
+                              )}
                             </button>
-                          ) : (
-                            <button
-                              type="button"
-                              disabled={busy}
-                              data-testid={`contest-reinstate-btn-${entry.id}`}
-                              onClick={() => void handleReinstate(entry)}
-                              className="inline-flex items-center gap-1 rounded border border-emerald-400 px-2.5 py-1 text-[11px] font-bold text-emerald-800 hover:bg-emerald-50 dark:text-emerald-300"
-                            >
-                              <CheckCircle2 className="h-3 w-3" />
-                              <span>Reinstate</span>
-                            </button>
-                          )}
+                          </div>
                         </td>
                       </tr>
                     );
@@ -687,13 +760,15 @@ export const Admin2ContestSection: React.FC<Admin2ContestSectionProps> = ({ dark
                 <label className="mt-3 flex cursor-pointer items-start gap-2 rounded-lg border border-red-200/70 bg-red-50/50 p-2.5 text-xs dark:border-red-900/60 dark:bg-red-950/20">
                   <input
                     type="checkbox"
+                    data-testid="contest-disqualify-hide-post-checkbox"
                     checked={disqualifyHidePost}
                     onChange={(e) => setDisqualifyHidePost(e.target.checked)}
                     className="mt-0.5 h-3.5 w-3.5 rounded accent-red-600"
                   />
                   <span>
-                    Also hide this duplicate/disqualified post from the public Community Feed
-                    (reinstating restores it automatically).
+                    <strong>Also unpublish from Community Feed:</strong> Leave unchecked to remove
+                    from the contest leaderboard only while keeping the article published in the
+                    Community Feed. Check this box to remove it from public display completely.
                   </span>
                 </label>
 

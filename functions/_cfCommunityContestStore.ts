@@ -81,7 +81,7 @@ export interface CfDeltaPayload {
 }
 
 const CF_SHARED_CACHE_KEY = 'https://coffeenadu.internal/cf-shared-community-contest-v2';
-const SNAPSHOT_TTL_MS = 3_000;
+const SNAPSHOT_TTL_MS = 1_500;
 const APPS_SCRIPT_TIMEOUT_MS = 18_000;
 
 let sharedMemState: CfSharedCommunityContestState | null = null;
@@ -220,24 +220,51 @@ function mergeTwoStates(
   local: CfSharedCommunityContestState | null
 ): CfSharedCommunityContestState {
   if (!local) return remote;
-  // If remote Apps Script has data or local is empty, remote is authoritative.
-  // Also preserve any local-only records created in the current isolate if remote hadn't received them yet.
-  const remotePostIds = new Set(remote.posts.map((p) => p.id));
-  const remoteEntryIds = new Set(remote.entries.map((e) => e.id));
-  const remoteUserIds = new Set(remote.users.map((u) => u.id));
-  const remoteSessionHashes = new Set(remote.sessions.map((s) => s.tokenHash));
 
-  if (remote.posts.length === 0 && remote.entries.length === 0 && (local.posts.length > 0 || local.entries.length > 0)) {
-    // Only preserve if remote returned empty while local had items? No—if an admin deleted the last post on remote,
-    // remote IS authoritative when hydrated cleanly. Simply return remote!
-    return remote;
+  const localPostsById = new Map(local.posts.map((p) => [p.id, p]));
+  const mergedPosts = remote.posts.map((rp) => {
+    const lp = localPostsById.get(rp.id);
+    if (!lp) return rp;
+    return {
+      ...rp,
+      viewsCount: Math.max(Number(rp.viewsCount) || 0, Number(lp.viewsCount) || 0),
+      sharesCount: Math.max(Number(rp.sharesCount) || 0, Number(lp.sharesCount) || 0),
+    };
+  });
+
+  const localEntriesById = new Map(local.entries.map((e) => [e.id, e]));
+  const mergedEntries = remote.entries.map((re) => {
+    const le = localEntriesById.get(re.id);
+    if (!le) return re;
+    const newer = (le.updatedAt || '') > (re.updatedAt || '') ? le : re;
+    return {
+      ...newer,
+      eligibleViews: Math.max(Number(re.eligibleViews) || 0, Number(le.eligibleViews) || 0),
+      totalPageViews: Math.max(Number(re.totalPageViews) || 0, Number(le.totalPageViews) || 0),
+      suspiciousBlockedViews: Math.max(
+        Number(re.suspiciousBlockedViews) || 0,
+        Number(le.suspiciousBlockedViews) || 0
+      ),
+      suspiciousFlagged: Boolean(re.suspiciousFlagged || le.suspiciousFlagged),
+    };
+  });
+
+  const bucketMap = new Map<string, CfContestViewBucket>();
+  for (const b of [...(remote.viewBuckets || []), ...(local.viewBuckets || [])]) {
+    if (!b?.entryId || !b?.visitorHash) continue;
+    const key = `${b.entryId}:${b.visitorHash}`;
+    const prev = bucketMap.get(key);
+    if (!prev || b.lastEligibleAtMs > prev.lastEligibleAtMs) {
+      bucketMap.set(key, b);
+    }
   }
 
-  void remotePostIds;
-  void remoteEntryIds;
-  void remoteUserIds;
-  void remoteSessionHashes;
-  return remote;
+  return {
+    ...remote,
+    posts: mergedPosts,
+    entries: mergedEntries,
+    viewBuckets: Array.from(bucketMap.values()),
+  };
 }
 
 async function writeEdgeCache(state: CfSharedCommunityContestState): Promise<void> {

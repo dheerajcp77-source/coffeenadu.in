@@ -144,6 +144,7 @@ import {
   CommunityComposerModal,
   CommunityRegisterModal,
   CommunityReportModal,
+  type CommunityReportTarget,
 } from './components/community/CommunityModals';
 import { ContestPage } from './components/contest/ContestPage';
 import { HomepageContestBanner } from './components/contest/HomepageContestBanner';
@@ -412,9 +413,9 @@ export default function App() {
   const [activeFeedCategory, setActiveFeedCategory] = useState<FeedCategoryId>('all');
   const [feedSort, setFeedSort] = useState<'latest' | 'popular'>('latest');
   const [feedError, setFeedError] = useState<string | null>(null);
-  const [reportingCommunityPost, setReportingCommunityPost] = useState<PublicCommunityPost | null>(
-    null
-  );
+  const [reportingCommunityPost, setReportingCommunityPost] = useState<
+    CommunityReportTarget | PublicCommunityPost | null
+  >(null);
   const [reportingPlatformListing, setReportingPlatformListing] = useState<PlatformListing | null>(
     null
   );
@@ -422,6 +423,7 @@ export default function App() {
   const [platformReportDetails, setPlatformReportDetails] = useState('');
   const [platformReportSaving, setPlatformReportSaving] = useState(false);
   const [platformReportDone, setPlatformReportDone] = useState(false);
+  const [platformReportError, setPlatformReportError] = useState('');
 
   // Coffeenadu Community (simple name + mobile registration, instant publish) state
   const [communityUser, setCommunityUser] = useState<CommunitySelfProfile | null>(null);
@@ -485,6 +487,15 @@ export default function App() {
         .catch(() => setCommunityUser(null));
     }
   }, [adminRouteActive, refreshPlatformBootstrap, refreshCommunityPublicFeed]);
+
+  useEffect(() => {
+    const handleDataMutated = () => {
+      refreshCommunityPublicFeed();
+      refreshPlatformBootstrap();
+    };
+    window.addEventListener('coffeenadu:data-mutated', handleDataMutated);
+    return () => window.removeEventListener('coffeenadu:data-mutated', handleDataMutated);
+  }, [refreshCommunityPublicFeed, refreshPlatformBootstrap]);
 
   const handleTogglePlatformLang = useCallback((next: PlatformLanguage) => {
     setPlatformLang(next);
@@ -1501,10 +1512,17 @@ export default function App() {
   const handleReportUnifiedItem = useCallback((item: UnifiedFeedItem) => {
     if (item.source === 'community' && item.communityPost) {
       setReportingCommunityPost(item.communityPost);
+    } else if (item.source === 'news') {
+      setReportingCommunityPost({
+        id: item.id,
+        title: item.title,
+        targetType: 'news',
+      });
     } else if (item.source === 'platform' && item.platformListing) {
       setPlatformReportReason('ತಪ್ಪು ಅಥವಾ ಹಳೆಯ ಮಾಹಿತಿ');
       setPlatformReportDetails('');
       setPlatformReportDone(false);
+      setPlatformReportError('');
       setReportingPlatformListing(item.platformListing);
     }
   }, []);
@@ -2228,6 +2246,7 @@ export default function App() {
                   onSubmit={async (e) => {
                     e.preventDefault();
                     setPlatformReportSaving(true);
+                    setPlatformReportError('');
                     try {
                       await submitListingReport({
                         listingId: reportingPlatformListing.id,
@@ -2235,6 +2254,12 @@ export default function App() {
                         details: platformReportDetails.trim(),
                       });
                       setPlatformReportDone(true);
+                    } catch (err) {
+                      setPlatformReportError(
+                        err instanceof Error
+                          ? err.message
+                          : 'ವರದಿ ಸಲ್ಲಿಸಲು ಸಾಧ್ಯವಾಗಲಿಲ್ಲ. ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ.'
+                      );
                     } finally {
                       setPlatformReportSaving(false);
                     }
@@ -2259,6 +2284,11 @@ export default function App() {
                     placeholder={platformLang === 'kn' ? 'ಹೆಚ್ಚುವರಿ ವಿವರ (ಐಚ್ಛಿಕ)' : 'Additional details (optional)'}
                     className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs text-[#10243D] dark:text-white placeholder:text-slate-500 dark:placeholder:text-slate-400"
                   />
+                  {platformReportError && (
+                    <p className="font-kannada text-xs font-semibold text-red-700 dark:text-red-300 bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-900 px-3 py-2 rounded-xl">
+                      {platformReportError}
+                    </p>
+                  )}
                   <div className="flex justify-end gap-2">
                     <button
                       type="button"

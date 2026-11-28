@@ -805,7 +805,7 @@ export async function handleCfContestApi(
           linkedPost.hiddenReason = reason;
           linkedPost.updatedAt = nowIso;
           touchedPost = linkedPost;
-        } else if (eligibility === 'eligible' && linkedPost.status === 'hidden') {
+        } else if (linkedPost.status === 'hidden') {
           linkedPost.status = 'published';
           linkedPost.hiddenReason = undefined;
           linkedPost.updatedAt = nowIso;
@@ -821,7 +821,11 @@ export async function handleCfContestApi(
         competitionMonth: entry.competitionMonth,
         targetId: entry.id,
         details: `Updated "${entry.title}" -> ${eligibility}${reason ? ` (${reason})` : ''}${
-          eligibility === 'disqualified' && hidePost ? ' [post hidden from feed]' : ''
+          eligibility === 'disqualified'
+            ? hidePost
+              ? ' [unpublished from Community Feed]'
+              : ' [kept published in Community Feed]'
+            : ' [published in Community Feed]'
         }`,
       };
       state.auditLogs.unshift(auditLog);

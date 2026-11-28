@@ -929,8 +929,10 @@ export class CommunityBackend {
         return;
       }
 
-      post.viewsCount = (post.viewsCount || 0) + 1;
-      this.persistState();
+      if (post.category !== 'monthly-news-contest') {
+        post.viewsCount = (post.viewsCount || 0) + 1;
+        this.persistState();
+      }
 
       res.json({
         ok: true,
@@ -959,25 +961,59 @@ export class CommunityBackend {
         return;
       }
 
+      const targetId = cleanSingleLine(req.params.id, 160);
       const post = this.state.posts.find(
-        (p) => p.id === req.params.id || p.slug === req.params.id
+        (p) => p.id === targetId || p.slug === targetId
       );
-      if (!post) {
-        res.status(404).json({ ok: false, error: 'ಪ್ರಕಟಣೆ ಕಂಡುಬಂದಿಲ್ಲ.' });
+      const fallbackTitle = cleanSingleLine(req.body?.postTitle, 240);
+      const fallbackSlug = cleanSingleLine(req.body?.postSlug, 160);
+      const rawTargetType = cleanSingleLine(req.body?.targetType, 32);
+      const targetType: 'community' | 'contest' | 'news' =
+        rawTargetType === 'news'
+          ? 'news'
+          : post?.category === 'monthly-news-contest' || rawTargetType === 'contest'
+          ? 'contest'
+          : 'community';
+
+      if (!post && !fallbackTitle) {
+        res.status(404).json({ ok: false, error: 'ವರದಿ ಮಾಡಬೇಕಾದ ಸುದ್ದಿ ಅಥವಾ ಪ್ರಕಟಣೆ ಕಂಡುಬಂದಿಲ್ಲ.' });
         return;
       }
 
       const reason = cleanSingleLine(req.body?.reason, 180);
       const details = cleanMultiline(req.body?.details, 800);
-      if (!reason) {
+      if (!reason || reason.length < 2) {
         res.status(400).json({ ok: false, error: 'ದಯವಿಟ್ಟು ವರದಿಯ ಕಾರಣವನ್ನು ಆಯ್ಕೆಮಾಡಿ.' });
+        return;
+      }
+
+      const resolvedPostId = post ? post.id : targetId;
+      const resolvedTitle = post ? post.title : fallbackTitle;
+      const resolvedSlug = post ? post.slug : fallbackSlug || undefined;
+
+      // Prevent accidental duplicate reports for the same article + reason within 10 minutes
+      const nowMs = Date.now();
+      const existingDuplicate = this.state.reports.find((r) => {
+        if (r.postId !== resolvedPostId || r.status !== 'open') return false;
+        if (r.reason !== reason) return false;
+        const createdMs = Date.parse(r.createdAt);
+        return Number.isFinite(createdMs) && nowMs - createdMs < 10 * 60 * 1000;
+      });
+      if (existingDuplicate) {
+        res.status(200).json({
+          ok: true,
+          duplicatePrevented: true,
+          id: existingDuplicate.id,
+        });
         return;
       }
 
       const report: CommunityReportRecord = {
         id: makeId('crep'),
-        postId: post.id,
-        postTitle: post.title,
+        postId: resolvedPostId,
+        postSlug: resolvedSlug,
+        postTitle: resolvedTitle,
+        targetType,
         reason,
         details: details || undefined,
         createdAt: new Date().toISOString(),
@@ -985,7 +1021,7 @@ export class CommunityBackend {
       };
       this.state.reports.unshift(report);
       this.persistState();
-      res.status(201).json({ ok: true, id: report.id });
+      res.status(201).json({ ok: true, duplicatePrevented: false, id: report.id });
     });
 
     // -------------------------------------------------------------------------

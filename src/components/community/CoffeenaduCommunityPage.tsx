@@ -185,6 +185,18 @@ export const CoffeenaduCommunityPage: React.FC<CoffeenaduCommunityPageProps> = (
                 (stats) => {
                   if (!cancelled && stats) {
                     setContestViewStats(stats);
+                    setDetailPost((prev) =>
+                      prev && prev.slug === found.slug
+                        ? { ...prev, viewsCount: stats.totalPageViews }
+                        : prev
+                    );
+                    setPosts((prev) => {
+                      const next = prev.map((p) =>
+                        p.slug === found.slug ? { ...p, viewsCount: stats.totalPageViews } : p
+                      );
+                      onPostsUpdatedRef.current?.(next);
+                      return next;
+                    });
                   }
                 }
               );

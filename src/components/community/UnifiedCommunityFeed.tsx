@@ -653,11 +653,14 @@ export const UnifiedCommunityFeed: React.FC<UnifiedCommunityFeedProps> = ({
                         </span>
                       )}
 
-                      {(item.source === 'community' || item.source === 'platform') && (
+                      {(item.source === 'news' ||
+                        item.source === 'community' ||
+                        item.source === 'platform') && (
                         <button
                           type="button"
                           onClick={() => onReportItem(item)}
                           aria-label={`Report ${item.title}`}
+                          data-testid={`feed-report-btn-${item.id}`}
                           title={language === 'kn' ? 'ದೂರು ಸಲ್ಲಿಸಿ' : 'Report post'}
                           className="inline-flex items-center gap-1 px-2.5 py-2 rounded-xl text-[#6B6052] dark:text-[#A89C8B] hover:text-rose-700 dark:hover:text-rose-300 hover:bg-rose-50 dark:hover:bg-rose-950/40 text-xs font-semibold transition-colors cursor-pointer min-h-[40px]"
                         >

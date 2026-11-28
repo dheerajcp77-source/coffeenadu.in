@@ -35,6 +35,7 @@ import { ArticleShareBar } from './ArticleShareBar';
 import { NewsImage } from './NewsImage';
 import { ArticleEcosystemEngagement } from './platform/ArticleEcosystemEngagement';
 import { WhatsAppGroupBanner } from './WhatsAppGroupBanner';
+import { CommunityReportModal } from './community/CommunityModals';
 import type { PlatformLanguage, PlatformListing, PlatformModuleId } from '../types/platform';
 
 interface ArticleDetailViewProps {
@@ -98,6 +99,7 @@ export function ArticleDetailView({
     informative: 0,
     correction: 0,
   });
+  const [reportModalOpen, setReportModalOpen] = useState(false);
 
   const isMountedRef = useRef(true);
   const recordedMountArticleIdRef = useRef<string | null>(null);
@@ -612,9 +614,12 @@ export function ArticleDetailView({
 
                 <button
                   type="button"
-                  onClick={() => void submitFeedback('correction')}
-                  disabled={Boolean(feedbackSent)}
-                  className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border text-xs font-semibold transition-colors cursor-pointer disabled:cursor-default ${
+                  data-testid="article-detail-report-btn"
+                  onClick={() => {
+                    setReportModalOpen(true);
+                    void submitFeedback('correction');
+                  }}
+                  className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border text-xs font-semibold transition-colors cursor-pointer ${
                     feedbackSent === 'correction'
                       ? 'bg-amber-600 text-white border-amber-600'
                       : 'bg-slate-50 dark:bg-[#13253E] text-[#17263A] dark:text-slate-200 border-slate-200 dark:border-slate-700 hover:border-amber-500'
@@ -806,6 +811,19 @@ export function ArticleDetailView({
           />
         )}
       </main>
+
+      <CommunityReportModal
+        post={
+          reportModalOpen
+            ? {
+                id: article.id,
+                title: stripRichTextToPlainText(article.titleKannada),
+                targetType: 'news',
+              }
+            : null
+        }
+        onClose={() => setReportModalOpen(false)}
+      />
     </>
   );
 }
