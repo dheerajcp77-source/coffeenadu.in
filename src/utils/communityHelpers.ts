@@ -152,8 +152,11 @@ export function validateCommunityPhotoInput(input: unknown): {
   }
   const trimmed = input.trim();
 
-  // Existing server-hosted media URL
-  if (/^\/api\/community\/media\/[a-zA-Z0-9_-]+\.(?:jpg|jpeg|png|webp)$/.test(trimmed)) {
+  // Existing server-hosted or Google Drive proxy media URL
+  if (
+    /^\/api\/community\/media\/[a-zA-Z0-9_-]+\.(?:jpg|jpeg|png|webp)$/.test(trimmed) ||
+    /^\/api\/media\/drive\/[a-zA-Z0-9_-]{10,120}$/.test(trimmed)
+  ) {
     return { ok: true, kind: 'existing-media' };
   }
 

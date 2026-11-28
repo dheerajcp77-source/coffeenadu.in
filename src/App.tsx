@@ -134,6 +134,11 @@ import {
   filterUnifiedCommunityFeed,
   type UnifiedFeedItem,
 } from './utils/unifiedFeedHelpers';
+import {
+  parseAppLocationTarget,
+  parseContestHashSection,
+  type ContestSectionId,
+} from './utils/navigationHelpers';
 import { CoffeenaduCommunityPage } from './components/community/CoffeenaduCommunityPage';
 import {
   CommunityComposerModal,
@@ -526,6 +531,7 @@ export default function App() {
     }
 
     const handlePopState = () => {
+      const nextPath = window.location.pathname.replace(/\/+$/, '') || '/';
       setPathname(window.location.pathname);
       setSelectedArticleId(readArticleIdFromUrl());
       setSelectedEventId(readEventIdFromUrl());
@@ -533,6 +539,16 @@ export default function App() {
       setSelectedAdPreviewToken(readAdPreviewTokenFromUrl());
       setPlatformItemId(readPlatformItemIdFromUrl());
       setPlatformSearchInitialQ(readSearchQFromUrl());
+      if (nextPath === '/contest') {
+        const hashSection = parseContestHashSection(window.location.hash);
+        if (hashSection) {
+          setContestNavTarget((prev) => ({
+            section: hashSection,
+            sectionNonce: prev.sectionNonce + 1,
+            submitNonce: prev.submitNonce,
+          }));
+        }
+      }
     };
     window.addEventListener('popstate', handlePopState);
     return () => window.removeEventListener('popstate', handlePopState);
@@ -752,14 +768,17 @@ export default function App() {
     }
   };
 
-  const navigateTo = (targetPath: string, instantScroll = false) => {
-    const currentFull = `${window.location.pathname}${window.location.search}`;
-    if (currentFull !== targetPath) {
-      window.history.pushState({}, '', targetPath);
-      setPathname(targetPath.split('?')[0] || '/');
+  const navigateTo = useCallback((targetPath: string, instantScroll = false) => {
+    const parsed = parseAppLocationTarget(targetPath);
+    const currentFull = `${window.location.pathname.replace(/\/+$/, '') || '/'}${window.location.search}${window.location.hash}`;
+    if (currentFull !== parsed.fullPath) {
+      window.history.pushState({}, '', parsed.fullPath);
+      setPathname(parsed.pathname);
     }
-    window.scrollTo({ top: 0, behavior: instantScroll ? 'auto' : 'smooth' });
-  };
+    if (!parsed.hash) {
+      window.scrollTo({ top: 0, behavior: instantScroll ? 'auto' : 'smooth' });
+    }
+  }, []);
 
   const filteredArticles = useMemo(
     () =>
@@ -1491,16 +1510,33 @@ export default function App() {
   }, []);
 
   const [contestNavTarget, setContestNavTarget] = useState<{
-    section?: 'leaderboard' | 'rules' | 'winners';
+    section?: ContestSectionId;
     openSubmit?: boolean;
-  }>({});
+    sectionNonce: number;
+    submitNonce: number;
+  }>(() => ({
+    section:
+      typeof window !== 'undefined' &&
+      normalizeRoutePath(window.location.pathname) === '/contest'
+        ? parseContestHashSection(window.location.hash) || undefined
+        : undefined,
+    sectionNonce: 0,
+    submitNonce: 0,
+  }));
 
   const handleJumpToContest = useCallback(
-    (options?: { section?: 'leaderboard' | 'rules' | 'winners'; openSubmit?: boolean }) => {
-      setContestNavTarget(options || {});
+    (options?: { section?: ContestSectionId; openSubmit?: boolean }) => {
+      setSelectedArticleId(null);
+      setSelectedEventId(null);
+      setSelectedAdId(null);
+      setContestNavTarget((prev) => ({
+        section: options?.section,
+        openSubmit: Boolean(options?.openSubmit),
+        sectionNonce: options?.section ? prev.sectionNonce + 1 : prev.sectionNonce,
+        submitNonce: options?.openSubmit ? prev.submitNonce + 1 : prev.submitNonce,
+      }));
       const suffix = options?.section ? `#${options.section}` : '';
       navigateTo(`/contest${suffix}`);
-      window.scrollTo({ top: 0, behavior: 'smooth' });
     },
     [navigateTo]
   );
@@ -1637,6 +1673,8 @@ export default function App() {
             <ContestPage
               initialSection={contestNavTarget.section || null}
               initialOpenSubmit={Boolean(contestNavTarget.openSubmit)}
+              sectionNonce={contestNavTarget.sectionNonce}
+              submitNonce={contestNavTarget.submitNonce}
               onBackHome={handleResetHome}
               onOpenCommunityPost={handleOpenCommunityPost}
               onContestSubmitted={() => {

@@ -100,6 +100,7 @@ export const CoffeenaduCommunityPage: React.FC<CoffeenaduCommunityPageProps> = (
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState('');
   const [activePhotoIdx, setActivePhotoIdx] = useState(0);
+  const [brokenImages, setBrokenImages] = useState<Record<string, boolean>>({});
   const [contestViewStats, setContestViewStats] = useState<ContestViewRecordResult | null>(null);
   const lastRecordedContestSlugRef = useRef<string | null>(null);
 
@@ -400,35 +401,58 @@ export const CoffeenaduCommunityPage: React.FC<CoffeenaduCommunityPageProps> = (
         ) : (
           <article className="bg-white dark:bg-[#111F33] rounded-2xl border border-slate-200 dark:border-slate-800 overflow-hidden shadow-xs">
             {/* Photos */}
-            {detailPost.photos.length > 0 && (
-              <div className="bg-slate-950/5 dark:bg-slate-950/40">
-                <div className="aspect-[16/10] max-h-[440px] w-full overflow-hidden bg-slate-100 dark:bg-slate-900">
-                  <img
-                    src={detailPost.photos[activePhotoIdx] || detailPost.photos[0]}
-                    alt={detailPost.title}
-                    className="w-full h-full object-contain bg-slate-100 dark:bg-slate-950"
-                  />
-                </div>
-                {detailPost.photos.length > 1 && (
-                  <div className="flex items-center gap-2 p-3 border-t border-slate-100 dark:border-slate-800 overflow-x-auto">
-                    {detailPost.photos.map((photoUrl, idx) => (
-                      <button
-                        key={photoUrl}
-                        type="button"
-                        onClick={() => setActivePhotoIdx(idx)}
-                        className={`w-16 h-16 rounded-lg overflow-hidden border-2 shrink-0 cursor-pointer bg-[#F4F1EA] dark:bg-[#0B1714] flex items-center justify-center ${
-                          activePhotoIdx === idx
-                            ? 'border-[#14452F] dark:border-[#D9A441]'
-                            : 'border-transparent opacity-70 hover:opacity-100'
-                        }`}
-                      >
-                        <img src={photoUrl} alt="" className="w-full h-full object-contain" />
-                      </button>
-                    ))}
+            {detailPost.photos.length > 0 && (() => {
+              const activeSrc = detailPost.photos[activePhotoIdx] || detailPost.photos[0];
+              return (
+                <div className="bg-slate-950/5 dark:bg-slate-950/40">
+                  <div className="w-full max-h-[520px] overflow-hidden bg-[#F4F1EA] dark:bg-slate-900 flex items-center justify-center">
+                    {activeSrc && !brokenImages[activeSrc] ? (
+                      <img
+                        src={activeSrc}
+                        alt={detailPost.title}
+                        onError={() =>
+                          setBrokenImages((prev) => ({ ...prev, [activeSrc]: true }))
+                        }
+                        className="w-full max-h-[520px] h-auto object-contain bg-[#F4F1EA] dark:bg-slate-950"
+                      />
+                    ) : (
+                      <div className="py-12 px-4 text-center text-xs font-kannada text-[#64748B] dark:text-slate-400">
+                        ಫೋಟೋ ಲಭ್ಯವಿಲ್ಲ
+                      </div>
+                    )}
                   </div>
-                )}
-              </div>
-            )}
+                  {detailPost.photos.length > 1 && (
+                    <div className="flex items-center gap-2 p-3 border-t border-slate-100 dark:border-slate-800 overflow-x-auto">
+                      {detailPost.photos.map((photoUrl, idx) => (
+                        <button
+                          key={photoUrl}
+                          type="button"
+                          onClick={() => setActivePhotoIdx(idx)}
+                          className={`w-16 h-16 rounded-lg overflow-hidden border-2 shrink-0 cursor-pointer bg-[#F4F1EA] dark:bg-[#0B1714] flex items-center justify-center ${
+                            activePhotoIdx === idx
+                              ? 'border-[#14452F] dark:border-[#D9A441]'
+                              : 'border-transparent opacity-70 hover:opacity-100'
+                          }`}
+                        >
+                          {!brokenImages[photoUrl] ? (
+                            <img
+                              src={photoUrl}
+                              alt=""
+                              onError={() =>
+                                setBrokenImages((prev) => ({ ...prev, [photoUrl]: true }))
+                              }
+                              className="w-full h-full object-contain"
+                            />
+                          ) : (
+                            <span className="text-[10px] text-slate-400">N/A</span>
+                          )}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
 
             <div className="p-5 sm:p-7 space-y-5">
               {/* Public Metadata ONLY — Contributor Name, Category, Location, Date */}
@@ -1077,7 +1101,7 @@ export const CoffeenaduCommunityPage: React.FC<CoffeenaduCommunityPageProps> = (
                     className="bg-white dark:bg-[#111F33] rounded-2xl border border-slate-200 dark:border-slate-800 overflow-hidden flex flex-col justify-between shadow-2xs hover:border-[#176B4A]/60 transition-colors"
                   >
                     <div>
-                      {post.photos[0] && (
+                      {post.photos[0] && !brokenImages[post.photos[0]] && (
                         <button
                           type="button"
                           onClick={() => onNavigatePost(post.slug)}
@@ -1087,6 +1111,12 @@ export const CoffeenaduCommunityPage: React.FC<CoffeenaduCommunityPageProps> = (
                             src={post.photos[0]}
                             alt={post.title}
                             loading="lazy"
+                            onError={() =>
+                              setBrokenImages((prev) => ({
+                                ...prev,
+                                [post.photos[0]]: true,
+                              }))
+                            }
                             className="w-full h-auto max-h-72 object-contain mx-auto block"
                           />
                         </button>

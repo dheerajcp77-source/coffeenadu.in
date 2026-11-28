@@ -106,6 +106,131 @@ var ADMIN_LOGS_HEADERS = [
   'details'
 ];
 
+var COMMUNITY_USERS_HEADERS = [
+  'id',
+  'fullName',
+  'mobileNumber',
+  'registeredAt',
+  'lastActiveAt',
+  'status',
+  'suspendedReason'
+];
+
+var COMMUNITY_SESSIONS_HEADERS = [
+  'tokenHash',
+  'userId',
+  'createdAtMs',
+  'expiresAtMs'
+];
+
+var COMMUNITY_POSTS_HEADERS = [
+  'id',
+  'slug',
+  'authorUserId',
+  'authorName',
+  'title',
+  'category',
+  'description',
+  'location',
+  'photosJson',
+  'price',
+  'optionalPublicContact',
+  'status',
+  'hiddenReason',
+  'createdAt',
+  'updatedAt',
+  'viewsCount',
+  'sharesCount'
+];
+
+var COMMUNITY_REPORTS_HEADERS = [
+  'id',
+  'postId',
+  'postTitle',
+  'reason',
+  'details',
+  'createdAt',
+  'status',
+  'resolvedAt',
+  'resolvedBy'
+];
+
+var CONTEST_MONTHS_HEADERS = [
+  'monthKey',
+  'competitionName',
+  'displayLabelEn',
+  'displayLabelKn',
+  'startsAtIso',
+  'endsAtIso',
+  'status',
+  'prizesJson',
+  'winnersJson',
+  'winnersPublished',
+  'allowCarryOver',
+  'finalizedAt',
+  'finalizedBy',
+  'createdAt',
+  'updatedAt'
+];
+
+var CONTEST_ENTRIES_HEADERS = [
+  'id',
+  'postId',
+  'slug',
+  'competitionMonth',
+  'contributorUserId',
+  'contributorName',
+  'title',
+  'summary',
+  'location',
+  'thumbnailUrl',
+  'publishedAt',
+  'eligibility',
+  'disqualificationReason',
+  'disqualifiedBy',
+  'disqualifiedAt',
+  'totalPageViews',
+  'eligibleViews',
+  'suspiciousBlockedViews',
+  'suspiciousFlagged',
+  'lastViewedAt',
+  'createdAt',
+  'updatedAt'
+];
+
+var CONTEST_ALERTS_HEADERS = [
+  'id',
+  'entryId',
+  'articleSlug',
+  'articleTitle',
+  'competitionMonth',
+  'severity',
+  'reason',
+  'blockedCount',
+  'detectedAt',
+  'status',
+  'adminNote',
+  'reviewedBy',
+  'reviewedAt'
+];
+
+var CONTEST_AUDIT_HEADERS = [
+  'id',
+  'timestamp',
+  'actorEmail',
+  'action',
+  'competitionMonth',
+  'targetId',
+  'details'
+];
+
+var CONTEST_VIEW_BUCKETS_HEADERS = [
+  'entryId',
+  'visitorHash',
+  'lastEligibleAtMs',
+  'hitCount'
+];
+
 var DEFAULT_CATEGORIES = [
   ['local', 'Local', 'ಸ್ಥಳೀಯ', 'koppa-landscape', 1, 'TRUE'],
   ['malnad', 'Malnad', 'ಮಲೆನಾಡು', 'malnad-hills', 2, 'TRUE'],
@@ -250,10 +375,22 @@ function doPost(e) {
     if (action === 'getAdminStats') {
       return jsonResponse_(handleAdminStats_());
     }
+    if (action === 'getCommunityContestSnapshot') {
+      return jsonResponse_(handleGetCommunityContestSnapshot_());
+    }
+    if (action === 'getCommunityPostPublicForOg') {
+      return jsonResponse_(handleGetCommunityPostPublicForOg_(payload.slug || ''));
+    }
 
-    // Validate admin email for mutating actions (except automated view flush)
+    var PUBLIC_SERVER_ACTIONS = {
+      batchUpdateViews: true,
+      uploadPublicCommunityImage: true,
+      upsertCommunityContestDelta: true
+    };
+
+    // Validate admin email for admin-only mutating actions (server-secret already verified above)
     var adminEmail = String(payload.adminEmail || '').trim().toLowerCase();
-    if (action !== 'batchUpdateViews' && !isAuthorizedAdminEmail_(adminEmail)) {
+    if (!PUBLIC_SERVER_ACTIONS[action] && !isAuthorizedAdminEmail_(adminEmail)) {
       return jsonResponse_({ ok: false, error: 'Forbidden: unauthorized administrator email.' }, 403);
     }
 
@@ -274,6 +411,10 @@ function doPost(e) {
       result = handleBatchUpdateViews_(payload.newsViews || {}, payload.eventViews || {});
     } else if (action === 'uploadImage') {
       result = handleUploadImage_(payload, adminEmail);
+    } else if (action === 'uploadPublicCommunityImage') {
+      result = handleUploadPublicCommunityImage_(payload);
+    } else if (action === 'upsertCommunityContestDelta') {
+      result = handleUpsertCommunityContestDelta_(payload);
     } else if (action === 'createEvent') {
       result = handleCreateEvent_(payload.data || {}, adminEmail);
     } else if (action === 'updateEvent') {
@@ -1913,6 +2054,15 @@ function ensureAllSheets_(ss) {
   }
   ensureSheetWithHeaders_(ss, 'Settings', SETTINGS_HEADERS);
   ensureSheetWithHeaders_(ss, 'AdminLogs', ADMIN_LOGS_HEADERS);
+  ensureSheetWithHeaders_(ss, 'CommunityUsers', COMMUNITY_USERS_HEADERS);
+  ensureSheetWithHeaders_(ss, 'CommunitySessions', COMMUNITY_SESSIONS_HEADERS);
+  ensureSheetWithHeaders_(ss, 'CommunityPosts', COMMUNITY_POSTS_HEADERS);
+  ensureSheetWithHeaders_(ss, 'CommunityReports', COMMUNITY_REPORTS_HEADERS);
+  ensureSheetWithHeaders_(ss, 'ContestMonths', CONTEST_MONTHS_HEADERS);
+  ensureSheetWithHeaders_(ss, 'ContestEntries', CONTEST_ENTRIES_HEADERS);
+  ensureSheetWithHeaders_(ss, 'ContestAlerts', CONTEST_ALERTS_HEADERS);
+  ensureSheetWithHeaders_(ss, 'ContestAuditLogs', CONTEST_AUDIT_HEADERS);
+  ensureSheetWithHeaders_(ss, 'ContestViewBuckets', CONTEST_VIEW_BUCKETS_HEADERS);
 
   // Remove default empty "Sheet1" if unused
   var defaultSheet = ss.getSheetByName('Sheet1');
@@ -2210,4 +2360,454 @@ function jsonResponse_(obj) {
   return ContentService
     .createTextOutput(JSON.stringify(obj))
     .setMimeType(ContentService.MimeType.JSON);
+}
+
+/* ============================================================================
+ * DURABLE COMMUNITY & MONTHLY CONTEST STORAGE (GOOGLE SHEETS + DRIVE)
+ * ============================================================================ */
+
+function parseJsonArraySafe_(raw) {
+  if (Array.isArray(raw)) return raw;
+  var s = String(raw || '').trim();
+  if (!s) return [];
+  try {
+    var parsed = JSON.parse(s);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (ignore) {
+    return [];
+  }
+}
+
+function upsertRowByKey_(sheet, headers, keyCol, keyVal, recordObj) {
+  var found = findRowByColumnValue_(sheet, headers, keyCol, keyVal);
+  var row = objectToRow_(recordObj, headers);
+  if (found) {
+    sheet.getRange(found.rowIndex, 1, 1, headers.length).setValues([row]);
+  } else {
+    sheet.appendRow(row);
+  }
+}
+
+function deleteRowsByColumnValue_(sheet, headers, colName, targetVal) {
+  var rows = readSheetRowsWithIndex_(sheet, headers);
+  for (var i = rows.length - 1; i >= 0; i--) {
+    if (String(rows[i].record[colName] || '') === String(targetVal)) {
+      sheet.deleteRow(rows[i].rowIndex);
+    }
+  }
+}
+
+function handleUploadPublicCommunityImage_(payload) {
+  var mimeType = String(payload.mimeType || 'image/jpeg').trim().toLowerCase();
+  if (mimeType !== 'image/jpeg' && mimeType !== 'image/jpg' && mimeType !== 'image/png' && mimeType !== 'image/webp') {
+    return { ok: false, error: 'JPG, PNG or WebP images only.' };
+  }
+  var cleanBase64 = String(payload.base64Data || '').replace(/^data:image\/[a-zA-Z0-9+.-]+;base64,/, '');
+  if (!cleanBase64 || cleanBase64.length > 4200000) {
+    return { ok: false, error: 'Image too large or empty (max 3 MB).' };
+  }
+  return handleUploadImage_({
+    base64Data: cleanBase64,
+    mimeType: mimeType === 'image/jpg' ? 'image/jpeg' : mimeType,
+    fileName: payload.fileName || ('community_' + Date.now() + '.jpg')
+  }, 'public-contributor');
+}
+
+function handleGetCommunityContestSnapshot_() {
+  var ss = getOrCreateSpreadsheet_();
+  var usersSheet = ensureSheetWithHeaders_(ss, 'CommunityUsers', COMMUNITY_USERS_HEADERS);
+  var sessSheet = ensureSheetWithHeaders_(ss, 'CommunitySessions', COMMUNITY_SESSIONS_HEADERS);
+  var postsSheet = ensureSheetWithHeaders_(ss, 'CommunityPosts', COMMUNITY_POSTS_HEADERS);
+  var reportsSheet = ensureSheetWithHeaders_(ss, 'CommunityReports', COMMUNITY_REPORTS_HEADERS);
+  var monthsSheet = ensureSheetWithHeaders_(ss, 'ContestMonths', CONTEST_MONTHS_HEADERS);
+  var entriesSheet = ensureSheetWithHeaders_(ss, 'ContestEntries', CONTEST_ENTRIES_HEADERS);
+  var alertsSheet = ensureSheetWithHeaders_(ss, 'ContestAlerts', CONTEST_ALERTS_HEADERS);
+  var auditSheet = ensureSheetWithHeaders_(ss, 'ContestAuditLogs', CONTEST_AUDIT_HEADERS);
+  var bucketsSheet = ensureSheetWithHeaders_(ss, 'ContestViewBuckets', CONTEST_VIEW_BUCKETS_HEADERS);
+
+  var users = readSheetObjects_(usersSheet, COMMUNITY_USERS_HEADERS).map(function (r) {
+    return {
+      id: String(r.id || ''),
+      fullName: String(r.fullName || ''),
+      mobileNumber: String(r.mobileNumber || ''),
+      registeredAt: String(r.registeredAt || ''),
+      lastActiveAt: String(r.lastActiveAt || ''),
+      status: String(r.status || 'active') === 'suspended' ? 'suspended' : 'active',
+      suspendedReason: r.suspendedReason ? String(r.suspendedReason) : undefined
+    };
+  });
+
+  var nowMs = Date.now();
+  var sessions = readSheetObjects_(sessSheet, COMMUNITY_SESSIONS_HEADERS).map(function (r) {
+    return {
+      tokenHash: String(r.tokenHash || ''),
+      userId: String(r.userId || ''),
+      createdAtMs: Number(r.createdAtMs) || 0,
+      expiresAtMs: Number(r.expiresAtMs) || 0
+    };
+  }).filter(function (s) { return s.tokenHash && s.expiresAtMs > nowMs; });
+
+  var posts = readSheetObjects_(postsSheet, COMMUNITY_POSTS_HEADERS).map(function (r) {
+    return {
+      id: String(r.id || ''),
+      slug: String(r.slug || ''),
+      authorUserId: String(r.authorUserId || ''),
+      authorName: String(r.authorName || ''),
+      title: String(r.title || ''),
+      category: String(r.category || 'community-info'),
+      description: String(r.description || ''),
+      location: String(r.location || ''),
+      photos: parseJsonArraySafe_(r.photosJson),
+      price: r.price ? String(r.price) : undefined,
+      optionalPublicContact: r.optionalPublicContact ? String(r.optionalPublicContact) : undefined,
+      status: String(r.status || 'published'),
+      hiddenReason: r.hiddenReason ? String(r.hiddenReason) : undefined,
+      createdAt: String(r.createdAt || ''),
+      updatedAt: String(r.updatedAt || ''),
+      viewsCount: Number(r.viewsCount) || 0,
+      sharesCount: Number(r.sharesCount) || 0
+    };
+  });
+
+  var reports = readSheetObjects_(reportsSheet, COMMUNITY_REPORTS_HEADERS).map(function (r) {
+    return {
+      id: String(r.id || ''),
+      postId: String(r.postId || ''),
+      postTitle: String(r.postTitle || ''),
+      reason: String(r.reason || ''),
+      details: r.details ? String(r.details) : undefined,
+      createdAt: String(r.createdAt || ''),
+      status: String(r.status || 'open'),
+      resolvedAt: r.resolvedAt ? String(r.resolvedAt) : undefined,
+      resolvedBy: r.resolvedBy ? String(r.resolvedBy) : undefined
+    };
+  });
+
+  var months = readSheetObjects_(monthsSheet, CONTEST_MONTHS_HEADERS).map(function (r) {
+    return {
+      monthKey: String(r.monthKey || ''),
+      competitionName: String(r.competitionName || ''),
+      displayLabelEn: String(r.displayLabelEn || ''),
+      displayLabelKn: String(r.displayLabelKn || ''),
+      startsAtIso: String(r.startsAtIso || ''),
+      endsAtIso: String(r.endsAtIso || ''),
+      status: String(r.status || 'open'),
+      prizes: parseJsonArraySafe_(r.prizesJson),
+      winners: parseJsonArraySafe_(r.winnersJson),
+      winnersPublished: parseBool_(r.winnersPublished),
+      allowCarryOver: parseBool_(r.allowCarryOver),
+      finalizedAt: r.finalizedAt ? String(r.finalizedAt) : undefined,
+      finalizedBy: r.finalizedBy ? String(r.finalizedBy) : undefined,
+      createdAt: String(r.createdAt || ''),
+      updatedAt: String(r.updatedAt || '')
+    };
+  });
+
+  var entries = readSheetObjects_(entriesSheet, CONTEST_ENTRIES_HEADERS).map(function (r) {
+    return {
+      id: String(r.id || ''),
+      postId: String(r.postId || ''),
+      slug: String(r.slug || ''),
+      competitionMonth: String(r.competitionMonth || ''),
+      contributorUserId: String(r.contributorUserId || ''),
+      contributorName: String(r.contributorName || ''),
+      title: String(r.title || ''),
+      summary: String(r.summary || ''),
+      location: String(r.location || ''),
+      thumbnailUrl: r.thumbnailUrl ? String(r.thumbnailUrl) : undefined,
+      publishedAt: String(r.publishedAt || ''),
+      eligibility: String(r.eligibility || 'eligible'),
+      disqualificationReason: r.disqualificationReason ? String(r.disqualificationReason) : undefined,
+      disqualifiedBy: r.disqualifiedBy ? String(r.disqualifiedBy) : undefined,
+      disqualifiedAt: r.disqualifiedAt ? String(r.disqualifiedAt) : undefined,
+      totalPageViews: Number(r.totalPageViews) || 0,
+      eligibleViews: Number(r.eligibleViews) || 0,
+      suspiciousBlockedViews: Number(r.suspiciousBlockedViews) || 0,
+      suspiciousFlagged: parseBool_(r.suspiciousFlagged),
+      lastViewedAt: r.lastViewedAt ? String(r.lastViewedAt) : undefined,
+      createdAt: String(r.createdAt || ''),
+      updatedAt: String(r.updatedAt || '')
+    };
+  });
+
+  var alerts = readSheetObjects_(alertsSheet, CONTEST_ALERTS_HEADERS).map(function (r) {
+    return {
+      id: String(r.id || ''),
+      entryId: String(r.entryId || ''),
+      articleSlug: String(r.articleSlug || ''),
+      articleTitle: String(r.articleTitle || ''),
+      competitionMonth: String(r.competitionMonth || ''),
+      severity: String(r.severity || 'medium'),
+      reason: String(r.reason || ''),
+      blockedCount: Number(r.blockedCount) || 1,
+      detectedAt: String(r.detectedAt || ''),
+      status: String(r.status || 'open'),
+      adminNote: r.adminNote ? String(r.adminNote) : undefined,
+      reviewedBy: r.reviewedBy ? String(r.reviewedBy) : undefined,
+      reviewedAt: r.reviewedAt ? String(r.reviewedAt) : undefined
+    };
+  });
+
+  var auditLogs = readSheetObjects_(auditSheet, CONTEST_AUDIT_HEADERS).map(function (r) {
+    return {
+      id: String(r.id || ''),
+      timestamp: String(r.timestamp || ''),
+      actorEmail: String(r.actorEmail || ''),
+      action: String(r.action || ''),
+      competitionMonth: String(r.competitionMonth || ''),
+      targetId: r.targetId ? String(r.targetId) : undefined,
+      details: String(r.details || '')
+    };
+  });
+
+  var viewBuckets = readSheetObjects_(bucketsSheet, CONTEST_VIEW_BUCKETS_HEADERS).map(function (r) {
+    return {
+      entryId: String(r.entryId || ''),
+      visitorHash: String(r.visitorHash || ''),
+      lastEligibleAtMs: Number(r.lastEligibleAtMs) || 0,
+      hitCount: Number(r.hitCount) || 1
+    };
+  });
+
+  var activeMonthKeySetting = handleGetSettings_().settings.contestActiveMonthKey || '';
+
+  return {
+    ok: true,
+    community: {
+      users: users,
+      sessions: sessions,
+      posts: posts,
+      reports: reports
+    },
+    contest: {
+      activeMonthKey: activeMonthKeySetting,
+      months: months,
+      entries: entries,
+      alerts: alerts,
+      auditLogs: auditLogs,
+      viewBuckets: viewBuckets
+    }
+  };
+}
+
+function handleGetCommunityPostPublicForOg_(slugOrId) {
+  var key = String(slugOrId || '').trim().toLowerCase();
+  if (!key) return { ok: false, error: 'Missing slug' };
+  var ss = getOrCreateSpreadsheet_();
+  var postsSheet = ensureSheetWithHeaders_(ss, 'CommunityPosts', COMMUNITY_POSTS_HEADERS);
+  var posts = readSheetObjects_(postsSheet, COMMUNITY_POSTS_HEADERS);
+  for (var i = 0; i < posts.length; i++) {
+    var p = posts[i];
+    if (String(p.status || 'published') !== 'published') continue;
+    if (String(p.slug || '').toLowerCase() === key || String(p.id || '').toLowerCase() === key) {
+      return {
+        ok: true,
+        post: {
+          id: String(p.id || ''),
+          slug: String(p.slug || ''),
+          authorName: String(p.authorName || ''),
+          title: String(p.title || ''),
+          category: String(p.category || 'community-info'),
+          description: String(p.description || ''),
+          location: String(p.location || ''),
+          photos: parseJsonArraySafe_(p.photosJson),
+          createdAt: String(p.createdAt || '')
+        }
+      };
+    }
+  }
+  return { ok: false, error: 'Post not found' };
+}
+
+function handleUpsertCommunityContestDelta_(payload) {
+  var ss = getOrCreateSpreadsheet_();
+
+  if (payload.user && payload.user.id) {
+    var uSheet = ensureSheetWithHeaders_(ss, 'CommunityUsers', COMMUNITY_USERS_HEADERS);
+    upsertRowByKey_(uSheet, COMMUNITY_USERS_HEADERS, 'id', payload.user.id, {
+      id: payload.user.id,
+      fullName: payload.user.fullName || '',
+      mobileNumber: payload.user.mobileNumber || '',
+      registeredAt: payload.user.registeredAt || '',
+      lastActiveAt: payload.user.lastActiveAt || '',
+      status: payload.user.status || 'active',
+      suspendedReason: payload.user.suspendedReason || ''
+    });
+  }
+
+  if (payload.session && payload.session.tokenHash) {
+    var sSheet = ensureSheetWithHeaders_(ss, 'CommunitySessions', COMMUNITY_SESSIONS_HEADERS);
+    upsertRowByKey_(sSheet, COMMUNITY_SESSIONS_HEADERS, 'tokenHash', payload.session.tokenHash, {
+      tokenHash: payload.session.tokenHash,
+      userId: payload.session.userId || '',
+      createdAtMs: Number(payload.session.createdAtMs) || Date.now(),
+      expiresAtMs: Number(payload.session.expiresAtMs) || Date.now()
+    });
+  }
+
+  if (payload.revokeSessionTokenHash) {
+    var sDelSheet = ensureSheetWithHeaders_(ss, 'CommunitySessions', COMMUNITY_SESSIONS_HEADERS);
+    deleteRowsByColumnValue_(sDelSheet, COMMUNITY_SESSIONS_HEADERS, 'tokenHash', payload.revokeSessionTokenHash);
+  }
+  if (payload.revokeSessionsForUserId) {
+    var sUserDelSheet = ensureSheetWithHeaders_(ss, 'CommunitySessions', COMMUNITY_SESSIONS_HEADERS);
+    deleteRowsByColumnValue_(sUserDelSheet, COMMUNITY_SESSIONS_HEADERS, 'userId', payload.revokeSessionsForUserId);
+  }
+
+  if (payload.post && payload.post.id) {
+    var pSheet = ensureSheetWithHeaders_(ss, 'CommunityPosts', COMMUNITY_POSTS_HEADERS);
+    upsertRowByKey_(pSheet, COMMUNITY_POSTS_HEADERS, 'id', payload.post.id, {
+      id: payload.post.id,
+      slug: payload.post.slug || '',
+      authorUserId: payload.post.authorUserId || '',
+      authorName: payload.post.authorName || '',
+      title: payload.post.title || '',
+      category: payload.post.category || 'community-info',
+      description: payload.post.description || '',
+      location: payload.post.location || '',
+      photosJson: JSON.stringify(Array.isArray(payload.post.photos) ? payload.post.photos : []),
+      price: payload.post.price || '',
+      optionalPublicContact: payload.post.optionalPublicContact || '',
+      status: payload.post.status || 'published',
+      hiddenReason: payload.post.hiddenReason || '',
+      createdAt: payload.post.createdAt || '',
+      updatedAt: payload.post.updatedAt || '',
+      viewsCount: Number(payload.post.viewsCount) || 0,
+      sharesCount: Number(payload.post.sharesCount) || 0
+    });
+  }
+
+  if (payload.deletePostId) {
+    var pDelSheet = ensureSheetWithHeaders_(ss, 'CommunityPosts', COMMUNITY_POSTS_HEADERS);
+    deleteRowsByColumnValue_(pDelSheet, COMMUNITY_POSTS_HEADERS, 'id', payload.deletePostId);
+  }
+
+  if (payload.report && payload.report.id) {
+    var rSheet = ensureSheetWithHeaders_(ss, 'CommunityReports', COMMUNITY_REPORTS_HEADERS);
+    upsertRowByKey_(rSheet, COMMUNITY_REPORTS_HEADERS, 'id', payload.report.id, {
+      id: payload.report.id,
+      postId: payload.report.postId || '',
+      postTitle: payload.report.postTitle || '',
+      reason: payload.report.reason || '',
+      details: payload.report.details || '',
+      createdAt: payload.report.createdAt || '',
+      status: payload.report.status || 'open',
+      resolvedAt: payload.report.resolvedAt || '',
+      resolvedBy: payload.report.resolvedBy || ''
+    });
+  }
+
+  if (payload.activeMonthKey) {
+    upsertSetting_(ss, 'contestActiveMonthKey', String(payload.activeMonthKey), 'contest-sync');
+  }
+
+  if (payload.contestMonth && payload.contestMonth.monthKey) {
+    var mSheet = ensureSheetWithHeaders_(ss, 'ContestMonths', CONTEST_MONTHS_HEADERS);
+    upsertRowByKey_(mSheet, CONTEST_MONTHS_HEADERS, 'monthKey', payload.contestMonth.monthKey, {
+      monthKey: payload.contestMonth.monthKey,
+      competitionName: payload.contestMonth.competitionName || '',
+      displayLabelEn: payload.contestMonth.displayLabelEn || '',
+      displayLabelKn: payload.contestMonth.displayLabelKn || '',
+      startsAtIso: payload.contestMonth.startsAtIso || '',
+      endsAtIso: payload.contestMonth.endsAtIso || '',
+      status: payload.contestMonth.status || 'open',
+      prizesJson: JSON.stringify(payload.contestMonth.prizes || []),
+      winnersJson: JSON.stringify(payload.contestMonth.winners || []),
+      winnersPublished: payload.contestMonth.winnersPublished ? 'TRUE' : 'FALSE',
+      allowCarryOver: payload.contestMonth.allowCarryOver ? 'TRUE' : 'FALSE',
+      finalizedAt: payload.contestMonth.finalizedAt || '',
+      finalizedBy: payload.contestMonth.finalizedBy || '',
+      createdAt: payload.contestMonth.createdAt || '',
+      updatedAt: payload.contestMonth.updatedAt || ''
+    });
+  }
+
+  if (payload.contestEntry && payload.contestEntry.id) {
+    var eSheet = ensureSheetWithHeaders_(ss, 'ContestEntries', CONTEST_ENTRIES_HEADERS);
+    upsertRowByKey_(eSheet, CONTEST_ENTRIES_HEADERS, 'id', payload.contestEntry.id, {
+      id: payload.contestEntry.id,
+      postId: payload.contestEntry.postId || '',
+      slug: payload.contestEntry.slug || '',
+      competitionMonth: payload.contestEntry.competitionMonth || '',
+      contributorUserId: payload.contestEntry.contributorUserId || '',
+      contributorName: payload.contestEntry.contributorName || '',
+      title: payload.contestEntry.title || '',
+      summary: payload.contestEntry.summary || '',
+      location: payload.contestEntry.location || '',
+      thumbnailUrl: payload.contestEntry.thumbnailUrl || '',
+      publishedAt: payload.contestEntry.publishedAt || '',
+      eligibility: payload.contestEntry.eligibility || 'eligible',
+      disqualificationReason: payload.contestEntry.disqualificationReason || '',
+      disqualifiedBy: payload.contestEntry.disqualifiedBy || '',
+      disqualifiedAt: payload.contestEntry.disqualifiedAt || '',
+      totalPageViews: Number(payload.contestEntry.totalPageViews) || 0,
+      eligibleViews: Number(payload.contestEntry.eligibleViews) || 0,
+      suspiciousBlockedViews: Number(payload.contestEntry.suspiciousBlockedViews) || 0,
+      suspiciousFlagged: payload.contestEntry.suspiciousFlagged ? 'TRUE' : 'FALSE',
+      lastViewedAt: payload.contestEntry.lastViewedAt || '',
+      createdAt: payload.contestEntry.createdAt || '',
+      updatedAt: payload.contestEntry.updatedAt || ''
+    });
+  }
+
+  if (payload.deleteContestEntryByPostId) {
+    var eDelSheet = ensureSheetWithHeaders_(ss, 'ContestEntries', CONTEST_ENTRIES_HEADERS);
+    deleteRowsByColumnValue_(eDelSheet, CONTEST_ENTRIES_HEADERS, 'postId', payload.deleteContestEntryByPostId);
+  }
+
+  if (payload.contestAlert && payload.contestAlert.id) {
+    var aSheet = ensureSheetWithHeaders_(ss, 'ContestAlerts', CONTEST_ALERTS_HEADERS);
+    upsertRowByKey_(aSheet, CONTEST_ALERTS_HEADERS, 'id', payload.contestAlert.id, {
+      id: payload.contestAlert.id,
+      entryId: payload.contestAlert.entryId || '',
+      articleSlug: payload.contestAlert.articleSlug || '',
+      articleTitle: payload.contestAlert.articleTitle || '',
+      competitionMonth: payload.contestAlert.competitionMonth || '',
+      severity: payload.contestAlert.severity || 'medium',
+      reason: payload.contestAlert.reason || '',
+      blockedCount: Number(payload.contestAlert.blockedCount) || 1,
+      detectedAt: payload.contestAlert.detectedAt || '',
+      status: payload.contestAlert.status || 'open',
+      adminNote: payload.contestAlert.adminNote || '',
+      reviewedBy: payload.contestAlert.reviewedBy || '',
+      reviewedAt: payload.contestAlert.reviewedAt || ''
+    });
+  }
+
+  if (payload.contestAuditLog && payload.contestAuditLog.id) {
+    var logSheet = ensureSheetWithHeaders_(ss, 'ContestAuditLogs', CONTEST_AUDIT_HEADERS);
+    logSheet.appendRow(objectToRow_(payload.contestAuditLog, CONTEST_AUDIT_HEADERS));
+  }
+
+  if (Array.isArray(payload.viewBuckets)) {
+    var bSheet = ensureSheetWithHeaders_(ss, 'ContestViewBuckets', CONTEST_VIEW_BUCKETS_HEADERS);
+    var existingBuckets = readSheetRowsWithIndex_(bSheet, CONTEST_VIEW_BUCKETS_HEADERS);
+    for (var bi = 0; bi < payload.viewBuckets.length; bi++) {
+      var nb = payload.viewBuckets[bi];
+      if (!nb || !nb.entryId || !nb.visitorHash) continue;
+      var matchedBucket = null;
+      for (var ei = 0; ei < existingBuckets.length; ei++) {
+        if (
+          String(existingBuckets[ei].record.entryId || '') === String(nb.entryId) &&
+          String(existingBuckets[ei].record.visitorHash || '') === String(nb.visitorHash)
+        ) {
+          matchedBucket = existingBuckets[ei];
+          break;
+        }
+      }
+      var bucketRow = objectToRow_({
+        entryId: nb.entryId,
+        visitorHash: nb.visitorHash,
+        lastEligibleAtMs: Number(nb.lastEligibleAtMs) || 0,
+        hitCount: Number(nb.hitCount) || 1
+      }, CONTEST_VIEW_BUCKETS_HEADERS);
+      if (matchedBucket) {
+        bSheet.getRange(matchedBucket.rowIndex, 1, 1, CONTEST_VIEW_BUCKETS_HEADERS.length).setValues([bucketRow]);
+      } else {
+        bSheet.appendRow(bucketRow);
+      }
+    }
+  }
+
+  return { ok: true };
 }

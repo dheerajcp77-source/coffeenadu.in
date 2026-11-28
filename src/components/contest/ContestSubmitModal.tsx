@@ -12,7 +12,10 @@ import {
   X,
 } from 'lucide-react';
 import { COMMUNITY_LOCATIONS_KN } from '../../constants/communityCategories';
-import { fetchCommunitySession } from '../../services/communityClient';
+import {
+  compressCommunityImageFile,
+  fetchCommunitySession,
+} from '../../services/communityClient';
 import {
   submitContestNewsEntry,
   type SubmitContestNewsResult,
@@ -30,42 +33,6 @@ interface ContestSubmitModalProps {
 }
 
 const MAX_PHOTOS = 3;
-
-async function compressPhotoToDataUrl(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onerror = () => reject(new Error('ಫೋಟೋ ಓದಲು ಸಾಧ್ಯವಾಗಲಿಲ್ಲ.'));
-    reader.onload = () => {
-      const img = new Image();
-      img.onerror = () => reject(new Error('ಅಮಾನ್ಯ ಫೋಟೋ ಫೈಲ್.'));
-      img.onload = () => {
-        const maxDim = 1280;
-        let { width, height } = img;
-        if (width > maxDim || height > maxDim) {
-          if (width >= height) {
-            height = Math.round((height * maxDim) / width);
-            width = maxDim;
-          } else {
-            width = Math.round((width * maxDim) / height);
-            height = maxDim;
-          }
-        }
-        const canvas = document.createElement('canvas');
-        canvas.width = width;
-        canvas.height = height;
-        const ctx = canvas.getContext('2d');
-        if (!ctx) {
-          resolve(String(reader.result));
-          return;
-        }
-        ctx.drawImage(img, 0, 0, width, height);
-        resolve(canvas.toDataURL('image/jpeg', 0.82));
-      };
-      img.src = String(reader.result);
-    };
-    reader.readAsDataURL(file);
-  });
-}
 
 export const ContestSubmitModal: React.FC<ContestSubmitModalProps> = ({
   isOpen,
@@ -87,6 +54,7 @@ export const ContestSubmitModal: React.FC<ContestSubmitModalProps> = ({
   const [photos, setPhotos] = useState<string[]>([]);
   const [confirmOriginalNews, setConfirmOriginalNews] = useState(false);
 
+  const [uploadingPhoto, setUploadingPhoto] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
   const [submittedResult, setSubmittedResult] = useState<SubmitContestNewsResult | null>(null);
@@ -118,14 +86,19 @@ export const ContestSubmitModal: React.FC<ContestSubmitModalProps> = ({
     const files = Array.from(e.target.files || []);
     if (files.length === 0) return;
     setError('');
+    setUploadingPhoto(true);
     const remaining = MAX_PHOTOS - photos.length;
     const toProcess = files.slice(0, remaining);
     try {
-      const encoded = await Promise.all(toProcess.map(compressPhotoToDataUrl));
+      const encoded: string[] = [];
+      for (const f of toProcess) {
+        encoded.push(await compressCommunityImageFile(f));
+      }
       setPhotos((prev) => [...prev, ...encoded].slice(0, MAX_PHOTOS));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'ಫೋಟೋ ಅಪ್‌ಲೋಡ್ ವಿಫಲವಾಗಿದೆ.');
     } finally {
+      setUploadingPhoto(false);
       if (fileInputRef.current) fileInputRef.current.value = '';
     }
   };
@@ -486,12 +459,16 @@ export const ContestSubmitModal: React.FC<ContestSubmitModalProps> = ({
                   </label>
                   <button
                     type="button"
-                    disabled={photos.length >= MAX_PHOTOS}
+                    disabled={photos.length >= MAX_PHOTOS || uploadingPhoto}
                     onClick={() => fileInputRef.current?.click()}
-                    className="inline-flex items-center gap-1.5 rounded-md border border-emerald-800/25 bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-900 transition hover:bg-emerald-100 disabled:opacity-40"
+                    className="inline-flex items-center gap-1.5 rounded-md border border-emerald-800/25 bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-900 transition hover:bg-emerald-100 disabled:opacity-40 cursor-pointer"
                   >
-                    <ImagePlus className="h-3.5 w-3.5" />
-                    <span>ಫೋಟೋ ಸೇರಿಸಿ</span>
+                    {uploadingPhoto ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <ImagePlus className="h-3.5 w-3.5" />
+                    )}
+                    <span>{uploadingPhoto ? 'ಪ್ರಕ್ರಿಯೆಯಲ್ಲಿದೆ...' : 'ಫೋಟೋ ಸೇರಿಸಿ'}</span>
                   </button>
                   <input
                     ref={fileInputRef}
@@ -507,19 +484,19 @@ export const ContestSubmitModal: React.FC<ContestSubmitModalProps> = ({
                     {photos.map((src, idx) => (
                       <div
                         key={idx}
-                        className="relative aspect-video overflow-hidden rounded-lg border border-slate-200 bg-slate-100"
+                        className="relative h-24 overflow-hidden rounded-lg border border-slate-200 bg-[#F4F1EA] flex items-center justify-center"
                       >
                         <img
                           src={src}
                           alt={`Upload ${idx + 1}`}
-                          className="h-full w-full object-cover"
+                          className="h-full w-full object-contain"
                         />
                         <button
                           type="button"
                           onClick={() =>
                             setPhotos((prev) => prev.filter((_, i) => i !== idx))
                           }
-                          className="absolute right-1.5 top-1.5 rounded bg-slate-900/80 p-1 text-white hover:bg-red-600"
+                          className="absolute right-1.5 top-1.5 rounded bg-slate-900/80 p-1 text-white hover:bg-red-600 cursor-pointer"
                           aria-label="Remove photo"
                         >
                           <Trash2 className="h-3.5 w-3.5" />
@@ -555,14 +532,14 @@ export const ContestSubmitModal: React.FC<ContestSubmitModalProps> = ({
                 <button
                   type="button"
                   onClick={resetAndClose}
-                  className="inline-flex min-h-[44px] items-center rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                  className="inline-flex min-h-[44px] items-center rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 cursor-pointer"
                 >
                   ರದ್ದುಮಾಡಿ
                 </button>
                 <button
                   type="submit"
-                  disabled={submitting || !isMonthOpen}
-                  className="inline-flex min-h-[44px] items-center gap-2 rounded-lg bg-[#0F3928] px-5 py-2.5 text-sm font-bold text-white transition hover:bg-[#144B35] disabled:opacity-50"
+                  disabled={submitting || uploadingPhoto || !isMonthOpen}
+                  className="inline-flex min-h-[44px] items-center gap-2 rounded-lg bg-[#0F3928] px-5 py-2.5 text-sm font-bold text-white transition hover:bg-[#144B35] disabled:opacity-50 cursor-pointer"
                 >
                   {submitting && <Loader2 className="h-4 w-4 animate-spin" />}
                   <span>ಸುದ್ದಿ ಪ್ರಕಟಿಸಿ ಮತ್ತು ಸ್ಪರ್ಧೆಗೆ ಸೇರಿ</span>

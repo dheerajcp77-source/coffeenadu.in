@@ -122,6 +122,7 @@ export class CommunityBackend {
   private readonly uploadsDir: string;
   private state: CommunityStoreState;
   private readonly rateBuckets = new Map<string, number[]>();
+  private readonly postDeletedListeners: Array<(postId: string) => void> = [];
 
   constructor(
     dataDir: string,
@@ -188,9 +189,23 @@ export class CommunityBackend {
       }
     }
 
-    const tmp = `${this.storePath}.${process.pid}.${Date.now()}.tmp`;
+    const tmp = `${this.storePath}.${process.pid}.${Date.now()}.${crypto.randomBytes(3).toString('hex')}.tmp`;
     fs.writeFileSync(tmp, serialized, 'utf8');
     fs.renameSync(tmp, this.storePath);
+  }
+
+  public onPostDeleted(listener: (postId: string) => void): void {
+    this.postDeletedListeners.push(listener);
+  }
+
+  private emitPostDeleted(postId: string): void {
+    for (const listener of this.postDeletedListeners) {
+      try {
+        listener(postId);
+      } catch {
+        // Non-fatal listener error
+      }
+    }
   }
 
   private checkRateLimit(bucketKey: string, maxRequests: number, windowMs: number): boolean {
@@ -1152,9 +1167,11 @@ export class CommunityBackend {
       }
 
       const removedPhotos = [...post.photos];
+      const deletedId = post.id;
       this.state.posts.splice(idx, 1);
       this.persistState();
       this.cleanupUnusedMedia(removedPhotos);
+      this.emitPostDeleted(deletedId);
 
       res.json({ ok: true });
     });
@@ -1321,9 +1338,11 @@ export class CommunityBackend {
         return;
       }
       const removedPhotos = [...this.state.posts[idx].photos];
+      const deletedId = this.state.posts[idx].id;
       this.state.posts.splice(idx, 1);
       this.persistState();
       this.cleanupUnusedMedia(removedPhotos);
+      this.emitPostDeleted(deletedId);
       res.json({ ok: true });
     });
 

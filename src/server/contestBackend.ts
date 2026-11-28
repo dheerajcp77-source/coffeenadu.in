@@ -139,6 +139,28 @@ export class ContestBackend {
       `coffeenadu-contest-${crypto.createHash('sha256').update(dataDir).digest('hex').slice(0, 24)}`;
     this.state = this.loadState();
     this.ensureActiveMonthSynced();
+    this.communityBackend.onPostDeleted((postId) => {
+      this.handlePostDeleted(postId);
+    });
+  }
+
+  private handlePostDeleted(postId: string): void {
+    const before = this.state.entries.length;
+    this.state.entries = this.state.entries.filter((entry) => {
+      if (entry.postId !== postId) return true;
+      const month = this.state.months.find((m) => m.monthKey === entry.competitionMonth);
+      // Preserve finalized month records for audit history, mark disqualified
+      if (month?.status === 'finalized') {
+        entry.eligibility = 'disqualified';
+        entry.disqualificationReason = entry.disqualificationReason || 'Source post deleted';
+        entry.updatedAt = new Date().toISOString();
+        return true;
+      }
+      return false;
+    });
+    if (this.state.entries.length !== before || before > 0) {
+      this.persistState();
+    }
   }
 
   private createDefaultState(): ContestStoreState {
@@ -215,7 +237,7 @@ export class ContestBackend {
         // non-fatal
       }
     }
-    const tmp = `${this.storePath}.${process.pid}.${Date.now()}.tmp`;
+    const tmp = `${this.storePath}.${process.pid}.${Date.now()}.${crypto.randomBytes(3).toString('hex')}.tmp`;
     fs.writeFileSync(tmp, serialized, 'utf8');
     fs.renameSync(tmp, this.storePath);
   }

@@ -35,6 +35,8 @@ import { ContestSubmitModal } from './ContestSubmitModal';
 interface ContestPageProps {
   initialSection?: 'leaderboard' | 'rules' | 'winners' | null;
   initialOpenSubmit?: boolean;
+  sectionNonce?: number;
+  submitNonce?: number;
   onBackHome: () => void;
   onOpenCommunityPost: (slug: string) => void;
   onContestSubmitted?: () => void;
@@ -58,6 +60,8 @@ function formatDateKn(iso: string): string {
 export const ContestPage: React.FC<ContestPageProps> = ({
   initialSection,
   initialOpenSubmit = false,
+  sectionNonce = 0,
+  submitNonce = 0,
   onBackHome,
   onOpenCommunityPost,
   onContestSubmitted,
@@ -68,6 +72,7 @@ export const ContestPage: React.FC<ContestPageProps> = ({
   const [submitModalOpen, setSubmitModalOpen] = useState(initialOpenSubmit);
   const [searchQuery, setSearchQuery] = useState('');
   const [copiedContestUrl, setCopiedContestUrl] = useState(false);
+  const [failedThumbIds, setFailedThumbIds] = useState<Record<string, boolean>>({});
   const [countdown, setCountdown] = useState({
     days: 0,
     hours: 0,
@@ -105,8 +110,10 @@ export const ContestPage: React.FC<ContestPageProps> = ({
   }, [loadOverview]);
 
   useEffect(() => {
-    if (initialOpenSubmit) setSubmitModalOpen(true);
-  }, [initialOpenSubmit]);
+    if (initialOpenSubmit || submitNonce > 0) {
+      setSubmitModalOpen(true);
+    }
+  }, [initialOpenSubmit, submitNonce]);
 
   useEffect(() => {
     if (!overview?.activeMonth.endsAtIso) return;
@@ -128,7 +135,7 @@ export const ContestPage: React.FC<ContestPageProps> = ({
       if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }, 150);
     return () => window.clearTimeout(timeout);
-  }, [initialSection, loading]);
+  }, [initialSection, sectionNonce, loading]);
 
   const scrollToSection = (id: 'leaderboard' | 'rules' | 'winners') => {
     const el = document.getElementById(id);
@@ -433,7 +440,7 @@ export const ContestPage: React.FC<ContestPageProps> = ({
         </section>
 
         {/* Live Monthly Leaderboard */}
-        <section id="leaderboard" aria-labelledby="leaderboard-heading" className="scroll-mt-6 space-y-5">
+        <section id="leaderboard" aria-labelledby="leaderboard-heading" className="scroll-mt-28 space-y-5">
           <div className="flex flex-wrap items-end justify-between gap-3 border-b border-slate-200 pb-3">
             <div>
               <p className="text-xs font-bold uppercase tracking-[0.12em] text-emerald-800">
@@ -497,13 +504,16 @@ export const ContestPage: React.FC<ContestPageProps> = ({
                     }`}
                   >
                     <div className="flex gap-4 p-4">
-                      <div className="relative h-24 w-24 shrink-0 overflow-hidden rounded-lg border border-slate-200 bg-emerald-950/5 sm:h-28 sm:w-28">
-                        {entry.thumbnailUrl ? (
+                      <div className="relative h-24 w-24 shrink-0 overflow-hidden rounded-lg border border-slate-200 bg-[#F4F1EA] flex items-center justify-center sm:h-28 sm:w-28">
+                        {entry.thumbnailUrl && !failedThumbIds[entry.id] ? (
                           <img
                             src={entry.thumbnailUrl}
                             alt={entry.title}
-                            className="h-full w-full object-cover"
+                            className="h-full w-full object-contain"
                             loading="lazy"
+                            onError={() =>
+                              setFailedThumbIds((prev) => ({ ...prev, [entry.id]: true }))
+                            }
                           />
                         ) : (
                           <div className="flex h-full w-full flex-col items-center justify-center bg-[#0F3928]/10 text-emerald-900">
@@ -722,7 +732,7 @@ export const ContestPage: React.FC<ContestPageProps> = ({
         </section>
 
         {/* Official Competition Rules */}
-        <section id="rules" aria-labelledby="rules-heading" className="scroll-mt-6 space-y-4">
+        <section id="rules" aria-labelledby="rules-heading" className="scroll-mt-28 space-y-4">
           <div className="border-b border-slate-200 pb-3">
             <p className="text-xs font-bold uppercase tracking-[0.12em] text-emerald-800">
               Official Competition Guidelines & Fair-Play Policy
@@ -785,7 +795,7 @@ export const ContestPage: React.FC<ContestPageProps> = ({
         </section>
 
         {/* Previous Monthly Winners Archive */}
-        <section id="winners" aria-labelledby="winners-heading" className="scroll-mt-6 space-y-4">
+        <section id="winners" aria-labelledby="winners-heading" className="scroll-mt-28 space-y-4">
           <div className="border-b border-slate-200 pb-3">
             <p className="text-xs font-bold uppercase tracking-[0.12em] text-emerald-800">
               Official Hall of Winners
