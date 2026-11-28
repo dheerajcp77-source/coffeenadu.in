@@ -386,6 +386,278 @@ export class CommunityBackend {
     return found ? toPublicCommunityPost(found, null) : null;
   }
 
+  /**
+   * Internal admin-only lookup used by ContestBackend to show contributor mobile numbers
+   * exclusively inside the Admin Dashboard (never on public APIs).
+   */
+  public getPrivateMobileByUserId(userId: string): string {
+    const user = this.state.users.find((u) => u.id === userId);
+    return user?.mobileNumber || '';
+  }
+
+  /**
+   * Internal lookup used by ContestBackend to resolve published/hidden contest posts.
+   */
+  public getInternalPostByIdOrSlug(idOrSlug: string): CommunityPostRecord | null {
+    const key = String(idOrSlug || '').trim().toLowerCase();
+    if (!key) return null;
+    return (
+      this.state.posts.find(
+        (p) => p.id.toLowerCase() === key || p.slug.toLowerCase() === key
+      ) || null
+    );
+  }
+
+  /**
+   * Keeps the existing CommunityPostRecord view count aligned when contest views increment.
+   */
+  public syncContestPostTotalViews(postId: string, totalViews: number): void {
+    const post = this.state.posts.find((p) => p.id === postId);
+    if (!post) return;
+    if (totalViews > (post.viewsCount || 0)) {
+      post.viewsCount = totalViews;
+      this.persistState();
+    }
+  }
+
+  /**
+   * Reuses the EXISTING community registration/session pipeline (Full Name + Mobile Number,
+   * NO OTP, NO fee) for Monthly News Contest contributors.
+   */
+  public resolveOrRegisterContestContributor(
+    req: Request,
+    res: Response,
+    input: { fullName?: unknown; mobileNumber?: unknown }
+  ):
+    | {
+        ok: true;
+        user: CommunityUserPrivate;
+        token: string | null;
+        profile: CommunitySelfProfile;
+      }
+    | { ok: false; status: number; error: string } {
+    const existingSession = this.resolveSessionUser(req, false);
+    const providedName = cleanSingleLine(input.fullName, 80);
+    const providedMobile = normalizeCommunityMobile(input.mobileNumber);
+
+    if (existingSession) {
+      if (existingSession.user.status === 'suspended') {
+        return {
+          ok: false,
+          status: 403,
+          error:
+            'ನಿಮ್ಮ ಖಾತೆಯನ್ನು ತಾತ್ಕಾಲಿಕವಾಗಿ ನಿರ್ಬಂಧಿಸಲಾಗಿದೆ. ಹೆಚ್ಚಿನ ಮಾಹಿತಿಗಾಗಿ ಕಾಫಿನಾಡು ಆಡ್ಮಿನ್ ಸಂಪರ್ಕಿಸಿ.',
+        };
+      }
+      if (providedName.length >= 2 && providedName !== existingSession.user.fullName) {
+        existingSession.user.fullName = providedName;
+        for (const post of this.state.posts) {
+          if (post.authorUserId === existingSession.user.id) {
+            post.authorName = providedName;
+          }
+        }
+      }
+      existingSession.user.lastActiveAt = new Date().toISOString();
+      this.persistState();
+      return {
+        ok: true,
+        user: existingSession.user,
+        token: null,
+        profile: this.buildSelfProfile(existingSession.user),
+      };
+    }
+
+    const ip = getClientIp(req);
+    if (!this.checkRateLimit(`creg:${ip}`, 30, 60 * 60 * 1000)) {
+      return {
+        ok: false,
+        status: 429,
+        error: 'ದಯವಿಟ್ಟು ಕೆಲವು ನಿಮಿಷಗಳ ನಂತರ ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ.',
+      };
+    }
+
+    if (providedName.length < 2) {
+      return {
+        ok: false,
+        status: 400,
+        error: 'ದಯವಿಟ್ಟು ನಿಮ್ಮ ಪೂರ್ಣ ಹೆಸರನ್ನು ನಮೂದಿಸಿ (ಕನಿಷ್ಠ 2 ಅಕ್ಷರಗಳು).',
+      };
+    }
+    if (!providedMobile) {
+      return {
+        ok: false,
+        status: 400,
+        error: 'ದಯವಿಟ್ಟು ಸರಿಯಾದ 10 ಅಂಕಿಯ ಮೊಬೈಲ್ ಸಂಖ್ಯೆಯನ್ನು ನಮೂದಿಸಿ (ಬಹುಮಾನ ಸಂಪರ್ಕಕ್ಕಾಗಿ ಅಗತ್ಯ).',
+      };
+    }
+
+    const nowIso = new Date().toISOString();
+    let user = this.state.users.find((u) => u.mobileNumber === providedMobile);
+    if (user) {
+      if (user.status === 'suspended') {
+        return {
+          ok: false,
+          status: 403,
+          error:
+            'ನಿಮ್ಮ ಖಾತೆಯನ್ನು ತಾತ್ಕಾಲಿಕವಾಗಿ ನಿರ್ಬಂಧಿಸಲಾಗಿದೆ. ಹೆಚ್ಚಿನ ಮಾಹಿತಿಗಾಗಿ ಕಾಫಿನಾಡು ಆಡ್ಮಿನ್ ಸಂಪರ್ಕಿಸಿ.',
+        };
+      }
+      user.fullName = providedName;
+      user.lastActiveAt = nowIso;
+    } else {
+      user = {
+        id: makeId('cuser'),
+        fullName: providedName,
+        mobileNumber: providedMobile,
+        registeredAt: nowIso,
+        lastActiveAt: nowIso,
+        status: 'active',
+      };
+      this.state.users.unshift(user);
+    }
+
+    const nowMs = Date.now();
+    this.state.sessions = this.state.sessions.filter((s) => s.expiresAtMs > nowMs);
+    const userSessions = this.state.sessions.filter((s) => s.userId === user.id);
+    if (userSessions.length >= 5) {
+      const oldest = userSessions.sort((a, b) => a.createdAtMs - b.createdAtMs)[0];
+      this.state.sessions = this.state.sessions.filter((s) => s.tokenHash !== oldest.tokenHash);
+    }
+
+    const rawToken = crypto.randomBytes(32).toString('hex');
+    this.state.sessions.push({
+      tokenHash: sha256(rawToken),
+      userId: user.id,
+      createdAtMs: nowMs,
+      expiresAtMs: nowMs + SESSION_TTL_MS,
+    });
+
+    this.persistState();
+    this.setSessionCookie(req, res, rawToken);
+
+    return {
+      ok: true,
+      user,
+      token: rawToken,
+      profile: this.buildSelfProfile(user),
+    };
+  }
+
+  /**
+   * Publishes a Monthly News Contest article directly through the existing community
+   * publishing store under the dedicated `monthly-news-contest` category.
+   */
+  public createContestPostInternal(
+    req: Request,
+    user: CommunityUserPrivate,
+    input: {
+      title: unknown;
+      description: unknown;
+      location: unknown;
+      photos?: unknown;
+    }
+  ):
+    | {
+        ok: true;
+        post: CommunityPostRecord;
+        publicPost: ReturnType<typeof toPublicCommunityPost>;
+        duplicatePrevented?: boolean;
+      }
+    | { ok: false; status: number; error: string } {
+    const ip = getClientIp(req);
+    if (!this.checkRateLimit(`cpost:${user.id}:${ip}`, 20, 60 * 60 * 1000)) {
+      return {
+        ok: false,
+        status: 429,
+        error: 'ಒಂದು ಗಂಟೆಯಲ್ಲಿ ಗರಿಷ್ಠ ಮಿತಿ ತಲುಪಿದೆ. ದಯವಿಟ್ಟು ಸ್ವಲ್ಪ ಸಮಯದ ನಂತರ ಪ್ರಯತ್ನಿಸಿ.',
+      };
+    }
+
+    const title = cleanSingleLine(input.title, 160);
+    const description = cleanMultiline(input.description, 4000);
+    const location = cleanSingleLine(input.location, 100);
+
+    if (title.length < 5) {
+      return {
+        ok: false,
+        status: 400,
+        error: 'ದಯವಿಟ್ಟು ಸ್ಪಷ್ಟವಾದ ಸುದ್ದಿ ಶೀರ್ಷಿಕೆಯನ್ನು ನಮೂದಿಸಿ (ಕನಿಷ್ಠ 5 ಅಕ್ಷರಗಳು).',
+      };
+    }
+    if (description.length < 20) {
+      return {
+        ok: false,
+        status: 400,
+        error: 'ದಯವಿಟ್ಟು ಮೂಲ ಸ್ಥಳೀಯ ಸುದ್ದಿಯ ವಿವರಣೆಯನ್ನು ನಮೂದಿಸಿ (ಕನಿಷ್ಠ 20 ಅಕ್ಷರಗಳು).',
+      };
+    }
+    if (location.length < 2) {
+      return {
+        ok: false,
+        status: 400,
+        error: 'ದಯವಿಟ್ಟು ನಿಮ್ಮ ಊರು / ಸ್ಥಳವನ್ನು ಆಯ್ಕೆಮಾಡಿ.',
+      };
+    }
+
+    const nowMs = Date.now();
+    const duplicate = this.state.posts.find(
+      (p) =>
+        p.authorUserId === user.id &&
+        p.category === 'monthly-news-contest' &&
+        p.title.toLowerCase() === title.toLowerCase() &&
+        nowMs - Date.parse(p.createdAt) < 60_000
+    );
+    if (duplicate) {
+      return {
+        ok: true,
+        duplicatePrevented: true,
+        post: duplicate,
+        publicPost: toPublicCommunityPost(duplicate, user.id),
+      };
+    }
+
+    const photoResult = this.processUploadedPhotos(input.photos);
+    if (!photoResult.ok) {
+      return {
+        ok: false,
+        status: 400,
+        error: photoResult.error || 'ಅಮಾನ್ಯ ಫೋಟೋ ಫೈಲ್.',
+      };
+    }
+
+    const nowIso = new Date().toISOString();
+    const id = makeId('cpost');
+    const uniqueToken = crypto.randomBytes(4).toString('hex');
+    const slug = generateCommunitySlug(title, uniqueToken);
+
+    const newPost: CommunityPostRecord = {
+      id,
+      slug,
+      authorUserId: user.id,
+      authorName: user.fullName,
+      title,
+      category: 'monthly-news-contest',
+      description,
+      location,
+      photos: photoResult.photos,
+      status: 'published',
+      createdAt: nowIso,
+      updatedAt: nowIso,
+      viewsCount: 0,
+      sharesCount: 0,
+    };
+
+    this.state.posts.unshift(newPost);
+    user.lastActiveAt = nowIso;
+    this.persistState();
+
+    return {
+      ok: true,
+      post: newPost,
+      publicPost: toPublicCommunityPost(newPost, user.id),
+    };
+  }
+
   public mountRoutes(app: Express): void {
     // -------------------------------------------------------------------------
     // PUBLIC MEDIA SERVING (strictly confined to community-uploads/)
@@ -713,6 +985,14 @@ export class CommunityBackend {
       }
       if (!isValidCommunityCategory(category)) {
         res.status(400).json({ ok: false, error: 'ದಯವಿಟ್ಟು ಸೂಕ್ತ ವಿಭಾಗವನ್ನು ಆಯ್ಕೆಮಾಡಿ.' });
+        return;
+      }
+      if (category === 'monthly-news-contest') {
+        res.status(400).json({
+          ok: false,
+          error:
+            'ತಿಂಗಳ ಸುದ್ದಿ ಸ್ಪರ್ಧೆಯ ಸುದ್ದಿಗಳನ್ನು ದಯವಿಟ್ಟು /contest ಪುಟದ ಮೂಲಕವೇ ಪ್ರಕಟಿಸಿ.',
+        });
         return;
       }
       if (description.length < 5) {

@@ -1,9 +1,19 @@
 import type { CommunityCategoryId, CommunityCategoryMeta } from '../types/community';
 
 /**
- * Exact 13 Kannada categories required for Coffeenadu Community submissions.
+ * Dedicated Monthly News Contest category + the 13 Kannada Community categories.
+ * Contest submissions are strictly separated from Sales, Lost & Found, and Add Information.
  */
 export const COMMUNITY_CATEGORIES: CommunityCategoryMeta[] = [
+  {
+    id: 'monthly-news-contest',
+    labelKn: 'ತಿಂಗಳ ಸುದ್ದಿ ಸ್ಪರ್ಧೆ',
+    labelEn: 'Monthly News Contest',
+    showPriceField: false,
+    pricePlaceholderKn: '',
+    contestOnly: true,
+    feedGroup: 'contest',
+  },
   {
     id: 'my-shop',
     labelKn: 'ನನ್ನ ಅಂಗಡಿ',
@@ -121,6 +131,7 @@ export const COMMUNITY_CATEGORY_MAP: Record<CommunityCategoryId, CommunityCatego
 
 export type CommunityFeedTabId =
   | 'all'
+  | 'contest'
   | 'nearby'
   | 'shops'
   | 'sale'
@@ -137,6 +148,7 @@ export const COMMUNITY_FEED_TABS: Array<{
   labelEn: string;
 }> = [
   { id: 'all', labelKn: 'ಇತ್ತೀಚಿನವು', labelEn: 'Latest' },
+  { id: 'contest', labelKn: 'ತಿಂಗಳ ಸುದ್ದಿ ಸ್ಪರ್ಧೆ', labelEn: 'News Contest' },
   { id: 'nearby', labelKn: 'ಹತ್ತಿರದ ಮಾಹಿತಿ', labelEn: 'Nearby' },
   { id: 'shops', labelKn: 'ಅಂಗಡಿ ಮತ್ತು ವ್ಯಾಪಾರ', labelEn: 'Shops' },
   { id: 'sale', labelKn: 'ಮಾರಾಟ & ಆಸ್ತಿ', labelEn: 'For Sale' },

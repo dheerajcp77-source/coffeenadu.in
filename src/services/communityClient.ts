@@ -17,6 +17,14 @@ import { MAX_COMMUNITY_PHOTO_BYTES } from '../utils/communityHelpers';
 // Server also maintains an HttpOnly cookie so page reloads stay signed in seamlessly.
 let communityMemoryToken: string | null = null;
 
+export function getCommunityMemoryToken(): string | null {
+  return communityMemoryToken;
+}
+
+export function setCommunityMemoryToken(token: string | null): void {
+  communityMemoryToken = token && token.trim() ? token.trim() : null;
+}
+
 function buildCommunityHeaders(extra: Record<string, string> = {}): Record<string, string> {
   const headers: Record<string, string> = {
     Accept: 'application/json',

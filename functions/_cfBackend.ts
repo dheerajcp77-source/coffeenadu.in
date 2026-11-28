@@ -10,6 +10,7 @@
 import firebaseConfig from '../firebase-applet-config.json';
 import { handleCfAdminPlatformRoute, handleCfPublicPlatformRoute } from './_cfPlatform';
 import { handleCfCommunityApi } from './_cfCommunity';
+import { handleCfContestApi } from './_cfContest';
 
 export interface PagesEnv {
   BACKEND_ORIGIN?: string;
@@ -2593,6 +2594,11 @@ export async function handleApiDirectOnCloudflare(
     if (communityResp) return communityResp;
   }
 
+  if (pathname.startsWith('/api/public/contest/')) {
+    const contestResp = await handleCfContestApi(request, url, async () => ({ ok: false }));
+    if (contestResp) return contestResp;
+  }
+
   // ============================================================================
   // 7. PROTECTED ADMIN ROUTES (/api/storage/admin/* and /api/admin2/*)
   // ============================================================================
@@ -2615,6 +2621,14 @@ export async function handleApiDirectOnCloudflare(
         email: admin.email,
       }));
       if (adminCommunityResp) return adminCommunityResp;
+    }
+
+    if (pathname.startsWith('/api/admin2/contest/')) {
+      const adminContestResp = await handleCfContestApi(request, url, async () => ({
+        ok: true,
+        email: admin.email,
+      }));
+      if (adminContestResp) return adminContestResp;
     }
 
     // Allow verified admin requests to supply X-Apps-Script-Url and X-Apps-Script-Secret headers

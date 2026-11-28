@@ -431,13 +431,17 @@ export const UnifiedCommunityFeed: React.FC<UnifiedCommunityFeedProps> = ({
                           )}
                           <span className="text-[11px] font-bold text-[#926710] dark:text-[#E6BC5C]">
                             ·{' '}
-                            {isEditorialNews
+                            {item.isContestEntry
                               ? language === 'kn'
-                                ? 'ಸುದ್ದಿ'
-                                : 'Editorial'
-                              : language === 'kn'
-                                ? 'ಸಮುದಾಯ'
-                                : 'Community'}
+                                ? 'ಸ್ಪರ್ಧಾ ಸುದ್ದಿ · Contest Entry'
+                                : 'Contest Entry'
+                              : isEditorialNews
+                                ? language === 'kn'
+                                  ? 'ಸುದ್ದಿ'
+                                  : 'Editorial'
+                                : language === 'kn'
+                                  ? 'ಸಮುದಾಯ'
+                                  : 'Community'}
                           </span>
                         </div>
 

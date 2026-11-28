@@ -1,4 +1,5 @@
 export type CommunityCategoryId =
+  | 'monthly-news-contest'
   | 'my-shop'
   | 'for-sale'
   | 'lost-item'
@@ -23,7 +24,9 @@ export interface CommunityCategoryMeta {
   labelEn: string;
   showPriceField: boolean;
   pricePlaceholderKn: string;
+  contestOnly?: boolean;
   feedGroup:
+    | 'contest'
     | 'shops'
     | 'sale'
     | 'jobs'

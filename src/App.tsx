@@ -140,6 +140,8 @@ import {
   CommunityRegisterModal,
   CommunityReportModal,
 } from './components/community/CommunityModals';
+import { ContestPage } from './components/contest/ContestPage';
+import { HomepageContestBanner } from './components/contest/HomepageContestBanner';
 import { HomepageAnnouncementBanner } from './components/community/HomepageAnnouncementBanner';
 import { UnifiedCommunityFeed } from './components/community/UnifiedCommunityFeed';
 import { PlatformAccountPage } from './components/platform/PlatformAccountPage';
@@ -1016,8 +1018,10 @@ export default function App() {
   const exploreActive = normalizedPathname === '/explore';
   const accountActive = normalizedPathname === '/account';
   const searchPageActive = normalizedPathname === '/search';
+  const contestActive = normalizedPathname === '/contest';
   const isPlatformSubroute = Boolean(
     communityActive ||
+      contestActive ||
       activeDirectoryModule ||
       weatherActive ||
       gamesActive ||
@@ -1027,7 +1031,12 @@ export default function App() {
   );
 
   const isSpecialRoute =
-    busTimingsActive || eventsActive || chatActive || adsActive || isPlatformSubroute;
+    busTimingsActive ||
+    eventsActive ||
+    chatActive ||
+    adsActive ||
+    contestActive ||
+    isPlatformSubroute;
 
   useEffect(() => {
     if (adminRouteActive) return;
@@ -1481,6 +1490,21 @@ export default function App() {
     }
   }, []);
 
+  const [contestNavTarget, setContestNavTarget] = useState<{
+    section?: 'leaderboard' | 'rules' | 'winners';
+    openSubmit?: boolean;
+  }>({});
+
+  const handleJumpToContest = useCallback(
+    (options?: { section?: 'leaderboard' | 'rules' | 'winners'; openSubmit?: boolean }) => {
+      setContestNavTarget(options || {});
+      const suffix = options?.section ? `#${options.section}` : '';
+      navigateTo(`/contest${suffix}`);
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    },
+    [navigateTo]
+  );
+
   if (adminRouteActive) {
     return (
       <AdminPanel
@@ -1501,6 +1525,7 @@ export default function App() {
           isEventsView={eventsActive}
           isChatView={chatActive}
           isAdsView={adsActive || Boolean(selectedAdId)}
+          isContestView={contestActive}
           theme={publicTheme}
           lang={platformLang}
           bookmarkCount={bookmarks.length}
@@ -1510,6 +1535,7 @@ export default function App() {
           onJumpToBusTimings={handleJumpToBusTimings}
           onJumpToEvents={handleJumpToEvents}
           onJumpToAds={handleJumpToAds}
+          onJumpToContest={() => handleJumpToContest()}
           onOpenSearch={() => handleOpenSearchEverything('')}
           onOpenSaved={() => setLibraryDrawerTab('saved')}
           onOpenNotifications={() => setNotifDrawerOpen(true)}
@@ -1606,6 +1632,18 @@ export default function App() {
               onBackToNews={handleResetHome}
             />
           </main>
+        ) : contestActive ? (
+          <div className="flex-1" data-testid="dedicated-contest-route">
+            <ContestPage
+              initialSection={contestNavTarget.section || null}
+              initialOpenSubmit={Boolean(contestNavTarget.openSubmit)}
+              onBackHome={handleResetHome}
+              onOpenCommunityPost={handleOpenCommunityPost}
+              onContestSubmitted={() => {
+                refreshCommunityPublicFeed();
+              }}
+            />
+          </div>
         ) : communityActive ? (
           <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-5 sm:py-6">
             <CoffeenaduCommunityPage
@@ -1619,6 +1657,7 @@ export default function App() {
               onNavigateCommunityRoot={() => handleOpenCommunity()}
               onNavigatePost={handleOpenCommunityPost}
               onNavigateDashboard={handleOpenCommunityDashboard}
+              onNavigateContest={() => handleJumpToContest({ section: 'leaderboard' })}
               onPostsUpdated={setCommunityPosts}
             />
           </main>
@@ -1759,6 +1798,9 @@ export default function App() {
           </div>
         ) : (
           <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-4 sm:py-5 space-y-6">
+            {/* Prominent Monthly News Contributor Challenge Banner */}
+            <HomepageContestBanner onNavigateContest={handleJumpToContest} />
+
             {/* Custom Top Banner Homepage Admin Ad Slot */}
             {activeAds.length > 0 && (
               <HomepageAdSlot
@@ -2205,12 +2247,13 @@ export default function App() {
           </div>
         )}
 
-        {/* Optional Website Entry Advertisement Overlay */}
+        {/* Optional Website Entry Advertisement Overlay (STRICTLY Disabled on /contest) */}
         <WebsiteEntryAd
           ads={activeAds}
           settings={adSettings}
           onOpenAd={handleOpenAd}
           disabled={
+            contestActive ||
             adsActive ||
             Boolean(selectedAdId) ||
             Boolean(selectedAdPreviewToken) ||
@@ -2219,13 +2262,14 @@ export default function App() {
           onActiveChange={setEntryOverlayActive}
         />
 
-        {/* Optional Main Homepage Popup Advertisement */}
+        {/* Optional Main Homepage Popup Advertisement (STRICTLY Disabled on /contest) */}
         <HomepagePopupAd
           ads={activeAds}
           settings={adSettings}
           onOpenAd={handleOpenAd}
           entryOverlayActive={entryOverlayActive}
           disabled={
+            contestActive ||
             isSpecialRoute ||
             Boolean(selectedArticleId) ||
             Boolean(selectedAdId) ||
@@ -2233,13 +2277,19 @@ export default function App() {
           }
         />
 
-        {/* Article Reading / Scroll Popup Advertisement */}
+        {/* Article Reading / Scroll Popup Advertisement (STRICTLY Disabled on /contest) */}
         <FloatingScrollAd
           ads={activeAds}
           settings={adSettings}
           onOpenAd={handleOpenAd}
           articleId={selectedArticle ? selectedArticle.id : null}
-          disabled={adsActive || Boolean(selectedAdId) || chatActive || entryOverlayActive}
+          disabled={
+            contestActive ||
+            adsActive ||
+            Boolean(selectedAdId) ||
+            chatActive ||
+            entryOverlayActive
+          }
         />
 
         {/* Fixed Bottom Mobile Navigation Bar: Home · Explore · Services · Marketplace · Menu */}

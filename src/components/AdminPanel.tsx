@@ -93,6 +93,7 @@ import { AdminEventModal } from './AdminEventModal';
 import { AdminStorageManager } from './AdminStorageManager';
 import { Admin2LoginView } from './admin2/Admin2LoginView';
 import { Admin2CommunityUsersSection } from './admin2/Admin2CommunityUsersSection';
+import { Admin2ContestSection } from './admin2/Admin2ContestSection';
 import { Admin2GamesSection } from './admin2/Admin2GamesSection';
 import { Admin2HomepageBuilderSection } from './admin2/Admin2HomepageBuilderSection';
 import { Admin2PlatformSection } from './admin2/Admin2PlatformSection';
@@ -185,6 +186,8 @@ export function AdminPanel({ articles, onNavigateHome }: AdminPanelProps) {
       'security',
       'settings',
       'health',
+      'community-users',
+      'monthly-contest',
     ];
     return validSections.includes(requested as AdminSectionId)
       ? (requested as AdminSectionId)
@@ -1371,6 +1374,8 @@ export function AdminPanel({ articles, onNavigateHome }: AdminPanelProps) {
 
       case 'community-users':
         return <Admin2CommunityUsersSection darkMode={darkMode} />;
+      case 'monthly-contest':
+        return <Admin2ContestSection darkMode={darkMode} />;
 
       case 'platform-moderation':
         return <Admin2PlatformSection initialMode="moderation" />;

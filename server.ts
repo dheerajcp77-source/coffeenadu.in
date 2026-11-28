@@ -11,6 +11,7 @@ import sharp from 'sharp';
 import { SEED_ARTICLES as PORTAL_SEED_ARTICLES } from './src/constants/seedArticles.ts';
 import { Admin2Backend } from './src/server/admin2Backend.ts';
 import { CommunityBackend } from './src/server/communityBackend.ts';
+import { ContestBackend } from './src/server/contestBackend.ts';
 import { PlatformBackend } from './src/server/platformBackend.ts';
 import { SheetsStorageManager } from './src/server/sheetsStorageProxy.ts';
 
@@ -1451,6 +1452,9 @@ async function startServer() {
   const communityBackend = new CommunityBackend(DATA_DIR, (perm) =>
     admin2Backend.createAuthMiddleware(perm)
   );
+  const contestBackend = new ContestBackend(DATA_DIR, communityBackend, (perm) =>
+    admin2Backend.createAuthMiddleware(perm)
+  );
 
   // Record real public page traffic (anonymized daily hashes, never blocks response)
   app.use((req, _res, next) => {
@@ -1462,6 +1466,7 @@ async function startServer() {
   admin2Backend.mountRoutes(app);
   platformBackend.mountRoutes(app);
   communityBackend.mountRoutes(app);
+  contestBackend.mountRoutes(app);
 
   // Public Bus Timings endpoint sourced from hudkoo.com with 6-hour cache
   app.get('/api/bus-timings', async (req, res) => {
@@ -3166,7 +3171,7 @@ Rules:
     res.redirect(301, `/?article=${encodeURIComponent(id)}`);
   });
 
-  app.get(['/', '/events', '/ads', '/community', '/community/:slug'], async (req, res, next) => {
+  app.get(['/', '/events', '/ads', '/contest', '/community', '/community/:slug'], async (req, res, next) => {
     const articleId =
       req.path === '/' && typeof req.query.article === 'string'
         ? req.query.article.trim()
@@ -3257,6 +3262,12 @@ Rules:
         ogTitle = 'Local Advertisements — Coffeenadu News';
         ogDescription =
           'Browse Koppa Taluk local business advertisements, services, education, real estate, and offers on Coffeenadu News.';
+      } else if (req.path === '/contest' || req.path === '/contest/') {
+        ogUrl = `${deepLinkOrigin}/contest`;
+        ogTitle =
+          'COFFEENADU – MOST VIEWED NEWS CHALLENGE 2026 | ₹500 ನಗದು ಬಹುಮಾನ ಗೆಲ್ಲಿ!';
+        ogDescription =
+          'ನಿಮ್ಮ ಸುದ್ದಿ ಹೆಚ್ಚು ಜನರಿಗೆ ತಲುಪಲಿ – ₹500 ನಗದು ಬಹುಮಾನ ಗೆಲ್ಲಿ! ನಿಮ್ಮೂರಿನ ಸುದ್ದಿ ಪ್ರಕಟಿಸಿ, ಎಲ್ಲರೊಂದಿಗೆ ಹಂಚಿಕೊಳ್ಳಿ ಮತ್ತು ತಿಂಗಳ ವಿಜೇತರಾಗಿ (ಕೊಪ್ಪ, ಶೃಂಗೇರಿ, ಜಯಪುರ, ಬಾಳೆಹೊನ್ನೂರು).';
       } else if (req.path === '/community' || req.path === '/community/') {
         ogUrl = `${deepLinkOrigin}/community`;
         ogTitle = 'COFFEENADU COMMUNITY – ನಮ್ಮ ಮಲೆನಾಡು ಸಮುದಾಯ';

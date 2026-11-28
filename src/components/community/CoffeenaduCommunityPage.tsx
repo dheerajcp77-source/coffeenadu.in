@@ -3,6 +3,7 @@ import {
   ArrowLeft,
   Calendar,
   Edit3,
+  Eye,
   Flag,
   LayoutDashboard,
   Loader2,
@@ -13,6 +14,7 @@ import {
   Plus,
   Search,
   Trash2,
+  Trophy,
   User,
   Users,
 } from 'lucide-react';
@@ -37,6 +39,8 @@ import {
   logoutCommunityUser,
   updateCommunityProfile,
 } from '../../services/communityClient';
+import { recordContestArticleView } from '../../services/contestClient';
+import type { ContestViewRecordResult } from '../../types/contest';
 import {
   filterCommunityPosts,
   formatCommunityDateKn,
@@ -64,6 +68,7 @@ interface CoffeenaduCommunityPageProps {
   onNavigateCommunityRoot: () => void;
   onNavigatePost: (slug: string) => void;
   onNavigateDashboard: () => void;
+  onNavigateContest?: () => void;
   onPostsUpdated?: (posts: PublicCommunityPost[]) => void;
 }
 
@@ -78,6 +83,7 @@ export const CoffeenaduCommunityPage: React.FC<CoffeenaduCommunityPageProps> = (
   onNavigateCommunityRoot,
   onNavigatePost,
   onNavigateDashboard,
+  onNavigateContest,
   onPostsUpdated,
 }) => {
   const [posts, setPosts] = useState<PublicCommunityPost[]>([]);
@@ -94,6 +100,8 @@ export const CoffeenaduCommunityPage: React.FC<CoffeenaduCommunityPageProps> = (
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState('');
   const [activePhotoIdx, setActivePhotoIdx] = useState(0);
+  const [contestViewStats, setContestViewStats] = useState<ContestViewRecordResult | null>(null);
+  const lastRecordedContestSlugRef = useRef<string | null>(null);
 
   // User Dashboard state
   const [dashboardOpen, setDashboardOpen] = useState(initialDashboardOpen);
@@ -166,6 +174,24 @@ export const CoffeenaduCommunityPage: React.FC<CoffeenaduCommunityPageProps> = (
         if (!cancelled) {
           setDetailPost(found);
           setDetailLoading(false);
+          if (found.category === 'monthly-news-contest') {
+            if (lastRecordedContestSlugRef.current !== found.slug) {
+              lastRecordedContestSlugRef.current = found.slug;
+              const isPreview =
+                typeof window !== 'undefined' &&
+                new URLSearchParams(window.location.search).get('preview') === '1';
+              void recordContestArticleView(found.slug, { isAdminPreview: isPreview }).then(
+                (stats) => {
+                  if (!cancelled && stats) {
+                    setContestViewStats(stats);
+                  }
+                }
+              );
+            }
+          } else {
+            setContestViewStats(null);
+            lastRecordedContestSlugRef.current = null;
+          }
         }
       })
       .catch((err) => {
@@ -425,6 +451,64 @@ export const CoffeenaduCommunityPage: React.FC<CoffeenaduCommunityPageProps> = (
               <h1 className="font-kannada text-xl sm:text-2xl font-extrabold text-[#10243D] dark:text-white leading-snug">
                 {detailPost.title}
               </h1>
+
+              {/* Contest Participation Notice & Transparent Public View Counts (STRICTLY Contest Articles Only) */}
+              {detailPost.category === 'monthly-news-contest' && (
+                <div
+                  data-testid="contest-article-notice"
+                  className="rounded-xl border border-emerald-800/25 bg-emerald-50/80 dark:bg-emerald-950/35 dark:border-emerald-700/40 p-4 space-y-3"
+                >
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div className="space-y-0.5">
+                      <div className="flex items-center gap-1.5 text-[11px] font-extrabold uppercase tracking-[0.1em] text-emerald-900 dark:text-emerald-300">
+                        <Trophy className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
+                        <span>COFFEENADU – MOST VIEWED NEWS CHALLENGE 2026</span>
+                      </div>
+                      <p className="font-kannada text-xs sm:text-sm font-bold text-emerald-950 dark:text-emerald-100">
+                        ಈ ಸುದ್ದಿ ತಿಂಗಳ ₹500 ನಗದು ಬಹುಮಾನ ಸ್ಪರ್ಧೆಯ ಅಧಿಕೃತ ಭಾಗವಹಿಸುವಿಕೆಯಾಗಿದೆ.
+                      </p>
+                    </div>
+                    {onNavigateContest && (
+                      <button
+                        type="button"
+                        onClick={onNavigateContest}
+                        className="inline-flex items-center gap-1.5 rounded-lg bg-[#0F3928] hover:bg-[#144B35] text-white px-3 py-1.5 text-xs font-bold cursor-pointer min-h-[36px]"
+                      >
+                        <Trophy className="w-3.5 h-3.5 text-amber-300" />
+                        <span>View Leaderboard</span>
+                      </button>
+                    )}
+                  </div>
+
+                  {contestViewStats && (
+                    <div className="grid grid-cols-2 gap-3 border-t border-emerald-800/15 dark:border-emerald-700/30 pt-3">
+                      <div className="rounded-lg bg-white dark:bg-slate-900/70 border border-emerald-800/15 px-3 py-2">
+                        <span className="block text-[10px] font-bold uppercase tracking-wider text-emerald-800 dark:text-emerald-300">
+                          Eligible Competition Views
+                        </span>
+                        <span
+                          data-testid="contest-eligible-views"
+                          className="mt-0.5 inline-flex items-center gap-1.5 text-lg font-extrabold tabular-nums text-emerald-950 dark:text-white"
+                        >
+                          <Eye className="w-4 h-4 text-emerald-700 dark:text-emerald-400" />
+                          {contestViewStats.eligibleViews.toLocaleString('en-IN')}
+                        </span>
+                      </div>
+                      <div className="rounded-lg bg-white dark:bg-slate-900/70 border border-slate-200 dark:border-slate-700 px-3 py-2">
+                        <span className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                          Total Page Views
+                        </span>
+                        <span
+                          data-testid="contest-total-views"
+                          className="mt-0.5 block text-lg font-extrabold tabular-nums text-slate-800 dark:text-slate-200"
+                        >
+                          {contestViewStats.totalPageViews.toLocaleString('en-IN')}
+                        </span>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
 
               {detailPost.price && (
                 <div className="inline-flex items-center px-3.5 py-1.5 rounded-xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 font-kannada text-sm font-extrabold text-[#9A6700] dark:text-[#D9A441]">

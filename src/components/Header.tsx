@@ -9,6 +9,7 @@ import {
   Moon,
   Search,
   Sun,
+  Trophy,
   UserCheck,
   X,
 } from 'lucide-react';
@@ -27,6 +28,7 @@ interface HeaderProps {
   isEventsView?: boolean;
   isChatView?: boolean;
   isAdsView?: boolean;
+  isContestView?: boolean;
   theme: PublicThemeMode;
   lang?: PlatformLanguage;
   bookmarkCount: number;
@@ -36,6 +38,7 @@ interface HeaderProps {
   onJumpToBusTimings: () => void;
   onJumpToEvents: () => void;
   onJumpToAds: () => void;
+  onJumpToContest?: () => void;
   onOpenSearch: () => void;
   onOpenSaved: () => void;
   onOpenNotifications: () => void;
@@ -63,6 +66,7 @@ export function Header({
   isEventsView = false,
   isChatView = false,
   isAdsView = false,
+  isContestView = false,
   theme,
   lang = 'kn',
   bookmarkCount,
@@ -72,6 +76,7 @@ export function Header({
   onJumpToBusTimings,
   onJumpToEvents,
   onJumpToAds,
+  onJumpToContest,
   onOpenSearch,
   onOpenSaved,
   onOpenNotifications,
@@ -87,6 +92,7 @@ export function Header({
     !isEventsView &&
     !isChatView &&
     !isAdsView &&
+    !isContestView &&
     activePlatformRoute === '/';
 
   const handleNavModule = (modId: PlatformModuleId) => {
@@ -176,6 +182,26 @@ export function Header({
           >
             {pickLangText('ಜಾಹೀರಾತು', 'Local Ads', lang)}
           </button>
+
+          {onJumpToContest && (
+            <button
+              type="button"
+              data-testid="header-contest-nav-btn"
+              onClick={() => {
+                setMegaOpen(false);
+                onJumpToContest();
+              }}
+              aria-current={isContestView ? 'page' : undefined}
+              className={`inline-flex items-center gap-1.5 text-sm font-bold whitespace-nowrap shrink-0 py-1.5 border-b-2 transition-colors cursor-pointer ${
+                isContestView
+                  ? 'border-emerald-700 text-emerald-900 dark:border-emerald-400 dark:text-emerald-300'
+                  : 'border-transparent text-emerald-800 dark:text-emerald-300 hover:text-emerald-950 dark:hover:text-emerald-200'
+              }`}
+            >
+              <Trophy className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400 shrink-0" aria-hidden="true" />
+              <span>{pickLangText('₹500 ಸ್ಪರ್ಧೆ', 'Contest', lang)}</span>
+            </button>
+          )}
 
           <button
             type="button"

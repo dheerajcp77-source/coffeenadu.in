@@ -8,6 +8,7 @@ export type AdminSectionId =
   | 'ai-studio'
   | 'platform-hub'
   | 'community-users'
+  | 'monthly-contest'
   | 'platform-moderation'
   | 'platform-homepage'
   | 'platform-games'

@@ -463,6 +463,7 @@ export async function onRequest(context: PagesMiddlewareContext): Promise<Respon
   }
 
   const normalizedPath = pathname.replace(/\/+$/, '') || '/';
+  const isContestRoute = normalizedPath === '/contest';
   const rawArticleId =
     normalizedPath === '/' ? (url.searchParams.get('article') || '').trim() : '';
   const rawEventId =
@@ -471,7 +472,7 @@ export async function onRequest(context: PagesMiddlewareContext): Promise<Respon
   const hasValidArticleId = Boolean(rawArticleId && VALID_ID_PATTERN.test(rawArticleId));
   const hasValidEventId = Boolean(rawEventId && VALID_ID_PATTERN.test(rawEventId));
 
-  if (!hasValidArticleId && !hasValidEventId) {
+  if (!hasValidArticleId && !hasValidEventId && !isContestRoute) {
     return next();
   }
 
@@ -483,7 +484,20 @@ export async function onRequest(context: PagesMiddlewareContext): Promise<Respon
 
   const backendOrigin = resolveConfiguredBackendOrigin(env);
 
-  const resolvedMeta = hasValidArticleId
+  const resolvedMeta = isContestRoute
+    ? {
+        pageTitle:
+          'COFFEENADU – MOST VIEWED NEWS CHALLENGE 2026 | ₹500 ನಗದು ಬಹುಮಾನ ಗೆಲ್ಲಿ!',
+        ogTitle:
+          'COFFEENADU – MOST VIEWED NEWS CHALLENGE 2026 | ₹500 ನಗದು ಬಹುಮಾನ ಗೆಲ್ಲಿ!',
+        description:
+          'ನಿಮ್ಮ ಸುದ್ದಿ ಹೆಚ್ಚು ಜನರಿಗೆ ತಲುಪಲಿ – ₹500 ನಗದು ಬಹುಮಾನ ಗೆಲ್ಲಿ! ನಿಮ್ಮೂರಿನ ಸುದ್ದಿ ಪ್ರಕಟಿಸಿ, ಎಲ್ಲರೊಂದಿಗೆ ಹಂಚಿಕೊಳ್ಳಿ ಮತ್ತು ತಿಂಗಳ ವಿಜೇತರಾಗಿ (ಕೊಪ್ಪ, ಶೃಂಗೇರಿ, ಜಯಪುರ, ಬಾಳೆಹೊನ್ನೂರು).',
+        imageUrl: `${publicOrigin}/api/og-default-image`,
+        imageAlt: 'Coffeenadu Most Viewed News Challenge 2026',
+        canonicalUrl: `${publicOrigin}/contest`,
+        ogType: 'website' as const,
+      }
+    : hasValidArticleId
     ? await resolveArticleMetadata(rawArticleId, backendOrigin, env, publicOrigin)
     : await resolveEventMetadata(rawEventId, backendOrigin, env, publicOrigin);
 

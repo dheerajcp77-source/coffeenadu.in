@@ -35,6 +35,7 @@ export interface UnifiedFeedItem {
   canonicalPath: string;
   viewCount: number;
   verified?: boolean;
+  isContestEntry?: boolean;
   newsArticle?: NewsArticle;
   communityPost?: PublicCommunityPost;
   platformListing?: PlatformListing;
@@ -67,6 +68,7 @@ const NEWS_CATEGORY_TO_FEED: Record<NewsCategory, { kn: string; en: string; tags
 };
 
 const COMMUNITY_CATEGORY_TO_FEED: Record<CommunityCategoryId, FeedCategoryId[]> = {
+  'monthly-news-contest': ['news', 'community', 'local'],
   'my-shop': ['community', 'businesses'],
   'for-sale': ['community', 'marketplace'],
   'lost-item': ['community', 'lost-found'],
@@ -236,6 +238,7 @@ export function buildUnifiedCommunityFeed(input: {
       publicContact: undefined,
       canonicalPath: `/community/${encodeURIComponent(post.slug)}`,
       viewCount: Number(post.viewsCount || 0),
+      isContestEntry: post.category === 'monthly-news-contest',
       communityPost: post,
     });
   }

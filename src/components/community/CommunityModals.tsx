@@ -445,7 +445,7 @@ export const CommunityComposerModal: React.FC<CommunityComposerModalProps> = ({
                     onChange={(e) => setCategory(e.target.value as CommunityCategoryId)}
                     className="w-full px-3 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-sm text-[#10243D] dark:text-white font-kannada focus:outline-none focus:ring-2 focus:ring-[#176B4A] [&>option]:bg-white [&>option]:text-[#10243D] dark:[&>option]:bg-slate-900 dark:[&>option]:text-white"
                   >
-                    {COMMUNITY_CATEGORIES.map((cat) => (
+                    {COMMUNITY_CATEGORIES.filter((cat) => !cat.contestOnly).map((cat) => (
                       <option key={cat.id} value={cat.id}>
                         {cat.labelKn}
                       </option>
